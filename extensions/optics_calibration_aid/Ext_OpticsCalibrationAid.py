@@ -27,12 +27,12 @@ import pandas as pd
 from extensions.extension_template import Extension_TopLevel
 from extensions.extension_intermediary import Ext_DataIntermediary as Intermediary
 
-from library.controllers.class_spectrometer_controller import Class_SpectrometerController as Spectrometer
-from library.app.sframe_raman import Frm_RamanSpectrometerController as Frm_Raman
-from library.data_related.RamanMeasurement import RamanMeasurement
-from library import DataAnalysisConfigEnum as DAEnum
+from iris.controllers.class_spectrometer_controller import Class_SpectrometerController as Spectrometer
+from iris.gui.raman import Frm_RamanSpectrometerController as Frm_Raman
+from iris.data.measurement_Raman import MeaRaman
+from iris import DataAnalysisConfigEnum as DAEnum
 
-from library.general_functions import *
+from iris.utils.general import *
 
 class Ext_OpticsCalibrationAid(Extension_TopLevel):
     def __init__(self,master, intermediary: Intermediary) -> None:
@@ -155,7 +155,7 @@ class Ext_OpticsCalibrationAid(Extension_TopLevel):
         try: self._canvas.draw()
         except Exception as e: print(f"Error while drawing the canvas: {e}")
         
-    def _process_listMea(self, list_mea:list[RamanMeasurement], prev_max_y:float = 0) -> tuple[list[float], float]:
+    def _process_listMea(self, list_mea:list[MeaRaman], prev_max_y:float = 0) -> tuple[list[float], float]:
         """
         Process the list of measurements and update the plot.
         
@@ -167,7 +167,7 @@ class Ext_OpticsCalibrationAid(Extension_TopLevel):
             tuple[list[float], float]: The list of AUC values and the maximum value.
         """
         assert isinstance(list_mea, list), "list_mea must be a list of RamanMeasurement objects."
-        assert all(isinstance(mea, RamanMeasurement) for mea in list_mea), "list_mea must be a list of RamanMeasurement objects."
+        assert all(isinstance(mea, MeaRaman) for mea in list_mea), "list_mea must be a list of RamanMeasurement objects."
         assert len(list_mea) > 0, "list_mea must not be empty."
         
         maxlen:int

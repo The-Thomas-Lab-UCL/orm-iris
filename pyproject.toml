@@ -1,0 +1,40 @@
+[project]
+name = "orm-iris"
+version = "1.0.0"
+description = "Integrated Raman Imaging Software (IRIS) is a complementary controller software of the Open Raman Microscopy (ORM) system. It provides a GUI-based app to easily control a motorised Raman microscope (XY-stage, Z-stage, brightfield camera, and a spectrometer) for Raman imaging. It supports instruments from various manufacturers including Ocean Optics, Andor, Princeton Instruments, Thorlabs, Physik Instrumente, Zaber, and others."
+authors = [
+    {name = "Kevin T. Uning", email = "kevin.uning.23@ucl.ac.uk"},
+    {name = "Michael R. Thomas", email = "michael.thomas@ucl.ac.uk"},
+    {name = "Mads S. Bergholt", email = "mads.bergholt@kcl.ac.uk"},
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "configupdater>=3.2",
+    "dill>=0.4.0",
+    "keyboard>=0.13.5",
+    "matplotlib>=3.10.5",
+    "numpy>=2.3.2",
+    "opencv-python>=4.11.0.86",
+    "pandas>=2.3.2",
+    "pillow>=11.3.0",
+    "pyarrow>=21.0.0",
+    "pyusb>=1.3.1",
+    "scipy>=1.16.1",
+]
+
+[project.optional-dependencies]
+zaber = [
+    "zaber_motion~=6.5.0",
+]
+physik_instrumente = [
+    "PIPython~=2.10.2.1",
+    "pyserial~=3.5",
+]
+thorlabs = [
+    "pythonnet~=3.0.3"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["iris*"]

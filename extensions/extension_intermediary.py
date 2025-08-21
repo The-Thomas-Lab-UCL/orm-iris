@@ -14,23 +14,23 @@ from PIL import Image
 import numpy as np
 import threading
 
-from library.general_functions import *
+from iris.utils.general import *
 
 # Basic controllers
-from library.controllers.class_camera_controller import Class_CameraController
-from library.controllers.class_xy_stage_controller import Class_XYController
-from library.controllers.class_z_stage_controller import Class_ZController
-from library.controllers.class_spectrometer_controller import Class_SpectrometerController
+from iris.controllers.class_camera_controller import Class_CameraController
+from iris.controllers.class_xy_stage_controller import Class_XYController
+from iris.controllers.class_z_stage_controller import Class_ZController
+from iris.controllers.class_spectrometer_controller import Class_SpectrometerController
 
 # GUI controllers
-from library.app.sframe_motion_video import Frm_MotionController
-from library.app.sframe_raman import Frm_RamanSpectrometerController
-from library.app.sframe_hilvl_Raman import Frm_HighLvlController_Raman
-from library.app.sframe_hilvl_Brightfield import Frm_HighLvlController_Brightfield
+from iris.gui.motion_video import Frm_MotionController
+from iris.gui.raman import Frm_RamanSpectrometerController
+from iris.gui.hilvl_Raman import Frm_HighLvlController_Raman
+from iris.gui.hilvl_Brightfield import Frm_HighLvlController_Brightfield
 
 # Data containers/managers
-from library.app.sframe_dataHubMapping import Frm_DataHub_Mapping
-from library.app.sframe_dataHubImage import Frm_DataHub_Image, Frm_DataHub_ImgCal
+from iris.gui.dataHub_MeaRMap import Frm_DataHub_Mapping
+from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
 
 class Ext_DataIntermediary():
     """
