@@ -1,0 +1,2 @@
+# IRIS
+Integrated Raman Imaging Software (IRIS) is a complementary controller software of the Open Raman Microscopy (ORM) system. It provides a GUI-based app to easily control a motorised Raman microscope (XY-stage, Z-stage, brightfield camera, and a spectrometer) for Raman imaging. It supports instruments from various manufacturers including Ocean Optics, Andor, Princeton Instruments, Thorlabs, Physik Instrumente, Zaber, and others.
