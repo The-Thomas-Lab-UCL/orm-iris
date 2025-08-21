@@ -1,0 +1,9 @@
+data out/
+__pycache__/
+*.prof
+sandbox/
+*.ini
+temp/
+*.pkl
+autosave/
+.DS_Store
