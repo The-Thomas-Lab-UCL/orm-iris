@@ -68,7 +68,7 @@ class MeaRMap_Unit():
         
         # Parameters for the database storage
         self._flg_measurement_exist = False   # Flag to check if the measurement data exists
-        self._flg_meatadata_exist = False     # Flag to check if the metadata exists
+        self._flg_metadata_exist = False     # Flag to check if the metadata exists
         
         # Additional attributes for ease of use in other programs (for reference during plotting)
         self._label_ts = 'timestamp' # Timestamp column name corresponding to the dictionary
@@ -129,7 +129,7 @@ class MeaRMap_Unit():
         Returns:
             tuple: laser power, laser wavelength
         """
-        if not self._flg_meatadata_exist: raise ValueError('get_laser_metadata: The metadata does not exist.')
+        if not self._flg_metadata_exist: raise ValueError('get_laser_metadata: The metadata does not exist.')
         metadata = self.get_dict_measurement_metadata()
         power_key,wavelength_key = MeaRaman(reconstruct=True).get_laserMetadata_key()
         return (metadata[power_key],metadata[wavelength_key])
@@ -229,7 +229,10 @@ class MeaRMap_Unit():
         """
         Check if the measurement data and metadata exist
         """
-        return self._flg_measurement_exist and self._flg_meatadata_exist
+        if len(self._dict_measurement[self._label_ts]) == 0: self._flg_measurement_exist = False
+        if len(self._dict_metadata) == 0: self._flg_metadata_exist = False
+        
+        return self._flg_measurement_exist and self._flg_metadata_exist
         
     def set_unitName(self,unit_name:str):
         """
@@ -345,9 +348,9 @@ class MeaRMap_Unit():
         """
         assert isinstance(measurement_metadata, dict), 'set_metadata: The input data type is not correct. Expected a dictionary.'
         
-        if not self._flg_meatadata_exist:
+        if not self._flg_metadata_exist:
             self._dict_metadata['measurement_metadata'] = measurement_metadata
-            self._flg_meatadata_exist = True
+            self._flg_metadata_exist = True
         else:
             assert self._dict_metadata['measurement_metadata'] == measurement_metadata,\
                 'set_metadata: The input metadata is different from the stored metadata.'
@@ -389,7 +392,7 @@ class MeaRMap_Unit():
         
         # Check if the measurement metadata is the same as the stored metadata
         measurement_metadata = measurement.get_metadata()
-        if not self._flg_meatadata_exist: self._set_measurement_metadata(measurement_metadata)
+        if not self._flg_metadata_exist: self._set_measurement_metadata(measurement_metadata)
         elif measurement_metadata != self._dict_metadata['measurement_metadata']:
             raise ValueError('append_measurement_data: The measurement metadata does not match the stored metadata.')
         

@@ -23,10 +23,10 @@ from iris.gui.timestamp_coorshift import sFrm_xyCoorTimestampShift
 
 from iris import *
 
-class A2SSM_analyser(tk.Frame):
+class main_analyser(tk.Frame):
     def __init__(self, master, processor:mpp.Pool, dataHub:Frm_DataHub_Mapping|None=None):
         """
-        Initialises the A2SSM analyser.
+        Initialises the IRIS analyser.
         
         Args:
             master (tk.Tk): The master window
@@ -196,7 +196,7 @@ class Heatmap_InteractivePlotter(tk.Frame):
         self._heatmapPlotter = Frm_MappingMeasurement_Plotter(
             self,
             mappingHub=mappingHub,
-            queue_click=self._q_clickcoor,
+            callback_click=self._q_clickcoor.put,
             figsize_pxl=(600,600))
         self._heatmapPlotter.override_unit_combobox('Use the "Data Hub" to select the unit')
         self._heatmapPlotter.grid(row=0,column=0)
@@ -414,10 +414,10 @@ class EventHandler():
         
 if __name__ == '__main__':
     root = tk.Tk()
-    root.title('A2SSM Analyser')
+    root.title('IRIS Analyser')
     
     processor = mpp.Pool()
-    app = A2SSM_analyser(root,processor)
+    app = main_analyser(root,processor)
     app.pack(fill='both',expand=True)
     
     app.init_extensions(root)

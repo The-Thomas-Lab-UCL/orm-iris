@@ -35,19 +35,21 @@ from iris.data.measurement_RamanMap import MeaRMap_Hub,MeaRMap_Unit, MeaRMap_Plo
 from iris.gui import AppPlotEnum
 
 class Frm_MappingMeasurement_Plotter(tk.Frame):
-    def __init__(self,master,mappingHub:MeaRMap_Hub,queue_click:queue.Queue|None=None,
+    def __init__(self,master,mappingHub:MeaRMap_Hub,
+                 callback_click:Callable[[str,tuple[float,float]], None]|None=None,
                  figsize_pxl:tuple=(440,400)):
         """
         Initialise the plot_mapping_measurements class
         
         Args:
             master (tk.Tk): Parent widget
-            mappingHub (MappingMeasurement_Hub): Mapping measurement hub to be used for plotting
-            queue_click (queue.Queue, optional): Queue to return the RamanMeasurement clicked. Defaults to None.
+            mappingHub (MappingMeasurement_Hub): Mapping measurement hub to be used for plotting.
+            callback_click (Callable[[str,tuple[float,float]], None]|None): Callback function to be called on click events,
+                it will call the function with the measurement ID and the coordinates of the click.
             figsize_pxl (tuple, optional): Size of the figure in pixels. Defaults to (440,400).
         """
         assert isinstance(mappingHub,MeaRMap_Hub),'mappingHub must be an instance of MappingMeasurement_Hub'
-        assert isinstance(queue_click,(queue.Queue)) or queue_click is None,'queue_click must be a queue.Queue or None'
+        assert callable(callback_click) or callback_click is None,'callback_click must be a callable or None'
         assert isinstance(figsize_pxl,tuple) and len(figsize_pxl)==2,'figsize_pxl must be a tuple of length 2'
         
         super().__init__(master)
@@ -83,7 +85,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         self._current_mappingUnit.add_observer(self.replot_heatmap)
         
         # Set up a queue and threading to analyse the data for plotting
-        self.queue_plt_click:queue.Queue|None = queue_click
+        self._callback_click:Callable|None = callback_click
         
     # >>> Plotter selection setup <<<
         self._init_plotter_options_widgets()
@@ -363,6 +365,8 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         current_idx = self._combo_plot_SpectralPosition.current()
         self.refresh_plotter_options()
         self.refresh_plotter()
+        if current_idx < 0 or current_idx >= len(self._combo_plot_SpectralPosition.cget('values')):
+            current_idx = 0
         self._combo_plot_SpectralPosition.current(current_idx)
         
     def _set_combobox_closest_value(self):
@@ -460,11 +464,15 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         mapping_unit = self.get_selected_mappingUnit()
         list_mappingUnit_name = self._mappingHub.get_list_MappingUnit_names()
         list_mappingUnit = self._mappingHub.get_list_MappingUnit()
+        flg_found_valid = False
         if not mapping_unit.check_measurement_and_metadata_exist():
-            for i,mapping_unit in enumerate(list_mappingUnit):
-                if mapping_unit.check_measurement_and_metadata_exist(): break
-            if i==len(list_mappingUnit)-1: return False
-            
+            for mapping_unit in list_mappingUnit:
+                if mapping_unit.check_measurement_and_metadata_exist():
+                    flg_found_valid = True
+                    break
+        else: flg_found_valid = True
+        if not flg_found_valid: return False
+        
     # >>> Build the new list
         _,laser_wavelength = mapping_unit.get_laser_params()
         list_wavelengths = mapping_unit.get_list_wavelengths()
@@ -710,8 +718,8 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
             clicked_measurementId = self._current_mappingUnit.get_measurementId_from_coor(coor=(coorx,coory))
             ramanMea = self._current_mappingUnit.get_RamanMeasurement(clicked_measurementId)
             
-            if isinstance(self.queue_plt_click,queue.Queue):
-                self.queue_plt_click.put((clicked_measurementId,(coorx,coory)))
+            if self._callback_click:
+                self._callback_click((clicked_measurementId,(coorx,coory)))
 
 def test_plotter():
     from iris.data.measurement_RamanMap import generate_dummy_mappingHub, test_datasaveload_system
@@ -726,7 +734,7 @@ def test_plotter():
     plotter = Frm_MappingMeasurement_Plotter(
         root,
         mappingHub=mappinghub,
-        queue_click=queue_click,
+        callback_click=queue_click.put
         )
     plotter.refresh_plotter()
     plotter.pack(fill=tk.BOTH,expand=True)

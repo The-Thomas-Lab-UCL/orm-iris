@@ -7,3 +7,5 @@ temp/
 *.pkl
 autosave/
 .DS_Store
+build/
+orm_iris.egg-info/

@@ -1,7 +1,8 @@
 """
 This program is to control a Raman imaging microscope consisting of an XY stage, Z stage, brightfield camera, and a spectrometer.
 """
-if __name__ == "__main__": print('>>>>> A2SSM: IMPORTING LIBRARIES <<<<<')
+if __name__ == "__main__":
+    print('>>>>> IRIS: IMPORTING LIBRARIES <<<<<')
 
 import os
 import multiprocessing as mp
@@ -11,7 +12,6 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
 
-from extensions.extension_template import Extension_TopLevel
 from iris.gui.motion_video import Frm_MotionController
 from iris.gui.raman import Frm_RamanSpectrometerController
 from iris.gui.hilvl_Raman import Frm_HighLvlController_Raman
@@ -32,7 +32,7 @@ from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam,ini
 
 from iris.utils.general import *
 
-from iris.main_analyser import A2SSM_analyser
+from iris.main_analyser import main_analyser
 
 from iris.controllers import Controller_Spectrometer,Controller_XY,Controller_Z
 
@@ -42,8 +42,13 @@ from iris.controllers import ControllerConfigEnum
 from iris.gui import ShortcutsEnum
 
 ### Extension imports ###
-from extensions.extension_intermediary import Ext_DataIntermediary
-from extensions.optics_calibration_aid.ext_opticsCalibrationAid import Ext_OpticsCalibrationAid
+try:
+    from extensions.extension_template import Extension_TopLevel
+    from extensions.extension_intermediary import Ext_DataIntermediary
+    from extensions.optics_calibration_aid.ext_opticsCalibrationAid import Ext_OpticsCalibrationAid
+    flg_import_extension = True
+except Exception as e:
+    flg_import_extension = False
 
 class controller_app(tk.Tk):
     """
@@ -61,7 +66,7 @@ class controller_app(tk.Tk):
                  stage_hub:DataStreamer_StageCam):
         
         # Set the app windows name and inherit all the properties
-        screenName = 'A2SSM: Basic motion and spectrometer controller'
+        screenName = 'ORM-IRIS: Open-source Raman microscope controller'
         super().__init__()
         self.title(screenName)
         
@@ -178,19 +183,20 @@ class controller_app(tk.Tk):
         frm_raman.grid_columnconfigure(0,weight=1)
         
     # >> Set up the data manager <<
-        self._extension_intermediary = Ext_DataIntermediary(
-            raman_controller=raman_controller,
-            camera_controller=self._stageHub.get_camera_controller(),
-            xy_controller=xy_controller,
-            z_controller=z_controller,
-            frm_motion_controller=self._motion,
-            frm_raman_controller=self._raman,
-            frm_highlvl_raman=self._hilvl_raman,
-            frm_highlvl_brightfield=self._hilvl_brightfield,
-            frm_datahub_mapping=self._dataHub_map,
-            frm_datahub_image=self._dataHub_img,
-            frm_datahub_imgcal=self._dataHub_imgcal,
-            )
+        if flg_import_extension:
+            self._extension_intermediary = Ext_DataIntermediary(
+                raman_controller=raman_controller,
+                camera_controller=self._stageHub.get_camera_controller(),
+                xy_controller=xy_controller,
+                z_controller=z_controller,
+                frm_motion_controller=self._motion,
+                frm_raman_controller=self._raman,
+                frm_highlvl_raman=self._hilvl_raman,
+                frm_highlvl_brightfield=self._hilvl_brightfield,
+                frm_datahub_mapping=self._dataHub_map,
+                frm_datahub_image=self._dataHub_img,
+                frm_datahub_imgcal=self._dataHub_imgcal,
+                )
         
     # >> Set up the calibration generator <<
         self.toplevel_calibrator = tk.Toplevel(self)
@@ -205,10 +211,10 @@ class controller_app(tk.Tk):
         
     # >> Set up the analysers <<
         self.toplevel_analyser = tk.Toplevel(self)
-        self.toplevel_analyser.title('A2SSM analyser')
-        self.frm_a2ssm_analyser = A2SSM_analyser(self.toplevel_analyser,
+        self.toplevel_analyser.title('IRIS analyser')
+        self.frm_iris_analyser = main_analyser(self.toplevel_analyser,
             processor=self._processor,dataHub=self._dataHub_map)
-        self.frm_a2ssm_analyser.pack()
+        self.frm_iris_analyser.pack()
         
         # Set up a list for top level instances
         self._list_analyser_toplevel = []
@@ -233,13 +239,13 @@ class controller_app(tk.Tk):
         
         menu_analyser = tk.Menu(self._menubar,tearoff=0)
         menu_analyser.add_command(label='Show "Main analyser"',command=self.toplevel_analyser.deiconify)
-        menu_analyser.add_command(label='Create a new [destructible] "analyser"',command=self._set_A2SSM_analyser)
+        menu_analyser.add_command(label='Create a new [destructible] "analyser"',command=self._set_IRIS_analyser)
         self._menubar.add_cascade(label='Analyser',menu=menu_analyser)
         
     # >> Set up the extensions <<
         self._list_extensions_toplevel:list[Extension_TopLevel] = []
         
-        self._set_extensions()
+        if flg_import_extension: self._set_extensions()
         menu_extensions = tk.Menu(self._menubar,tearoff=0)
         for i,ext in enumerate(self._list_extensions_toplevel):
             ext:tk.Toplevel
@@ -341,20 +347,20 @@ class controller_app(tk.Tk):
             # Override the close button for the extension to minimise
             ext.protocol("WM_DELETE_WINDOW",ext.withdraw)
         
-    def _set_A2SSM_analyser(self):
+    def _set_IRIS_analyser(self):
         """
-        Creates more A2SSM analyser instances as new top level windows
+        Creates more IRIS analyser instances as new top level windows
         """
         number_analyser = len(self._list_analyser_toplevel)
         toplevel_analyser = tk.Toplevel(self)
-        toplevel_analyser.title('[destructible] A2SSM analyser {}'.format(number_analyser+1))
+        toplevel_analyser.title('[destructible] IRIS analyser {}'.format(number_analyser+1))
         toplevel_analyser.config(menu=self.winfo_toplevel().config('menu')[-1])
         
-        a2ssm_analyser = A2SSM_analyser(toplevel_analyser,processor=self._processor)
-        a2ssm_analyser.pack()
+        iris_analyser = main_analyser(toplevel_analyser,processor=self._processor)
+        iris_analyser.pack()
         
         self._list_analyser_toplevel.append(toplevel_analyser)
-        self._list_analyser_instances.append(a2ssm_analyser)
+        self._list_analyser_instances.append(iris_analyser)
         
     @thread_assign
     def terminate(self):
@@ -419,7 +425,7 @@ class controller_app(tk.Tk):
         # os._exit(0)
 
 def run_app():
-    print('>>>>> A2SSM: INITIATING THE CONTROLLERS AND THE APP <<<<<')
+    print('>>>>> IRIS: INITIATING THE CONTROLLERS AND THE APP <<<<<')
     
     base_manager = MyManager()
     initialise_manager_raman(base_manager)

@@ -27,23 +27,22 @@ from iris.data.measurement_RamanMap import MeaRMap_Hub, MeaRMap_Unit, MeaRMap_Ha
 from iris.data import SaveParamsEnum
 
 class Frm_DataHub_Mapping(tk.Frame):
-    def __init__(self, master, getter_MappingHub:Callable[[],MeaRMap_Hub]|None=None,width_rel:float=1, height_rel:float=1,autosave:bool=False):
+    def __init__(self, master, mappingHub:MeaRMap_Hub|None=None,width_rel:float=1, height_rel:float=1,autosave:bool=False):
         """
         Initialises the data hub frame. This frame stores all the data from the measurement session.
         
         Args:
             master (tk.Tk): The master window
-            getter_MappingHub (Callable[[],MappingMeasurement_Hub], optional): The function to get the MappingMeasurement_Hub. Defaults to None.
+            mappingHub (MeaRMap_Hub|None): The MappingMeasurement_Hub instance. Defaults to None.
             width_rel (float, optional): The relative width of the frame. Defaults to 1.
             height_rel (float, optional): The relative height of the frame. Defaults to 1.
             autosave (bool, optional): If True, will enable autosaving of the MappingMeasurement_Hub. Defaults to False.
-        
-        Note: getter_MappingHub will be used during the refresh callback to get the latest MappingMeasurement_Hub.
+
+        Note: mappingHub will be used during the refresh callback to get the latest MappingMeasurement_Hub.
         """
         if width_rel < 0 or height_rel < 0: width_rel, height_rel = 1, 1
         self._width_rel = width_rel
         self._height_rel = height_rel
-        self._getter_MappingHub = getter_MappingHub
         
         tk.Frame.__init__(self, master)
         frm_tree = tk.Frame(self)
@@ -55,7 +54,8 @@ class Frm_DataHub_Mapping(tk.Frame):
         frm_autosave.grid(row=2, column=0, sticky="nsew")
         
         # Storage to store the data
-        self._MappingHub = MeaRMap_Hub()
+        if isinstance(mappingHub, MeaRMap_Hub): self._MappingHub = mappingHub
+        else: self._MappingHub = MeaRMap_Hub()
         
         # Save parameters
         self._sessionid = get_timestamp_us_str()
@@ -81,7 +81,6 @@ class Frm_DataHub_Mapping(tk.Frame):
         self._bool_save_raw_MappingUnit_ext = tk.BooleanVar(value=True)
         btn_rename_entry = tk.Button(frm_control, text="Rename Entry", command=self.rename_unit)
         btn_delete_entry = tk.Button(frm_control, text="Remove Entry", command=self.delete_unit)
-        btn_refresh = tk.Button(frm_control, text="Refresh Data Hub", command=self._refresh_dataHub)
         self._btn_save_MappingUnit_ext = tk.Button(frm_control, text="Save selected Mapping Unit [ext]", command=self.save_selected_mappingUnit_ext)
         self._chk_save_raw_MappingUnit_txt = tk.Checkbutton(frm_control, text="Save raw data [ext]", variable=self._bool_save_raw_MappingUnit_ext)
         self._btn_save_MappingHub = tk.Button(frm_control, text="Save Mapping Hub", command=self.save_dataHub)
@@ -89,13 +88,10 @@ class Frm_DataHub_Mapping(tk.Frame):
         
         btn_rename_entry.grid(row=0, column=0, sticky="nsew", pady=(0,5))
         btn_delete_entry.grid(row=0, column=1, sticky="nsew", pady=(0,5))
-        # btn_refresh.grid(row=0, column=2, sticky="nsew", pady=(0,5))
         self._btn_save_MappingUnit_ext.grid(row=1, column=0, sticky="nsew", pady=(0,10))
         self._chk_save_raw_MappingUnit_txt.grid(row=1, column=1, sticky="nsew", pady=(0,10))
         self._btn_save_MappingHub.grid(row=2, column=0, sticky="nsew")
         self._btn_load_MappingHub.grid(row=2, column=1, sticky="nsew")
-        
-        if self._getter_MappingHub is None: btn_refresh.config(state=tk.DISABLED)
         
         # Interaction/callback setup
         self._list_MappingHub_load_callbacks = []
@@ -162,8 +158,7 @@ class Frm_DataHub_Mapping(tk.Frame):
         """
         Gets the latest MappingMeasurement_Hub from the getter function and updates the tree
         """
-        if self._getter_MappingHub is None: return
-        self.set_MappingHub(self._getter_MappingHub())
+        self.update_tree()
         
     def _init_tree(self):
         self._tree_hub.heading("Unit ID", text="Unit ID", anchor=tk.W)
