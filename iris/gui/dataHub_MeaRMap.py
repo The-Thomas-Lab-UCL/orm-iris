@@ -229,8 +229,11 @@ class Frm_DataHub_Mapping(tk.Frame):
                 if not persist:
                     messagebox.showerror("Unit ID already exists", str(e))
                     break
-                new_unitName = messagebox_request_input("'Unit name' already exists", "'Unit name' already exists!\nEnter a new 'unit name':")
-                unit.set_unitName_reset_unitID(new_unitName)
+                
+                new_unitName = messagebox_request_input(\
+                    "'Unit name' already exists", "'Unit name' already exists!\nEnter a new 'unit name':",
+                    default=unit.get_unit_name())
+                unit.set_unitName_and_unitID(new_unitName)
     
     @thread_assign
     def rename_unit(self):

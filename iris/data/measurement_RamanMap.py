@@ -250,19 +250,21 @@ class MeaRMap_Unit():
         
         if self.check_measurement_and_metadata_exist(): self._notify_observers()
         
-    def set_unitName_reset_unitID(self,unit_name:str):
+    def set_unitName_and_unitID(self,unit_name:str, unit_id:str|None=None):
         """
         Sets the measurement unit name and resets the measurement unit id
         
         Args:
             unit_name (str): measurement unit name
+            unit_id (str|None): measurement unit id. A new UUID will be generated if None
         """
         assert isinstance(unit_name, str), 'set_unit_id: The input data type is not correct. Expected a string.'
         
         self._unit_name = unit_name
         self._dict_metadata[self._unit_name_key] = unit_name
         
-        self._unit_id = uuid.uuid4().hex
+        if not isinstance(unit_id, str): unit_id = uuid.uuid4().hex
+        self._unit_id = unit_id
         self._dict_metadata[self._unit_id_key] = self._unit_id
 
         if self.check_measurement_and_metadata_exist(): self._notify_observers()
@@ -775,7 +777,7 @@ class MeaRMap_Hub():
         dest_unit:MeaRMap_Unit = MeaRMap_Unit()
         dest_unit.set_dict_metadata(deepcopy(source_unit.get_dict_unit_metadata()))
         dest_unit.set_dict_measurements(deepcopy(source_unit.get_dict_measurements()))
-        dest_unit.set_unitName_reset_unitID(dest_unit_name)
+        dest_unit.set_unitName_and_unitID(dest_unit_name)
         
         if appendToHub:
             self.append_mapping_unit(dest_unit)
