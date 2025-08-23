@@ -36,7 +36,7 @@ from iris.gui import AppPlotEnum
 
 class Frm_MappingMeasurement_Plotter(tk.Frame):
     def __init__(self,master,mappingHub:MeaRMap_Hub,
-                 callback_click:Callable[[str,tuple[float,float]], None]|None=None,
+                 callback_click:Callable[[], tuple[str,tuple[float,float]]]|None=None,
                  figsize_pxl:tuple=(440,400)):
         """
         Initialise the plot_mapping_measurements class
@@ -44,7 +44,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         Args:
             master (tk.Tk): Parent widget
             mappingHub (MappingMeasurement_Hub): Mapping measurement hub to be used for plotting.
-            callback_click (Callable[[str,tuple[float,float]], None]|None): Callback function to be called on click events,
+            callback_click (Callable[[], tuple[str,tuple[float,float]]]|None): Callback function to be called on click events,
                 it will call the function with the measurement ID and the coordinates of the click.
             figsize_pxl (tuple, optional): Size of the figure in pixels. Defaults to (440,400).
         """
@@ -529,7 +529,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
     def get_selected_mappingUnit(self) -> MeaRMap_Unit:
         """
         Get the currently selected mapping unit from the combo box.
-
+        
         Returns:
             MappingMeasurement_Unit: The currently selected mapping unit.
         """

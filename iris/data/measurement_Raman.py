@@ -28,6 +28,7 @@ import numpy as np
 import cv2
 import queue
 import os
+from typing import Self, Literal
 
 import bisect
 
@@ -77,7 +78,7 @@ class MeaRaman():
         self._spectrum_rawlist:list[pd.DataFrame] = []      # list of pandas df (of the raw measurements): for storage
         self._spectrum_rawlist_temp:list[pd.DataFrame] = [] # temporary storage for the raw measurements list
         
-        self._spectrum_analysed = None            # pandas df: stores the averaged spectrum
+        self._spectrum_analysed:pd.DataFrame|None = None            # pandas df: stores the averaged spectrum
         
     # >>> Name parameters <<<
         self.label_wavelength = DataAnalysisConfigEnum.WAVELENGTH_LABEL.value
@@ -330,28 +331,39 @@ class MeaRaman():
         spectrum_avg = self._average(spectrum_rawlist)
         return spectrum_avg
 
-    def set_analysed(self,spectrum_analysed:pd.DataFrame):
+    def set_analysed(self,spectrum_analysed:pd.DataFrame|np.ndarray):
         """
         Sets the analysed values (averaged and subtracted)
         
         Args:
-            spectrum_avg (pd.df): averaged spectrum
+            spectrum_analysed (pd.DataFrame|np.ndarray): analysed spectra
         """
-        assert isinstance(spectrum_analysed,pd.DataFrame), "'spectrum_analysed' should be a pandas DataFrame"
+        if not isinstance(spectrum_analysed,(pd.DataFrame,np.ndarray)):
+            raise TypeError("'spectrum_analysed' should be a pandas DataFrame or numpy array")
         self._flg_uptodate = True
-        self._spectrum_analysed = spectrum_analysed
-        
-    def get_analysed(self) -> pd.DataFrame:
+        if isinstance(spectrum_analysed,pd.DataFrame): self._spectrum_analysed = spectrum_analysed
+        else:
+            if not spectrum_analysed.shape[1] == 2: raise ValueError("'spectrum_analysed' should have 2 columns (wavelength, intensity)")
+            self._spectrum_analysed = pd.DataFrame(spectrum_analysed, columns=[self.label_wavelength, self.label_intensity])
+
+    def get_analysed(self, type:Literal['DataFrame','array']='DataFrame') -> pd.DataFrame|np.ndarray|None:
         """
         Get the analysed spectra.
         
+        Args:
+            type (Literal['DataFrame', 'array']): The type of the output
+            
         Returns:
-            pd.DataFrame: analysed spectra
+            pd.DataFrame|np.ndarray|None: analysed spectra or None if not available
         """
-        if not self._flg_uptodate:
-            print('!!!!! Returned analysed spectra are NOT UP-TO-DATE !!!!!')
-        return self._spectrum_analysed
-    
+        if not self._flg_uptodate: print('!!!!! Returned analysed spectra are NOT UP-TO-DATE !!!!!')
+        if not isinstance(self._spectrum_analysed, pd.DataFrame): return None
+        
+        if type == 'DataFrame': ret = self._spectrum_analysed
+        else: ret = self._spectrum_analysed.to_numpy()
+
+        return ret
+
     def _wavelength_similarity_check(self,wavelength_list):
         """
         Check if a list of wavelength is similar, within a tolerance.
@@ -404,6 +416,24 @@ class MeaRaman():
             queue_response.put(avg_spectra)
         
         return avg_spectra
+    
+    def copy(self) -> Self: # type: ignore
+        """
+        Creates a copy of the current MeaRaman instance.
+
+        Returns:
+            MeaRaman: A new copy of the current instance.
+        """
+        new_copy = MeaRaman(reconstruct=True)
+        if not self.check_measurement_exist():
+            raise ValueError("No valid measurement exists to copy.")
+        
+        new_copy.reconstruct(
+            measurement_id=self._measurement_time,
+            metadata=self._dict_metadata.copy(),
+            spec_analysed=self._spectrum_analysed.copy(),
+            spec_rawlist=self._spectrum_rawlist.copy()
+        )
     
     def self_report(self):
         """

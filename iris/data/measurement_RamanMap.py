@@ -17,7 +17,7 @@ import dill
 import sqlite3 as sql
 import json
 import uuid
-from typing import Callable
+from typing import Callable, Self
 from enum import Enum
 
 import matplotlib
@@ -37,7 +37,7 @@ if __name__ == '__main__':
 from iris.utils.general import *
 from iris.data.measurement_Raman import MeaRaman
 
-from iris import DataAnalysisConfigEnum
+from iris import DataAnalysisConfigEnum as DAEnum
 from iris.data import SaveParamsEnum
 from iris.gui import AppPlotEnum
 
@@ -64,21 +64,23 @@ class MeaRMap_Unit():
         self._unit_name = unit_name         # Measurement name (e.g., 'raw_measurement', 'calibration', 'background', 'analysed-1', etc.)
         self._unit_id_key = SaveParamsEnum.DATABASE_ID_KEY.value # Key for the measurement ID in the metadata dictionary
         self._unit_name_key = SaveParamsEnum.DATABASE_NAME_KEY.value # Key for the measurement name in the metadata dictionary
-        self._mea_id_key = 'timestamp'      # Key for the measurement timestamp in the measurement dictionary
+        self._mea_id_key = DAEnum.ID_TIMESTAMP_LABEL.value      # Key for the measurement timestamp in the measurement dictionary
         
         # Parameters for the database storage
         self._flg_measurement_exist = False   # Flag to check if the measurement data exists
         self._flg_metadata_exist = False     # Flag to check if the metadata exists
         
         # Additional attributes for ease of use in other programs (for reference during plotting)
-        self._label_ts = 'timestamp' # Timestamp column name corresponding to the dictionary
-        self._label_x = 'coor_x'     # X-coordinate column name corresponding to the dictionary
-        self._label_y = 'coor_y'     # Y-coordinate column name corresponding to the dictionary
-        self._label_z = 'coor_z'     # Z-coordinate column name corresponding to the dictionary
+        self._label_ts = DAEnum.ID_TIMESTAMP_LABEL.value    # Timestamp column name for the dictionary
+        self._label_x = DAEnum.COORX_LABEL.value            # X-coordinate column name for the dictionary
+        self._label_y = DAEnum.COORY_LABEL.value            # Y-coordinate column name for the dictionary
+        self._label_z = DAEnum.COORZ_LABEL.value            # Z-coordinate column name for the dictionary
+        self._label_listmea = DAEnum.LIST_MEA_LABEL.value   # Key for the list of raw dataframes in the measurement dictionary
+        self._label_avemea = DAEnum.AVE_MEA_LABEL.value     # Key for the averaged dataframe in the measurement dictionary
         
         # Column names to access the pd.DataFrame values
-        self._dflabel_wavelength = DataAnalysisConfigEnum.WAVELENGTH_LABEL.value    # Wavelength column name corresponding to the dataframe of the measurements
-        self._dflabel_intensity = DataAnalysisConfigEnum.INTENSITY_LABEL.value      # Intensity column name corresponding to the dataframe of the measurements
+        self._dflabel_wavelength = DAEnum.WAVELENGTH_LABEL.value    # Wavelength column name corresponding to the dataframe of the measurements
+        self._dflabel_intensity = DAEnum.INTENSITY_LABEL.value      # Intensity column name corresponding to the dataframe of the measurements
         
         self._dict_metadata = {
             self._unit_id_key: self._unit_id,
@@ -101,8 +103,8 @@ class MeaRMap_Unit():
             self._label_x: [],
             self._label_y: [],
             self._label_z: [],
-            'list_df': [],      # List of raw dataframes in an accumulation (e.g., background measurements may require multiple acquisitions)
-            'averaged_df': []   # Averaged dataframe from 'list_df'
+            self._label_listmea: [],      # List of raw dataframes in an accumulation (e.g., background measurements may require multiple acquisitions)
+            self._label_avemea: []   # Averaged dataframe from 'list_df'
         }
         
         self._dict_measurement_types = {    # Type definition for loading the measurement data from the database
@@ -110,8 +112,8 @@ class MeaRMap_Unit():
             self._label_x: float,
             self._label_y: float,
             self._label_z: float,
-            'list_df': list[pd.DataFrame],  # !!! Note that list_df can also be None !!!
-            'averaged_df': pd.DataFrame
+            self._label_listmea: list[pd.DataFrame],  # !!! Note that list_df can also be None !!!
+            self._label_avemea: pd.DataFrame
         }
         
         self._lock_measurement = threading.Lock()
@@ -161,7 +163,7 @@ class MeaRMap_Unit():
         Returns:
             tuple: keys for the timestamp, x, y, z, list_df, and averaged_df
         """
-        return (self._mea_id_key,self._label_x,self._label_y,self._label_z,'list_df','averaged_df')
+        return (self._mea_id_key,self._label_x,self._label_y,self._label_z,self._label_listmea,self._label_avemea)
         
     def get_key_measurementId(self) -> str:
         """
@@ -169,7 +171,7 @@ class MeaRMap_Unit():
         """
         return self._mea_id_key
         
-    def set_unit_metadata(self,measurementUnit_metadata:dict):
+    def set_dict_metadata(self,measurementUnit_metadata:dict):
         """
         Sets the metadata for the measurement analysis
         
@@ -401,8 +403,8 @@ class MeaRMap_Unit():
             self._dict_measurement[self._label_x].append(coor[0])
             self._dict_measurement[self._label_y].append(coor[1])
             self._dict_measurement[self._label_z].append(coor[2])
-            self._dict_measurement['list_df'].append(measurement.get_raw_list())
-            self._dict_measurement['averaged_df'].append(measurement.get_analysed())
+            self._dict_measurement[self._label_listmea].append(measurement.get_raw_list())
+            self._dict_measurement[self._label_avemea].append(measurement.get_analysed())
         
         self._flg_measurement_exist = True
         
@@ -428,14 +430,14 @@ class MeaRMap_Unit():
             if list_df is not None:
                 assert isinstance(list_df, list), 'append_measurement_data: The input list_df is not correct. Expected a list of pandas.DataFrame objects.'
                 assert all(isinstance(item, pd.DataFrame) for item in list_df), 'append_measurement_data: The input list_df is not correct. Expected a list of pandas.DataFrame objects.'
-                self._dict_measurement['list_df'].append(list_df)
+                self._dict_measurement[self._label_listmea].append(list_df)
             else:
-                self._dict_measurement['list_df'].append(None)
+                self._dict_measurement[self._label_listmea].append(None)
             self._dict_measurement[self._label_ts].append(timestamp)
             self._dict_measurement[self._label_x].append(coor[0])
             self._dict_measurement[self._label_y].append(coor[1])
             self._dict_measurement[self._label_z].append(coor[2])
-            self._dict_measurement['averaged_df'].append(measurement_df)
+            self._dict_measurement[self._label_avemea].append(measurement_df)
         
         self._flg_measurement_exist = True
         
@@ -454,7 +456,7 @@ class MeaRMap_Unit():
         assert self._flg_measurement_exist, 'get_avg_df: The measurement data does not exist.'
         assert 0<=idx < len(self._dict_measurement[self._label_ts]), 'get_avg_df: The index is out of range.'
         
-        df = self._dict_measurement['averaged_df'][idx]
+        df = self._dict_measurement[self._label_avemea][idx]
         
         return df
         
@@ -523,7 +525,7 @@ class MeaRMap_Unit():
         assert measurement_id in self._dict_measurement[self._mea_id_key], 'get_avg_df: The timestamp does not exist in the stored data.'
         
         idx = self._dict_measurement[self._mea_id_key].index(measurement_id)
-        df = self._dict_measurement['averaged_df'][idx]
+        df = self._dict_measurement[self._label_avemea][idx]
         
         return df
         
@@ -546,7 +548,7 @@ class MeaRMap_Unit():
         # assert self._flg_measurement_exist, 'get_list_wavelengths: The measurement data does not exist.'
         if not self._flg_measurement_exist: return []
         
-        df:pd.DataFrame = self._dict_measurement['averaged_df'][-1]
+        df:pd.DataFrame = self._dict_measurement[self._label_avemea][-1]
         list_wavelengths = df[self._dflabel_wavelength].tolist()
         return list_wavelengths
     
@@ -570,7 +572,7 @@ class MeaRMap_Unit():
         
         closest_wavelength = find_nearest(self.get_list_wavelengths(),wavelength)
         
-        df:pd.DataFrame = self._dict_measurement['averaged_df'][-1]
+        df:pd.DataFrame = self._dict_measurement[self._label_avemea][-1]
         wavelength_idx = df[self._dflabel_wavelength].tolist().index(closest_wavelength)
         
         return wavelength_idx
@@ -606,7 +608,7 @@ class MeaRMap_Unit():
         
         closest_wavelength = find_nearest(self.get_list_wavelengths(),wavelength)
         
-        df:pd.DataFrame = self._dict_measurement['averaged_df'][-1]
+        df:pd.DataFrame = self._dict_measurement[self._label_avemea][-1]
         wavelength_idx = df[self._dflabel_wavelength].tolist().index(closest_wavelength)
         
         df_result = pd.DataFrame(columns=[self._label_x,self._label_y,self._label_z,
@@ -616,7 +618,7 @@ class MeaRMap_Unit():
             x_coor = self._dict_measurement[self._label_x].copy()
             y_coor = self._dict_measurement[self._label_y].copy()
             z_coor = self._dict_measurement[self._label_z].copy()
-            intensities = [df.iloc[wavelength_idx, df.columns.get_loc(self._dflabel_intensity)] for df in self._dict_measurement['averaged_df'].copy()]
+            intensities = [df.iloc[wavelength_idx, df.columns.get_loc(self._dflabel_intensity)] for df in self._dict_measurement[self._label_avemea].copy()]
         
         df_result = pd.DataFrame({
             self._label_x: x_coor,
@@ -648,6 +650,18 @@ class MeaRMap_Unit():
         for observer in self._list_observers:
             try: observer()
             except Exception as e: print(f"Error notifying observer: {e}")
+    
+    def copy(self) -> Self: # type: ignore
+        """
+        Creates a copy of the current object.
+
+        Returns:
+            Self: A copy of the current object.
+        """
+        new_copy = MeaRMap_Unit(unit_name=self._unit_name)
+        new_copy.set_dict_measurements(self._dict_measurement.copy())
+        new_copy.set_dict_metadata(self._dict_metadata.copy())
+        return new_copy # type: ignore
 
     def delete_self(self):
         """
@@ -759,7 +773,7 @@ class MeaRMap_Hub():
         
         # Construct the destination unit
         dest_unit:MeaRMap_Unit = MeaRMap_Unit()
-        dest_unit.set_unit_metadata(deepcopy(source_unit.get_dict_unit_metadata()))
+        dest_unit.set_dict_metadata(deepcopy(source_unit.get_dict_unit_metadata()))
         dest_unit.set_dict_measurements(deepcopy(source_unit.get_dict_measurements()))
         dest_unit.set_unitName_reset_unitID(dest_unit_name)
         
@@ -1529,7 +1543,7 @@ class MeaRMap_Handler():
             else:
                 dict_unit_metadata[key] = row[key]
             
-        mappingUnit.set_unit_metadata(dict_unit_metadata) # Set the metadata and automatically set the unit name and id
+        mappingUnit.set_dict_metadata(dict_unit_metadata) # Set the metadata and automatically set the unit name and id
         
         return mappingUnit
     
@@ -1779,7 +1793,7 @@ def generate_dummy_mappingHub(numx:int=6,numy:int=8,repeat:int=3) -> MeaRMap_Hub
         for y in listy:
             # Generate the measurements
             mea_single = MeaRaman(timestamp=get_timestamp_us_int(),int_time_ms=10,
-                laserPower_mW=DataAnalysisConfigEnum.LASER_POWER_MILLIWATT.value,laserWavelength_nm=DataAnalysisConfigEnum.LASER_WAVELENGTH_NM.value)
+                laserPower_mW=DAEnum.LASER_POWER_MILLIWATT.value,laserWavelength_nm=DAEnum.LASER_WAVELENGTH_NM.value)
             for _ in range(repeat):
                 df,_,_ = spectrometer.measure_spectrum()
                 mea_single.set_raw_list(df_mea=df,timestamp_int=get_timestamp_us_int())

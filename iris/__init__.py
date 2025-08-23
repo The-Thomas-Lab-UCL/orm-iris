@@ -81,3 +81,9 @@ class DataAnalysisConfigEnum(Enum):
     WAVELENGTH_LABEL = dict_dataAnalysis_read['wavelength_label']
     INTENSITY_LABEL = dict_dataAnalysis_read['intensity_label']
     RAMANSHIFT_LABEL = dict_dataAnalysis_read['raman_shift_label']
+    COORX_LABEL = 'coor_x'
+    COORY_LABEL = 'coor_y'
+    COORZ_LABEL = 'coor_z'
+    ID_TIMESTAMP_LABEL = 'timestamp'
+    LIST_MEA_LABEL = 'list_df'
+    AVE_MEA_LABEL = 'averaged_df'
