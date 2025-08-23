@@ -653,16 +653,22 @@ class MeaRMap_Unit():
             try: observer()
             except Exception as e: print(f"Error notifying observer: {e}")
     
-    def copy(self) -> Self: # type: ignore
+    def copy(self, flg_newID:bool=True) -> Self: # type: ignore
         """
         Creates a copy of the current object.
-
+        
+        Args:
+            flg_newID (bool): Flag to indicate if a new ID should be assigned. Default is True.
+            
         Returns:
             Self: A copy of the current object.
         """
-        new_copy = MeaRMap_Unit(unit_name=self._unit_name)
-        new_copy.set_dict_measurements(self._dict_measurement.copy())
-        new_copy.set_dict_metadata(self._dict_metadata.copy())
+        if flg_newID: unit_id = uuid.uuid4().hex
+        else: unit_id = self._unit_id
+        
+        new_copy = MeaRMap_Unit(unit_name=self._unit_name,unit_id=unit_id)
+        new_copy.set_dict_measurements(deepcopy(self._dict_measurement))
+        new_copy.set_dict_metadata(deepcopy(self._dict_metadata))
         return new_copy # type: ignore
 
     def delete_self(self):

@@ -82,7 +82,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         
         # Latest measurement data storage for plotting purposes only
         self._current_mappingUnit:MeaRMap_Unit = MeaRMap_Unit()
-        self._current_mappingUnit.add_observer(self.replot_heatmap)
+        self._assign_new_mappingUnit(self._current_mappingUnit)
         
         # Set up a queue and threading to analyse the data for plotting
         self._callback_click:Callable|None = callback_click
@@ -356,7 +356,14 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         
         self._lbl_coordinates.config(text='Figures are reset')
     
+    def _assign_new_mappingUnit(self,mappingUnit:MeaRMap_Unit):
+        self._current_mappingUnit = mappingUnit
+        self._current_mappingUnit.add_observer(self.replot_heatmap)
+        
     def _switch_plot_RamanShift(self):
+        if not self._current_mappingUnit.check_measurement_and_metadata_exist():
+            return
+        
         _,laser_wavelength = self._current_mappingUnit.get_laser_params()
         if self._bool_RamanShiftCombobox.get():
             self._lbl_SpectralPosition.config(text='cm^-1')
@@ -475,17 +482,26 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
             bool: True if the combobox is updated successfully
         """
     # >>> Get the current mapping unit
-        mapping_unit = self.get_selected_mappingUnit()
+        prev_mappingUnit_name = self._combo_plot_mappingUnitName.get()
         list_mappingUnit_name = self._mappingHub.get_list_MappingUnit_names()
-        list_mappingUnit = self._mappingHub.get_list_MappingUnit()
-        flg_found_valid = False
+        
+        if prev_mappingUnit_name in list_mappingUnit_name:
+            mapping_unit = self._mappingHub.get_MappingUnit(unit_name=prev_mappingUnit_name)
+        else: mapping_unit = MeaRMap_Unit()
+        
         if not mapping_unit.check_measurement_and_metadata_exist():
-            for mapping_unit in list_mappingUnit:
+            flg_found = False
+            for name in list_mappingUnit_name:
+                mapping_unit = self._mappingHub.get_MappingUnit(unit_name=name)
                 if mapping_unit.check_measurement_and_metadata_exist():
-                    flg_found_valid = True
+                    flg_found = True
+                    self._assign_new_mappingUnit(mapping_unit)
                     break
-        else: flg_found_valid = True
-        if not flg_found_valid: return False
+            if not flg_found:
+                self._assign_new_mappingUnit(MeaRMap_Unit())
+                return False
+            
+        mapping_unit:MeaRMap_Unit
         
     # >>> Build the new list
         _,laser_wavelength = mapping_unit.get_laser_params()
@@ -507,16 +523,16 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         list_SpectralPosition = [f'{pos:.1f}' for pos in list_SpectralPosition]
         self._combo_plot_mappingUnitName.configure(values=list_mappingUnit_name,state='readonly')
         self._combo_plot_SpectralPosition.configure(values=list_SpectralPosition,state='active')
-        
-        prev_mappingUnit_name = mapping_unit.get_unit_name()
 
         try:
             if prev_mappingUnit_name in list_mappingUnit_name:
                 self._combo_plot_mappingUnitName.set(prev_mappingUnit_name)
+            else: self._combo_plot_mappingUnitName.current(0)
             if wavelength_prev in list_wavelengths:
                 spectralPosition = wavelength_prev if not self._bool_RamanShiftCombobox.get() else ramanshift_prev
                 pos_idx = int(np.argmin(np.abs(np.array(list_SpectralPosition).astype(float)-float(spectralPosition))))
                 self._combo_plot_SpectralPosition.current(pos_idx)
+            else:self._combo_plot_SpectralPosition.current(0)
         except Exception as e:
             print('Error in refresh_plotter_options: ',e)
             if len(list_mappingUnit_name)>0: self._combo_plot_mappingUnitName.current(0)
@@ -668,7 +684,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         Save the current plot data as a csv file, asks the user for the file path
         """
         try:
-            if not isinstance(self._current_mappingUnit,MeaRMap_Unit): return
+            if not self._current_mappingUnit.check_measurement_and_metadata_exist(): return
             filepath = filedialog.asksaveasfilename(defaultextension='.csv',
                 filetypes=[('CSV files','*.csv')])
             
@@ -724,7 +740,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         """
         Retrieve the index and the column where the figure is clicked
         """
-        if event.inaxes and isinstance(self._current_mappingUnit, MeaRMap_Unit):
+        if event.inaxes and self._current_mappingUnit.check_measurement_and_metadata_exist():
             coorx,coory = event.xdata,event.ydata
             if coorx is None or coory is None: return
             
