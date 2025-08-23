@@ -513,12 +513,12 @@ class MeaRMap_Unit():
         mea.reconstruct(measurement_id=measurement_id,metadata=mea_metadata,spec_analysed=mea_df)
         return mea
         
-    def get_RamanMeasurement_df(self,measurement_id:str) -> pd.DataFrame:
+    def get_RamanMeasurement_df(self,measurement_id:int) -> pd.DataFrame:
         """
         Grabs the averaged dataframe stored
         
         Args:
-            measurement_id (str): measurement_id of the measurement
+            measurement_id (int): measurement_id of the measurement
         
         Returns:
             pd.DataFrame: averaged dataframe of the measurement
