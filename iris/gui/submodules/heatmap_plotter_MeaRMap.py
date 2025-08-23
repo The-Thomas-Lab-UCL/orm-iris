@@ -492,9 +492,9 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         list_wavelengths = mapping_unit.get_list_wavelengths()
         spectralPosition = self._combo_plot_SpectralPosition.get()
         try:
-            float(spectralPosition)
-            wavelength_prev = float(spectralPosition) if not self._bool_RamanShiftCombobox.get() else convert_ramanshift_to_wavelength(float(spectralPosition),laser_wavelength)
-            ramanshift_prev = convert_wavelength_to_ramanshift(float(wavelength_prev),laser_wavelength)
+            pos = float(spectralPosition)
+            wavelength_prev = pos if not self._bool_RamanShiftCombobox.get() else convert_ramanshift_to_wavelength(pos,laser_wavelength)
+            ramanshift_prev = convert_wavelength_to_ramanshift(wavelength_prev,laser_wavelength)
         except ValueError:
             wavelength_prev,ramanshift_prev = self._get_closest_selected_wavelength(mapping_unit)
         
@@ -514,8 +514,9 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
             if prev_mappingUnit_name in list_mappingUnit_name:
                 self._combo_plot_mappingUnitName.set(prev_mappingUnit_name)
             if wavelength_prev in list_wavelengths:
-                spectralPosition = wavelength_prev if self._bool_RamanShiftCombobox.get() else ramanshift_prev
-                self._combo_plot_SpectralPosition.set(spectralPosition)
+                spectralPosition = wavelength_prev if not self._bool_RamanShiftCombobox.get() else ramanshift_prev
+                pos_idx = int(np.argmin(np.abs(np.array(list_SpectralPosition).astype(float)-float(spectralPosition))))
+                self._combo_plot_SpectralPosition.current(pos_idx)
         except Exception as e:
             print('Error in refresh_plotter_options: ',e)
             if len(list_mappingUnit_name)>0: self._combo_plot_mappingUnitName.current(0)
@@ -759,6 +760,8 @@ def test_plotter():
     threading.Thread(target=retrieve_click).start()
     
     root.mainloop()
+    
+    os._exit(0)
     
 if __name__=="__main__":
     test_plotter()
