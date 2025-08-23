@@ -357,15 +357,29 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         self._lbl_coordinates.config(text='Figures are reset')
     
     def _switch_plot_RamanShift(self):
+        _,laser_wavelength = self._current_mappingUnit.get_laser_params()
         if self._bool_RamanShiftCombobox.get():
             self._lbl_SpectralPosition.config(text='cm^-1')
         else:
             self._lbl_SpectralPosition.config(text='nm')
-            
-        current_idx = self._combo_plot_SpectralPosition.current()
+        
+        current_value = self._combo_plot_SpectralPosition.get()
+        try: current_value = float(current_value)
+        except: current_value = 0
+        
         self.refresh_plotter_options()
         self.refresh_plotter()
-        if current_idx < 0 or current_idx >= len(self._combo_plot_SpectralPosition.cget('values')):
+        
+        list_values = [float(val) for val in self._combo_plot_SpectralPosition.cget('values')]
+        if self._bool_RamanShiftCombobox.get():
+            current_value = convert_wavelength_to_ramanshift(float(current_value), laser_wavelength)
+        else:
+            current_value = convert_ramanshift_to_wavelength(float(current_value), laser_wavelength)
+
+        current_idx = int(np.argmin(np.abs(np.array(list_values)-float(current_value)))) if current_value else 0
+        print(f'Current Spectral Position: {current_value}, Index: {current_idx}')
+            
+        if current_idx < 0 or current_idx >= len(list_values):
             current_idx = 0
         self._combo_plot_SpectralPosition.current(current_idx)
         
