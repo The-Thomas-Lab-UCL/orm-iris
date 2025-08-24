@@ -198,19 +198,43 @@ class Frm_DataHub_Mapping(tk.Frame):
         list_units = []
         for item in selections:
             unit_id = self._tree_hub.item(item, "values")[0]
-            list_units.append(self._MappingHub.get_MappingUnit(unit_id))
-            
+            try: unit = self._MappingHub.get_MappingUnit(unit_id)
+            except ValueError: continue
+            list_units.append(unit)
+
         return list_units
         
     def get_MappingHub(self) -> MeaRMap_Hub:
         return self._MappingHub
         
-    def update_tree(self):
+    def update_tree(self, keep_selection:bool=True):
+        # Store the current selections
+        list_unitID = [unit.get_unit_id() for unit in self.get_selected_MappingUnit()]
+        
         self._tree_hub.delete(*self._tree_hub.get_children())
         list_unit_ids, list_unit_names, list_metadata, list_num_measurements = self._MappingHub.get_summary_units()
         for id, name, metadata, num_measurements in zip(list_unit_ids, list_unit_names, list_metadata, list_num_measurements):
             self._tree_hub.insert("", "end", values=(id, name, metadata, num_measurements))
             
+        # Set the selection back to the previous selection
+        if keep_selection: self.set_selection_unitID(list_unitID)
+        
+    def set_selection_unitID(self, list_unitID:list[str]|str, clear_previous:bool=True):
+        """
+        Sets the selection in the treeview to the given unit IDs.
+
+        Args:
+            list_unitID (list[str]|str): The list of unit IDs to select or a single unit ID.
+            clear_previous (bool): Whether to clear the previous selection.
+        """
+        if not isinstance(list_unitID, list): list_unitID = [list_unitID]
+        if clear_previous:
+            [self._tree_hub.selection_remove(item) for item in self._tree_hub.get_children()]
+            
+        for item in self._tree_hub.get_children():
+            if self._tree_hub.item(item, "values")[0] in list_unitID:
+                self._tree_hub.selection_add(item)
+                
     def append_MappingUnit(self, unit: MeaRMap_Unit, persist:bool=True):
         """
         Append a MappingMeasurement_Unit to the MappingMeasurement_Hub
@@ -234,6 +258,16 @@ class Frm_DataHub_Mapping(tk.Frame):
                     "'Unit name' already exists", "'Unit name' already exists!\nEnter a new 'unit name':",
                     default=unit.get_unit_name())
                 unit.set_unitName_and_unitID(new_unitName)
+    
+    def extend_MappingUnit(self, list_unit:list[MeaRMap_Unit], persist:bool=True):
+        """
+        Extend a MappingMeasurement_Unit in the MappingMeasurement_Hub
+        
+        Args:
+            list_unit (list[MappingMeasurement_Unit]): The unit to extend
+            persist (bool, optional): If True, will ask for a new unit ID if the unit ID does not exist. Defaults to True.
+        """
+        for unit in list_unit: self.append_MappingUnit(unit, persist=persist)
     
     @thread_assign
     def rename_unit(self):
@@ -313,14 +347,7 @@ class Frm_DataHub_Mapping(tk.Frame):
     def load_dataHub(self) -> threading.Thread:
         try:
             self._btn_load_MappingHub.config(state=tk.DISABLED, text="Loading...")
-            # q_load = queue.Queue()
             MeaRMap_Handler().load_choose(mappingHub=self._MappingHub)
-            # mappingHub_loaded:MappingMeasurement_Hub = q_load.get()[0]
-            # for unit_id in mappingHub_loaded.get_list_MappingUnit_ids():
-            #     unit = mappingHub_loaded.get_MappingUnit(unit_id)
-            #     self.append_MappingUnit(unit=unit, persist=False)
-            
-            # self._MappingHub = q_load.get()[0]
             messagebox.showinfo("Load Mapping Hub", "Mapping Hub loaded successfully")
         except Exception as e:
             print('Error in load_dataHub:\n', e)

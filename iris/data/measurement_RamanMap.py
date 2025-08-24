@@ -882,12 +882,13 @@ class MeaRMap_Hub():
         idx = self._dict_mappingMeasurementUnits[self._unit_id_key].index(unit_id)
         return self._dict_mappingMeasurementUnits['measurement_unit'][idx]
     
-    def append_mapping_unit(self,mapping_unit:MeaRMap_Unit) -> None:
+    def append_mapping_unit(self,mapping_unit:MeaRMap_Unit,notify:bool=True) -> None:
         """
         Appends a mapping_measurement_unit object into the mapping_measurements dictionary.
         
         Args:
             mapping_unit (MappingMeasurement_Unit): MappingMeasurement_Unit object to be stored
+            notify (bool): Flag to indicate if observers should be notified. Default is True.
         """
         assert isinstance(mapping_unit, MeaRMap_Unit), 'append_mapping_measurement_unit: The input data type is not correct. Expected mapping_measurement_unit object.'
         # assert measurement_unit.check_measurement_and_metadata_exist(), 'append_mapping_measurement_unit: The measurement data or metadata does not exist.'
@@ -901,9 +902,19 @@ class MeaRMap_Hub():
         self._dict_mappingMeasurementUnits['measurement_unit'].append(mapping_unit)
         
         self._dict_mappingUnit_NameID[mapping_unit.get_unit_name()] = mapping_unit.get_unit_id()
+
+        if notify: self._notify_observers()
         
+    def extend_mapping_unit(self,list_mapping_unit:list[MeaRMap_Unit]) -> None:
+        """
+        Extends the mapping_measurement_unit objects in the mapping_measurements dictionary.
+
+        Args:
+            list_mapping_unit (list[MeaRMap_Unit]): List of MappingMeasurement_Unit objects to be added.
+        """
+        [self.append_mapping_unit(unit, notify=False) for unit in list_mapping_unit]
         self._notify_observers()
-    
+        
     def rename_mapping_unit(self,unit_id:str,new_name:str) -> None:
         """
         Renames the mapping_measurement_unit object in the mapping_measurements dictionary
