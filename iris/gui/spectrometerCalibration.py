@@ -65,7 +65,7 @@ class sFrm_wavelength_calibration(tk.Frame):
         self._dataHub_Plus.grid(row=0, column=1, sticky='nsew')
         
         # Bind the RamanMeasurement selection event to the peak finding plotter
-        self._dataHub_Plus.set_RMSelection_interactive(callback=self._RMselection_callback)
+        self._dataHub_Plus.add_observer_RM_selection(callback=self._RMselection_callback)
         
     # >> Peak finding setup <<
         # Widget setup

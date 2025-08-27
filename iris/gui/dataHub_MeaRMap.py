@@ -93,9 +93,6 @@ class Frm_DataHub_Mapping(tk.Frame):
         self._btn_save_MappingHub.grid(row=2, column=0, sticky="nsew")
         self._btn_load_MappingHub.grid(row=2, column=1, sticky="nsew")
         
-        # Interaction/callback setup
-        self._list_MappingHub_load_callbacks = []
-        
         # Grid configuration
         frm_tree.grid_columnconfigure(0, weight=1)
         frm_tree.grid_rowconfigure(0, weight=1)
@@ -124,6 +121,12 @@ class Frm_DataHub_Mapping(tk.Frame):
         self._flg_isrunning.set()
         self._flg_issaving = threading.Event()
         self._thread_autosave = self._autosave_dataHub(suppress_errors=not autosave)
+        
+        # Interaction/callback setup
+        self._list_observer_load = []
+        self._list_observer_selection = []
+        
+        self._tree_hub.bind("<<TreeviewSelect>>", lambda event: self._notify_observer_selection())
         
     @thread_assign
     def _autosave_dataHub(self, suppress_errors:bool=False) -> threading.Thread:
@@ -176,12 +179,35 @@ class Frm_DataHub_Mapping(tk.Frame):
         self._tree_scroll_v.config(command=self._tree_hub.yview)
         self._tree_scroll_h.config(command=self._tree_hub.xview)
         
-    def set_MappingHub_load_callback(self, callback:Callable):
+    def add_observer_load(self, callback:Callable):
         """
         Sets a callback function to run after loading the MappingMeasurement_Hub
         """
         assert callable(callback), "callback must be a callable function"
-        self._list_MappingHub_load_callbacks.append(callback)
+        self._list_observer_load.append(callback)
+        
+    def remove_observer_selection(self, callback:Callable):
+        """
+        Removes a callback function from the list of selection callbacks
+        """
+        if callback in self._list_observer_selection:
+            try: self._list_observer_selection.remove(callback)
+            except Exception as e: print('Error in removing selection callback:', e)
+        
+    def _notify_observer_selection(self):
+        """
+        Run all the callbacks in the list when a MappingMeasurement_Unit is selected
+        """
+        for callback in self._list_observer_selection:
+            try: callback()
+            except Exception as e: print('Error in selection callback:', e)
+        
+    def add_observer_selection(self, callback:Callable):
+        """
+        Sets a callback function to run when the user selects a MappingMeasurement_Unit in the treeview
+        """
+        assert callable(callback), "callback must be a callable function"
+        self._list_observer_selection.append(callback)
         
     def get_tree(self) -> ttk.Treeview:
         return self._tree_hub
@@ -354,7 +380,7 @@ class Frm_DataHub_Mapping(tk.Frame):
             messagebox.showerror("Error", "Error in loading Mapping Hub\n" + str(e))
         finally:
             self.update_tree()
-            [callback() for callback in self._list_MappingHub_load_callbacks]
+            [callback() for callback in self._list_observer_load]
             self._btn_load_MappingHub.config(state=tk.NORMAL, text="Load Mapping Hub")
         
     @thread_assign
@@ -417,7 +443,7 @@ class Frm_DataHub_Mapping(tk.Frame):
         """
         self._MappingHub = mappingHub
         self.update_tree()
-        for callback in self._list_MappingHub_load_callbacks:
+        for callback in self._list_observer_load:
             try: callback()
             except Exception as e: print('set_mappingHub: Error in callback: ', e)
     
@@ -520,10 +546,10 @@ class Frm_DataHub_Mapping_Plus(tk.Frame):
         self._lbl_statusbar.grid(row=1, column=0, sticky="nsew")
         
         # Interactive widget setup
-        self._tree_MappingHub.bind("<ButtonRelease-1>", lambda event: self._Unitselection_callbacks())
-        self._tree_MappingUnit.bind("<ButtonRelease-1>", lambda event: self._RMselection_callbacks())
-        self._list_Unitsel_callbacks = [self._set_unit_dataHub]
-        self._list_RMsel_callbacks = []
+        self._tree_MappingHub.bind("<ButtonRelease-1>", lambda event: self._notify_observer_unit_selection())
+        self._tree_MappingUnit.bind("<ButtonRelease-1>", lambda event: self._notify_observer_RM_selection())
+        self._list_observer_unit_selection = [self._set_unit_dataHub]
+        self._list_observer_RamanMea_selection = []
         
         # Grid configuration
         self.grid_columnconfigure(0, weight=1)
@@ -536,31 +562,31 @@ class Frm_DataHub_Mapping_Plus(tk.Frame):
         self._flg_updated_dictRM = threading.Event()
         self._flg_updated_dictTree = threading.Event()
         
-    def _RMselection_callbacks(self):
+    def _notify_observer_RM_selection(self):
         """
         Run all the callbacks in the list when a RamanMeasurement is selected
         """
-        for callback in self._list_RMsel_callbacks: callback()
+        for callback in self._list_observer_RamanMea_selection: callback()
         
-    def _Unitselection_callbacks(self):
+    def _notify_observer_unit_selection(self):
         """
         Run all the callbacks in the list when a unit is selected
         """
-        for callback in self._list_Unitsel_callbacks: callback()
+        for callback in self._list_observer_unit_selection: callback()
         
-    def set_RMSelection_interactive(self, callback):
+    def add_observer_RM_selection(self, callback):
         """
         Sets a callback function to run when the user selects a RamanMeasurement in the unit treeview
         """
         assert callable(callback), "callback must be a callable function"
-        self._list_RMsel_callbacks.append(callback)
+        self._list_observer_RamanMea_selection.append(callback)
         
-    def set_UnitSelection_interactive(self, callback):
+    def add_observer_unit_selection(self, callback):
         """
         Sets a callback function to run when the user selects a MappingMeasurement_Unit in the hub treeview
         """
         assert callable(callback), "callback must be a callable function"
-        self._list_Unitsel_callbacks.append(callback)
+        self._list_observer_unit_selection.append(callback)
         
     def set_mappingHub(self, mappingHub:MeaRMap_Hub):
         """
@@ -746,9 +772,13 @@ def test_dataHub():
     datahub.pack()
     
     mappinghub = generate_dummy_mappingHub(numx=2, numy=2, repeat=1)
+    mappinghub.test_generate_dummy()
     datahub.set_MappingHub(mappinghub)
+    datahub.add_observer_selection(lambda: print("Selection changed:", [unit.get_unit_name() for unit in datahub.get_selected_MappingUnit()]))
     
     root.mainloop()
+    
+    os._exit(0)  # Force exit to kill all threads
     
 if __name__ == '__main__':
     test_dataHub()

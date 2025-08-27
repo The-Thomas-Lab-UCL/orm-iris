@@ -282,9 +282,9 @@ class EventHandler():
         self._list_callback_mea = []
         
         # Set the flags to the respective functions
-        self._dataHub.set_MappingHub_load_callback(self._flg_update_hub.set)
-        self._dataHubPlus.set_RMSelection_interactive(self._flg_update_mea.set)
-        self._dataHubPlus.set_UnitSelection_interactive(self._flg_update_unit.set)
+        self._dataHub.add_observer_load(self._flg_update_hub.set)
+        self._dataHubPlus.add_observer_RM_selection(self._flg_update_mea.set)
+        self._dataHubPlus.add_observer_unit_selection(self._flg_update_unit.set)
         
         # Set threads to constantly check the flags
         self._thd_AutoUpdate_hubload = threading.Thread(target=self._auto_update_Hub)
@@ -305,9 +305,9 @@ class EventHandler():
         
     def initialise_callbacks(self):
         # Set the flags to the respective functions
-        self._dataHub.set_MappingHub_load_callback(self._flg_update_hub.set)
-        self._dataHubPlus.set_RMSelection_interactive(self._flg_update_mea.set)
-        self._dataHubPlus.set_UnitSelection_interactive(self._flg_update_unit.set)
+        self._dataHub.add_observer_load(self._flg_update_hub.set)
+        self._dataHubPlus.add_observer_RM_selection(self._flg_update_mea.set)
+        self._dataHubPlus.add_observer_unit_selection(self._flg_update_unit.set)
         self._heatmapPlotterInteractive.set_click_callback(self._flg_update_mea_sel.set)
         
     def trigger_update_hub(self):
