@@ -236,6 +236,32 @@ class MeaRaman():
             self._flg_uptodate = True
         return self._flg_uptodate
     
+    def get_intensity(self, wavelength:float|None=None, raman_shift:float|None=None) -> float:
+        """
+        Retrieves the intensity at a specific wavelength.
+
+        Args:
+            wavelength (float | None, optional): The wavelength to search for. Defaults to None.
+            raman_shift (float | None, optional): The Raman shift value to retrieve. Defaults to None.
+
+        Returns:
+            float: The intensity at the specified wavelength.
+        """
+        if not any([isinstance(wavelength,(type(None),int,float)),isinstance(raman_shift,(type(None),int,float))]):
+            raise ValueError("Either 'wavelength' or 'raman_shift' must be provided")
+        if all([isinstance(wavelength,(int,float)),isinstance(raman_shift,(int,float))]):
+            raise ValueError("Only one of 'wavelength' or 'raman_shift' should be provided")
+        
+        if raman_shift is not None:
+            # If raman_shift is provided, convert it to wavelength
+            wavelength = convert_ramanshift_to_wavelength(raman_shift, self.get_laser_params()[1])
+        
+        idx = self.get_wavelength_index(wavelength)
+        
+        intensity = self._spectrum_analysed[self.label_intensity][idx]
+        
+        return intensity
+
     def get_wavelength_index(self,wavelength:float) -> int:
         """
         Returns the index of the given wavelength in the spectrum (if it does not exist, returns the closest index)
@@ -247,10 +273,13 @@ class MeaRaman():
             int: index of the wavelength in the spectrum
         """
         assert isinstance(wavelength,(int,float)), 'wavelength should be an integer or float'
-        if len(self._spectrum_rawlist) == 0: raise ValueError('No measurements have been taken yet')
+        if len(self._spectrum_rawlist) == 0 and len(self._spectrum_analysed) == 0: raise ValueError('No measurements have been taken yet')
+        
+        if len(self._spectrum_rawlist) == 0: spectrum = self._spectrum_analysed
+        else: spectrum = self._spectrum_rawlist[0]
         
         # Get the wavelength list
-        wavelength_list = self._spectrum_rawlist[0][self.label_wavelength].values
+        wavelength_list = spectrum[self.label_wavelength].values
         # Get the index of the closest wavelength
         idx = bisect.bisect_left(wavelength_list,wavelength)
         

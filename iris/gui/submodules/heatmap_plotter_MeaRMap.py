@@ -33,6 +33,7 @@ from iris.utils.general import *
 from iris.data.measurement_RamanMap import MeaRMap_Hub,MeaRMap_Unit, MeaRMap_Plotter
 
 from iris.gui import AppPlotEnum
+from iris import DataAnalysisConfigEnum as DAEnum
 
 class Frm_MappingMeasurement_Plotter(tk.Frame):
     def __init__(self,master,mappingHub:MeaRMap_Hub,
@@ -384,7 +385,6 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
             current_value = convert_ramanshift_to_wavelength(float(current_value), laser_wavelength)
 
         current_idx = int(np.argmin(np.abs(np.array(list_values)-float(current_value)))) if current_value else 0
-        print(f'Current Spectral Position: {current_value}, Index: {current_idx}')
             
         if current_idx < 0 or current_idx >= len(list_values):
             current_idx = 0
@@ -442,7 +442,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         but will not be visible in the GUI, instead, it will show a message
         """
         loc = self._combo_plot_mappingUnitName.grid_info()
-        # self._combo_plot_mappingUnitName.grid_forget()
+        self._combo_plot_mappingUnitName.grid_remove()
         frm = self._combo_plot_mappingUnitName.master
         lbl = tk.Label(frm,text=message,bg='yellow')
         lbl.grid(row=loc['row'],column=loc['column'],columnspan=loc['columnspan'])
@@ -736,6 +736,17 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         except TimeoutError: pass
         except Exception as e: print('_auto_update_plot',e)
     
+    def get_current_wavelength(self) -> float|None:
+        """
+        Retrieves the current wavelength being plotted.
+        
+        Returns:
+            float|None: The current wavelength or None if not set.
+        """
+        spectralPosition_idx = self._combo_plot_SpectralPosition.current()
+        list_wavelength = self._current_mappingUnit.get_list_wavelengths()
+        return list_wavelength[spectralPosition_idx] if spectralPosition_idx is not None else None
+    
     def _retrieve_click_idxcol(self,event:matplotlib.backend_bases.MouseEvent|Any):
         """
         Retrieve the index and the column where the figure is clicked
@@ -744,11 +755,16 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
             coorx,coory = event.xdata,event.ydata
             if coorx is None or coory is None: return
             
-            self._lbl_coordinates.config(text=f"Clicked: (x={coorx:.3f}, y={coory:.3f})")
-            
             clicked_measurementId = self._current_mappingUnit.get_measurementId_from_coor(coor=(coorx,coory))
             ramanMea = self._current_mappingUnit.get_RamanMeasurement(clicked_measurementId)
+            # intensity = f'{ramanMea.get_intensity(wavelength=self.get_current_wavelength()):.1f}'
+            try: intensity = f'{ramanMea.get_intensity(wavelength=self.get_current_wavelength()):.1f}'
+            except Exception as e:
+                print('_retrieve_click_idxcol: ',e)
+                intensity = 'error'
             
+            self._lbl_coordinates.config(text=f"Clicked: x={coorx:.3f}, y={coory:.3f}, intensity={intensity}")
+
             if self._callback_click:
                 self._callback_click((clicked_measurementId,(coorx,coory)))
 

@@ -971,6 +971,15 @@ class MeaRMap_Hub():
         
         self._notify_observers()
         
+    def delete_all_mapping_units(self) -> None:
+        """
+        Deletes all mapping_measurement_unit objects from the mapping_measurements dictionary.
+        """
+        self._dict_mappingMeasurementUnits[self._unit_id_key].clear()
+        self._dict_mappingMeasurementUnits['measurement_unit'].clear()
+        self._dict_mappingUnit_NameID.clear()
+        self._notify_observers()
+
     def shift_xycoordinate_timestamp(self, unit_id:str, timeshift_us:int) -> str:
         """
         Shifts the timestamp of the measurement data based on the given timeshift. The timeshift
