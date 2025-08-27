@@ -36,8 +36,8 @@ from iris.gui import AppPlotEnum
 from iris import DataAnalysisConfigEnum as DAEnum
 
 class Frm_MappingMeasurement_Plotter(tk.Frame):
-    def __init__(self,master,mappingHub:MeaRMap_Hub,
-                 callback_click:Callable[[], tuple[str,tuple[float,float]]]|None=None,
+    def __init__(self, master, mappingHub:MeaRMap_Hub,
+                 callback_click:Callable[[tuple[str,tuple[float,float]]], None]|None=None,
                  figsize_pxl:tuple=(440,400)):
         """
         Initialise the plot_mapping_measurements class
@@ -45,7 +45,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         Args:
             master (tk.Tk): Parent widget
             mappingHub (MappingMeasurement_Hub): Mapping measurement hub to be used for plotting.
-            callback_click (Callable[[], tuple[str,tuple[float,float]]]|None): Callback function to be called on click events,
+            callback_click (Callable[[tuple[str,tuple[float,float]]], None]|None): Callback function to be called on click events,
                 it will call the function with the measurement ID and the coordinates of the click.
             figsize_pxl (tuple, optional): Size of the figure in pixels. Defaults to (440,400).
         """
@@ -68,7 +68,6 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         self._frm_generalControls.grid(row=3,column=0,sticky='nsew')
         
     # >>> Store the parameters for re-initialisation <<<
-        self._master = master
         self._figsize_pxl = figsize_pxl
         self._dpi = plt.rcParams['figure.dpi']
         self._figsize_in = (self._figsize_pxl[0]/self._dpi,self._figsize_pxl[1]/self._dpi)
@@ -83,7 +82,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         
         # Latest measurement data storage for plotting purposes only
         self._current_mappingUnit:MeaRMap_Unit = MeaRMap_Unit()
-        self._assign_new_mappingUnit(self._current_mappingUnit)
+        self._current_mappingUnit.add_observer(self.replot_heatmap)
         
         # Set up a queue and threading to analyse the data for plotting
         self._callback_click:Callable|None = callback_click
@@ -94,7 +93,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
     # >>> Plotter setup <<<
         
     # > Matplotlib plot setup <
-        self._bool_RamanShiftCombobox = tk.BooleanVar(value=True) # Boolean variable to plot Raman shift
+        self._bool_plot_in_RamanShift = tk.BooleanVar(value=True) # Boolean variable to plot Raman shift
         self._plt_fig, self._plt_ax = plt.subplots(1,1,figsize=self._figsize_in) # Figure object for the mapping plot
         
         self._plt_cbar = None  # Colorbar figure object for the mapping plot
@@ -122,7 +121,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         
         # Bind selections to plot the latest measurement_data df
         self._combo_plot_mappingUnitName.bind("<<ComboboxSelected>>",func=lambda event:
-            self._update_currentMappingUnit())
+            self._update_currentMappingUnit_observer(replot=True))
         self._combo_plot_SpectralPosition.bind("<<ComboboxSelected>>",func=lambda event:
             self.replot_heatmap())
         self._combo_plot_SpectralPosition.bind("<Return>",func=lambda event:
@@ -133,7 +132,10 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         self._lbl_coordinates.grid(row=row,column=1,sticky='we')
         
         # Set the callbacks
-        self._mappingHub.add_observer(self.refresh_plotter_options)
+        self._mappingHub.add_observer(lambda: self.refresh_comboboxes(
+            preserve_unit_name=self._combo_plot_mappingUnitName.get(),
+            preserve_wavelength=self.get_current_wavelength(),
+        ))
 
     def _init_plot_control_widgets(self):
         """
@@ -157,7 +159,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         
         # > Set up the basic widgets
         chk_RamanShiftCombobox = tk.Checkbutton(frm_plotControl_basic,text='Plot Raman-shift',
-            variable=self._bool_RamanShiftCombobox,onvalue=True,offvalue=False,
+            variable=self._bool_plot_in_RamanShift,onvalue=True,offvalue=False,
             command=self._switch_plot_RamanShift)
         chk_RamanShiftCombobox.select()
         self._lbl_SpectralPosition = tk.Label(frm_plotControl_basic,text='cm^-1',width=7)
@@ -319,10 +321,6 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         try: plt.close(fig=self._plt_fig)
         except Exception as e: print('_reinitialise_auto_plot',e)
         
-        self._plt_fig = None
-        self._plt_ax = None
-        self._plt_cbar = None
-        
         # Reset the plot    
         self._plt_fig,self._plt_ax = plt.subplots(1,1,figsize=self._figsize_in)
         
@@ -357,84 +355,61 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         
         self._lbl_coordinates.config(text='Figures are reset')
     
-    def _assign_new_mappingUnit(self,mappingUnit:MeaRMap_Unit):
+    def _set_current_mappingUnit(self,mappingUnit:MeaRMap_Unit):
+        """
+        Set a new mappingUnit to be observed
+
+        Args:
+            mappingUnit (MeaRMap_Unit): The mapping unit to be set
+        """
+        assert mappingUnit in self._mappingHub.get_list_MappingUnit(),\
+            "This is a private method, only to be used when setting up a new mappingUnit to be observed"\
+            "the mappingUnit set must be obtained from the internal self._mappingHub."
         self._current_mappingUnit = mappingUnit
         self._current_mappingUnit.add_observer(self.replot_heatmap)
         
     def _switch_plot_RamanShift(self):
-        if not self._current_mappingUnit.check_measurement_and_metadata_exist():
-            return
+        if not self._current_mappingUnit.check_measurement_and_metadata_exist(): return
         
-        _,laser_wavelength = self._current_mappingUnit.get_laser_params()
-        if self._bool_RamanShiftCombobox.get():
+        current_wavelength = self._get_current_wavelength_reversed()
+        
+        if self._bool_plot_in_RamanShift.get():
             self._lbl_SpectralPosition.config(text='cm^-1')
         else:
             self._lbl_SpectralPosition.config(text='nm')
         
-        current_value = self._combo_plot_SpectralPosition.get()
-        try: current_value = float(current_value)
-        except: current_value = 0
-        
-        self.refresh_plotter_options()
-        self.refresh_plotter()
-        
-        list_values = [float(val) for val in self._combo_plot_SpectralPosition.cget('values')]
-        if self._bool_RamanShiftCombobox.get():
-            current_value = convert_wavelength_to_ramanshift(float(current_value), laser_wavelength)
-        else:
-            current_value = convert_ramanshift_to_wavelength(float(current_value), laser_wavelength)
-
-        current_idx = int(np.argmin(np.abs(np.array(list_values)-float(current_value)))) if current_value else 0
-            
-        if current_idx < 0 or current_idx >= len(list_values):
-            current_idx = 0
-        self._combo_plot_SpectralPosition.current(current_idx)
+        self.refresh_comboboxes(
+            preserve_unit_name=self._combo_plot_mappingUnitName.get(),
+            preserve_wavelength=current_wavelength
+        )
         
     def _set_combobox_closest_value(self):
         """
         Set the combobox to the closest wavelength to the entered value
-        
-        Returns:
-            tuple: (closest_wavelength,closest_wavelength_idx) of the closest wavelength
         """
-        entered_value = self._combo_plot_SpectralPosition.get()
-        try: # Check if the entered value is a number
-            entered_value = float(entered_value)
-        except:
-            return
-        # Terminology:
-        # Spectral Position: Wavelength or Raman shift
-        # idx: index
-        # tupp: tuple
+        if not self._current_mappingUnit.check_measurement_and_metadata_exist(): return
+        try: current_spectralPosition = float(self._combo_plot_SpectralPosition.get())
+        except Exception as e: print('_set_combobox_closest_value', e); return
         
-        # Get the list of wavelengths
-        tupp_SpecPosition = self._combo_plot_SpectralPosition.cget('values')
-        list_SpecPosition = []
-        for i in range(len(tupp_SpecPosition)):
-            try: list_SpecPosition.append(float(tupp_SpecPosition[i]))
-            except Exception as e: print('_set_combobox_closest_value',e)
-        
-        if len(list_SpecPosition)!=len(tupp_SpecPosition):
-            print("Error: Spectral Position are not in the correct format")
-            return
-        
-        # Find the closest wavelength
-        distance = np.abs(np.array(list_SpecPosition)-entered_value)
-        closest_SpecPos_idx = int(np.argmin(distance))
-        closest_SpecPos = tupp_SpecPosition[closest_SpecPos_idx]
-        
-        # Set the combobox to the closest wavelength and plot the heatmap
-        self._combo_plot_SpectralPosition.current(closest_SpecPos_idx)
-        self.plot_heatmap()
-        return (closest_SpecPos,closest_SpecPos_idx)
+        if self._bool_plot_in_RamanShift.get():
+            idx = self._current_mappingUnit.get_raman_shift_idx(current_spectralPosition)
+        else:
+            idx = self._current_mappingUnit.get_wavelength_idx(current_spectralPosition)
+        self._combo_plot_SpectralPosition.current(idx)
         
     def _reset_plot_combobox(self):
         """
         Resets the status of the combobox for next use cases
         """
+        current_name = self._combo_plot_mappingUnitName.get()
+        current_wavelength = self.get_current_wavelength()
         self._combo_plot_mappingUnitName.configure(values=[],state='readonly')
         self._combo_plot_SpectralPosition.configure(values=[],state='active')
-        self.refresh_plotter_options()
+        
+        self.refresh_comboboxes(
+            preserve_unit_name=current_name,
+            preserve_wavelength=current_wavelength,
+        )
         
     def override_unit_combobox(self, message:str) -> None:
         """
@@ -447,98 +422,66 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         lbl = tk.Label(frm,text=message,bg='yellow')
         lbl.grid(row=loc['row'],column=loc['column'],columnspan=loc['columnspan'])
         
-    def get_plotOptions_selection(self) -> tuple[str,str]:
-        """
-        Get the mappingUnit and spectralPosition selection in the combobox
-        
-        Returns:
-            tuple[str,str]: MappingUnit_ID and SpectralPosition selected
-        """
-        mappingUnit_name = self._combo_plot_mappingUnitName.get()
-        spectralPosition = self._combo_plot_SpectralPosition.get()
-        return (mappingUnit_name,spectralPosition)
-        
-    def set_plotOptions_selection(self,mappingUnit_name:str='',spectralPosition:str=''):
+    def set_combobox_values(self,mappingUnit_name:str|None=None,wavelength:float|None=None) -> None:
         """
         Set the mappingUnit and spectralPosition selection in the combobox
         
         Args:
-            mappingUnit_id (str): MappingUnit_ID to be selected
-            spectralPosition (str): SpectralPosition to be selected
+            mappingUnit_id (str): MappingUnit_ID to be selected. If None, no change is made.
+            wavelength (float): Wavelength to be selected. If None, no change is made.
         """
-        if mappingUnit_name in self._combo_plot_mappingUnitName.cget('values'):
-            self._combo_plot_mappingUnitName.set(mappingUnit_name)
-        if spectralPosition in self._combo_plot_SpectralPosition.cget('values'):
-            self._combo_plot_SpectralPosition.set(spectralPosition)
-            
-        self._update_currentMappingUnit()
-        self.replot_heatmap()
+        current_name = self._combo_plot_mappingUnitName.get()
+        current_wavelength = self.get_current_wavelength()
         
-    def refresh_plotter_options(self) -> bool:
+        if mappingUnit_name is None: mappingUnit_name = current_name
+        if wavelength is None: wavelength = current_wavelength
+            
+        self._update_currentMappingUnit_observer(replot=True)
+        
+    def refresh_comboboxes(self, preserve_unit_name:str|None=None, preserve_wavelength:float|None=None) -> None:
         """
         Refreshes the plotter's combobox according to the mappingUnits in the mappingHub
         
-        Returns:
-            bool: True if the combobox is updated successfully
+        Args:
+            preserve_unit_name (str|None): Unit name to be selected after the refresh if possible.
+            preserve_wavelength (float|None): Wavelength to be selected after the refresh if possible. It will\
+                be set to Raman shift automatically according to the checkbox state.
         """
-    # >>> Get the current mapping unit
-        prev_mappingUnit_name = self._combo_plot_mappingUnitName.get()
-        list_mappingUnit_name = self._mappingHub.get_list_MappingUnit_names()
+        # Check if there are any measurements in the mappingHub for the refresh. Returns if not
+        if not self._mappingHub.check_measurement_exist(): return
+        list_valid_names = [unit.get_unit_name() for unit in self._mappingHub.get_list_MappingUnit()\
+            if unit.check_measurement_and_metadata_exist()]
+        if len(list_valid_names) == 0: return
         
-        if prev_mappingUnit_name in list_mappingUnit_name:
-            mapping_unit = self._mappingHub.get_MappingUnit(unit_name=prev_mappingUnit_name)
-        else: mapping_unit = MeaRMap_Unit()
+        # Get the mappingUnit to be set
+        list_names = self._mappingHub.get_list_MappingUnit_names()
+        if preserve_unit_name in list_valid_names:
+            mappingUnit = self._mappingHub.get_MappingUnit(unit_name=preserve_unit_name)
+        elif self._current_mappingUnit.check_measurement_and_metadata_exist():
+            mappingUnit = self._current_mappingUnit
+        else: mappingUnit = self._mappingHub.get_MappingUnit(unit_name=list_valid_names[0])
+        unit_name = mappingUnit.get_unit_name()
         
-        if not mapping_unit.check_measurement_and_metadata_exist():
-            flg_found = False
-            for name in list_mappingUnit_name:
-                mapping_unit = self._mappingHub.get_MappingUnit(unit_name=name)
-                if mapping_unit.check_measurement_and_metadata_exist():
-                    flg_found = True
-                    self._assign_new_mappingUnit(mapping_unit)
-                    break
-            if not flg_found:
-                self._assign_new_mappingUnit(MeaRMap_Unit())
-                return False
-            
-        mapping_unit:MeaRMap_Unit
+        # Get the wavelength or Raman shift list to be set
+        current_wavelength = self.get_current_wavelength()
+        if isinstance(preserve_wavelength, (int,float)): preserve_wavelength = float(preserve_wavelength)
+        elif isinstance(current_wavelength, (int,float)): preserve_wavelength = float(current_wavelength)
+        else: preserve_wavelength = 0.0
         
-    # >>> Build the new list
-        _,laser_wavelength = mapping_unit.get_laser_params()
-        list_wavelengths = mapping_unit.get_list_wavelengths()
-        spectralPosition = self._combo_plot_SpectralPosition.get()
-        try:
-            pos = float(spectralPosition)
-            wavelength_prev = pos if not self._bool_RamanShiftCombobox.get() else convert_ramanshift_to_wavelength(pos,laser_wavelength)
-            ramanshift_prev = convert_wavelength_to_ramanshift(wavelength_prev,laser_wavelength)
-        except ValueError:
-            wavelength_prev,ramanshift_prev = self._get_closest_selected_wavelength(mapping_unit)
+        if self._bool_plot_in_RamanShift.get(): list_spectral_position = mappingUnit.get_list_Raman_shift()
+        else: list_spectral_position = mappingUnit.get_list_wavelengths()
+        idx_spectral_position = mappingUnit.get_wavelength_idx(preserve_wavelength)
+        list_spectral_position = [str(pos) for pos in list_spectral_position]
         
-        if self._bool_RamanShiftCombobox.get():
-            list_RamanShift = [convert_wavelength_to_ramanshift(float(wavelength),laser_wavelength) for wavelength in list_wavelengths]
-            list_SpectralPosition = list_RamanShift
-        else:
-            list_SpectralPosition = list_wavelengths
-            
-        list_SpectralPosition = [f'{pos:.1f}' for pos in list_SpectralPosition]
-        self._combo_plot_mappingUnitName.configure(values=list_mappingUnit_name,state='readonly')
-        self._combo_plot_SpectralPosition.configure(values=list_SpectralPosition,state='active')
-
-        try:
-            if prev_mappingUnit_name in list_mappingUnit_name:
-                self._combo_plot_mappingUnitName.set(prev_mappingUnit_name)
-            else: self._combo_plot_mappingUnitName.current(0)
-            if wavelength_prev in list_wavelengths:
-                spectralPosition = wavelength_prev if not self._bool_RamanShiftCombobox.get() else ramanshift_prev
-                pos_idx = int(np.argmin(np.abs(np.array(list_SpectralPosition).astype(float)-float(spectralPosition))))
-                self._combo_plot_SpectralPosition.current(pos_idx)
-            else:self._combo_plot_SpectralPosition.current(0)
-        except Exception as e:
-            print('Error in refresh_plotter_options: ',e)
-            if len(list_mappingUnit_name)>0: self._combo_plot_mappingUnitName.current(0)
-            if len(list_SpectralPosition)>0: self._combo_plot_SpectralPosition.current(0)
+        # Set the obtained lists
+        self._combo_plot_mappingUnitName.configure(values=[])
+        self._combo_plot_SpectralPosition.configure(values=[])
+        self._combo_plot_mappingUnitName.configure(values=list_names)
+        self._combo_plot_SpectralPosition.configure(values=list_spectral_position)
         
-        return True
+        # Set the original valies
+        self._combo_plot_mappingUnitName.set(unit_name)
+        self._combo_plot_SpectralPosition.current(idx_spectral_position)
     
     def replot_heatmap(self,flg_suppress_err:bool=False) -> threading.Thread|None:
         """
@@ -557,7 +500,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         except Exception as e:
             if not flg_suppress_err: print('replot_heatmap',e)
         
-    def get_selected_mappingUnit(self) -> MeaRMap_Unit:
+    def get_selected_mappingUnit(self) -> MeaRMap_Unit|None:
         """
         Get the currently selected mapping unit from the combo box.
         
@@ -566,25 +509,25 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         """
         return self._current_mappingUnit
     
-    def _update_currentMappingUnit(self):
+    def _update_currentMappingUnit_observer(self, replot:bool) -> None:
         """
-        Update the currently selected mapping unit.
-        """
-        self._current_mappingUnit.remove_observer(self.replot_heatmap)
+        Update the currently selected mapping unit according to the new combobox selection
         
+        Args:
+            replot (bool): If True, the heatmap will be replotted after updating the mapping unit.
+        """
+        # Remove observer
+        try: self._current_mappingUnit.remove_observer(self.replot_heatmap)
+        except: pass
+        
+        # Get the new mappingUnit
         mappingUnit_name = self._combo_plot_mappingUnitName.get()
-        dict_nameToID = self._mappingHub.get_dict_nameToID()
-        
-        mappingUnit_id = dict_nameToID[mappingUnit_name]
-        mappingUnit = self._mappingHub.get_MappingUnit(mappingUnit_id)
-        
-        self._current_mappingUnit = mappingUnit
+        self._current_mappingUnit = self._mappingHub.get_MappingUnit(unit_name=mappingUnit_name)
         self._current_mappingUnit.add_observer(self.replot_heatmap)
         
-        # Update the spectral position combobox
-        self._reset_plot_combobox()
+        self.refresh_comboboxes()
         
-        self.replot_heatmap()
+        if replot: self.replot_heatmap()
     
     def plot_heatmap(self):
         """
@@ -596,8 +539,8 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
             "plot_heatmap: Measurement data is not of the correct type. Expected: MappingMeasurement_Hub"
         
         mappingUnit = self._current_mappingUnit
-        if not mappingUnit.check_measurement_and_metadata_exist(): return
-        
+        if not isinstance(mappingUnit, MeaRMap_Unit) or not mappingUnit.check_measurement_and_metadata_exist(): return
+
         self._flg_isplotting.set()
         
         # >>> Find the wavelength
@@ -646,12 +589,12 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         try: spectralPosition = float(self._combo_plot_SpectralPosition.get())
         except ValueError: spectralPosition = 0.0
         
-        if not self._bool_RamanShiftCombobox.get(): wavelength = spectralPosition
+        if not self._bool_plot_in_RamanShift.get(): wavelength = spectralPosition
         else: wavelength = convert_ramanshift_to_wavelength(spectralPosition, laser_wavelength)    
         wavelength = list_wavelength[np.argmin(np.abs(np.array(list_wavelength)-wavelength))]
         ramanshift = convert_wavelength_to_ramanshift(wavelength, laser_wavelength)
         
-        spectralPosition = wavelength if not self._bool_RamanShiftCombobox.get() else ramanshift
+        spectralPosition = wavelength if not self._bool_plot_in_RamanShift.get() else ramanshift
         self._combo_plot_SpectralPosition.set(f'{spectralPosition:.1f}')
         
         return wavelength, ramanshift
@@ -684,7 +627,8 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         Save the current plot data as a csv file, asks the user for the file path
         """
         try:
-            if not self._current_mappingUnit.check_measurement_and_metadata_exist(): return
+            if not isinstance(self._current_mappingUnit, MeaRMap_Unit) or\
+                not self._current_mappingUnit.check_measurement_and_metadata_exist(): return
             filepath = filedialog.asksaveasfilename(defaultextension='.csv',
                 filetypes=[('CSV files','*.csv')])
             
@@ -736,6 +680,27 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         except TimeoutError: pass
         except Exception as e: print('_auto_update_plot',e)
     
+    def _get_current_wavelength_reversed(self) -> float|None:
+        """
+        Retrieves the current wavelength being plotted. REVERSED LOGIC!!!
+        ONLY USED FOR THE SWITCHING OF RAMAN SHIFT AND WAVELENGTH because of 
+        how the boolean variable is always switched before this function is called.
+        
+        Returns:
+            float|None: The current wavelength or None if not set.
+        """
+        if not isinstance(self._current_mappingUnit, MeaRMap_Unit) or\
+            not self._current_mappingUnit.check_measurement_and_metadata_exist():
+            ret = None
+        else:
+            try: current_val = float(self._combo_plot_SpectralPosition.get())
+            except Exception as e: print('get_current_wavelength',e); return None
+            if not self._bool_plot_in_RamanShift.get():
+                ret = self._current_mappingUnit.convert(Raman_shift=current_val)
+            else: ret = current_val
+            ret = self._current_mappingUnit.get_closest_wavelength(ret)
+        return ret
+    
     def get_current_wavelength(self) -> float|None:
         """
         Retrieves the current wavelength being plotted.
@@ -743,21 +708,29 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         Returns:
             float|None: The current wavelength or None if not set.
         """
-        spectralPosition_idx = self._combo_plot_SpectralPosition.current()
-        list_wavelength = self._current_mappingUnit.get_list_wavelengths()
-        return list_wavelength[spectralPosition_idx] if spectralPosition_idx is not None else None
-    
+        if not isinstance(self._current_mappingUnit, MeaRMap_Unit) or\
+            not self._current_mappingUnit.check_measurement_and_metadata_exist():
+            ret = None
+        else:
+            try: current_val = float(self._combo_plot_SpectralPosition.get())
+            except Exception as e: print('get_current_wavelength',e); return None
+            if self._bool_plot_in_RamanShift.get():
+                ret = self._current_mappingUnit.convert(Raman_shift=current_val)
+            else: ret = current_val
+            ret = self._current_mappingUnit.get_closest_wavelength(ret)
+        return ret
+
     def _retrieve_click_idxcol(self,event:matplotlib.backend_bases.MouseEvent|Any):
         """
         Retrieve the index and the column where the figure is clicked
         """
-        if event.inaxes and self._current_mappingUnit.check_measurement_and_metadata_exist():
+        if event.inaxes and isinstance(self._current_mappingUnit, MeaRMap_Unit)\
+            and self._current_mappingUnit.check_measurement_and_metadata_exist():
             coorx,coory = event.xdata,event.ydata
             if coorx is None or coory is None: return
             
             clicked_measurementId = self._current_mappingUnit.get_measurementId_from_coor(coor=(coorx,coory))
             ramanMea = self._current_mappingUnit.get_RamanMeasurement(clicked_measurementId)
-            # intensity = f'{ramanMea.get_intensity(wavelength=self.get_current_wavelength()):.1f}'
             try: intensity = f'{ramanMea.get_intensity(wavelength=self.get_current_wavelength()):.1f}'
             except Exception as e:
                 print('_retrieve_click_idxcol: ',e)

@@ -170,7 +170,7 @@ class Frm_HeatmapOverlay(Frm_MappingMeasurement_Plotter):
         self._btn_restart_threads.config(command=self._reinitialise_auto_plot)
         
     @thread_assign
-    def _reinitialise_auto_plot(self):
+    def _reinitialise_auto_plot(self) -> threading.Thread: # pyright: ignore[reportReturnType]
         thread = super()._reinitialise_auto_plot()
         thread.join()
         

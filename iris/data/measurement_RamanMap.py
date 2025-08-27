@@ -554,6 +554,69 @@ class MeaRMap_Unit():
         list_wavelengths = df[self._dflabel_wavelength].tolist()
         return list_wavelengths
     
+    def get_list_Raman_shift(self) -> list[float]:
+        """
+        Returns the list of Raman shifts stored in the measurement data
+        
+        Returns:
+            list: list of Raman shifts
+        """
+        list_wavelengths = self.get_list_wavelengths()
+        list_raman_shift = [convert_wavelength_to_ramanshift(wavelength=wvl,\
+            excitation_wavelength=self.get_laser_params()[1]) for wvl in list_wavelengths]
+        return list_raman_shift
+    
+    def convert(self, wavelength:float|None=None, Raman_shift:float|None=None):
+        """
+        Converts between wavelength and Raman shift by giving EITHER one based on
+        the laser params stored internally.
+        
+        Args:
+            wavelength (float | None, optional): Wavelength to convert. Defaults to None.
+            Raman_shift (float | None, optional): Raman shift to convert. Defaults to None.
+        """
+        if (isinstance(wavelength,(int,float)) and isinstance(Raman_shift,(int,float)))\
+            or (isinstance(wavelength, type(None)) and isinstance(Raman_shift, type(None))):
+            raise ValueError('convert: Please provide either wavelength or Raman shift, not both or neither.')
+        
+        if isinstance(wavelength,(int,float)):
+            return convert_wavelength_to_ramanshift(wavelength,self.get_laser_params()[1])
+        elif isinstance(Raman_shift,(int,float)):
+            return convert_ramanshift_to_wavelength(Raman_shift,self.get_laser_params()[1])
+        else: raise TypeError('Wavelength or Raman shift has to be in integer or float')
+        
+    def get_closest_wavelength(self,wavelength:float) -> float:
+        """
+        Returns the closest wavelength in the list of wavelengths stored in the measurement data
+
+        Args:
+            wavelength (float): wavelength to be retrieved (closest wavelength will be used)
+
+        Returns:
+            float: closest wavelength in the list of wavelengths
+        """
+        assert self._flg_measurement_exist, 'get_closest_wavelength: The measurement data does not exist.'
+        assert isinstance(wavelength, (int, float)), 'get_closest_wavelength: The input data type is not correct. Expected an integer or a float.'
+        
+        wavelength_idx = self.get_wavelength_idx(wavelength=wavelength)
+        wavelength = self.get_list_wavelengths()[wavelength_idx]
+        
+        return wavelength
+    
+    def get_closest_raman_shift(self,raman_shift:float) -> float:
+        """
+        Returns the closest Raman shift in the list of Raman shifts stored in the measurement data
+
+        Args:
+            raman_shift (float): Raman shift to be retrieved (closest Raman shift will be used)
+
+        Returns:
+            float: closest Raman shift in the list of Raman shifts
+        """
+        assert self._flg_measurement_exist and self._flg_metadata_exist, 'get_closest_raman_shift: The measurement or metadata does not exist.'
+        assert isinstance(raman_shift, (int, float)), 'get_closest_raman_shift: The input data type is not correct. Expected an integer or a float.'
+        return self.get_list_Raman_shift()[self.get_wavelength_idx(convert_ramanshift_to_wavelength(raman_shift,self.get_laser_params()[1]))]
+        
     def get_wavelength_idx(self,wavelength:float) -> int:
         """
         Returns the index of the wavelength in the list of wavelengths stored in the measurement data
@@ -578,7 +641,22 @@ class MeaRMap_Unit():
         wavelength_idx = df[self._dflabel_wavelength].tolist().index(closest_wavelength)
         
         return wavelength_idx
-    
+
+    def get_raman_shift_idx(self,raman_shift:float) -> int:
+        """
+        Returns the index of the Raman shift in the list of Raman shifts stored in the measurement data
+
+        Args:
+            raman_shift (float): Raman shift to be retrieved (closest Raman shift will be used)
+
+        Returns:
+            int: index of the Raman shift in the list of Raman shifts
+        """
+        assert self._flg_measurement_exist and self._flg_metadata_exist, 'get_raman_shift_idx: The measurement or metadata does not exist.'
+        assert isinstance(raman_shift, (int, float)), 'get_raman_shift_idx: The input data type is not correct. Expected an integer or a float.'
+        wvl = convert_ramanshift_to_wavelength(raman_shift,self.get_laser_params()[1])
+        return self.get_wavelength_idx(wavelength=wvl)
+
     def get_labels(self) -> tuple:
         """
         Returns the labels for the x, y, z coordinates, and the wavelength and intensity keys

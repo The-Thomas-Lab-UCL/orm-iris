@@ -403,7 +403,7 @@ class EventHandler():
             list_unitname = [unit.get_unit_name() for unit in list_unit]
             
             try:
-                self._heatmapPlotter.set_plotOptions_selection(list_unitname[0])
+                self._heatmapPlotter.set_combobox_values(list_unitname[0])
             except Exception as e: (f'_auto_update_Unit: {e}')
             
             for callback in self._list_callback_unit:
