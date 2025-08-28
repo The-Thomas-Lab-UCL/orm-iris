@@ -29,6 +29,8 @@ from iris.data.measurement_RamanMap import MeaRMap_Hub, MeaRMap_Unit, MeaRMap_Ha
 
 from iris.data import SaveParamsEnum
 
+SEARCHBAR_INIT = 'Search by typing here...'
+
 class Frm_DataHub_Mapping(tk.Frame):
     def __init__(self, master, mappingHub:MeaRMap_Hub|None=None,width_rel:float=1, height_rel:float=1,autosave:bool=False):
         """
@@ -68,7 +70,7 @@ class Frm_DataHub_Mapping(tk.Frame):
         if not os.path.exists(self._temp_savedir): os.makedirs(self._temp_savedir)
         
         # Widgets to show the stored data
-        self._str_search = tk.StringVar(value='')
+        self._str_search = tk.StringVar(value=SEARCHBAR_INIT)
         entry_searchbar = tk.Entry(frm_tree, textvariable=self._str_search)
         self._tree_hub = ttk.Treeview(frm_tree, columns=("Unit ID", "Unit name", "Metadata", "# Measurements"), show="headings",
                                       height=int(10*self._height_rel))
@@ -79,7 +81,7 @@ class Frm_DataHub_Mapping(tk.Frame):
         self._tree_hub.grid(row=1, column=0, sticky="nsew")
         self._tree_scroll_v.grid(row=1, column=1, sticky="ns")
         self._tree_scroll_h.grid(row=2, column=0, sticky="ew")
-
+        
         # Bind keypresses to search
         entry_searchbar.bind("<KeyRelease>", lambda event: self.update_tree(keep_selection=False))
         
@@ -246,24 +248,50 @@ class Frm_DataHub_Mapping(tk.Frame):
     def _filter_by_search(self) -> list[str]:
         """
         Filters the treeview items based on the search query.
+        
+        Returns:
+            list[str]: The filtered list of unit IDs
         """
         search_query = self._str_search.get().lower()
-        list_unit_names = self._MappingHub.get_list_MappingUnit_names()
+        dict_unit_IdNames = {unit.get_unit_id(): unit.get_unit_name().lower()\
+            for unit in self._MappingHub.get_list_MappingUnit()}
+        list_unit_ids = self._MappingHub.get_list_MappingUnit_ids()
+
+        # Return all if the search query is empty
+        if not search_query or search_query == "" or search_query == SEARCHBAR_INIT.lower():
+            return list_unit_ids
         
-        list_matches = process.extract(search_query, list_unit_names, scorer=fuzz.token_set_ratio)
+        # Perform fuzzy matching on the unit names
+        list_matches = process.extract(search_query, dict_unit_IdNames.values(), scorer=fuzz.token_ratio, limit=None)
+        list_matches = sorted(list_matches, key=lambda x: x[1], reverse=True)
         
-        list_matches_id = [self._MappingHub.get_dict_nameToID()[name] for name,_,_ in list_matches]
+        list_matches_id = [
+            unit_id
+            for name, _, _ in list_matches
+            for unit_id, unit_name in dict_unit_IdNames.items()
+            if unit_name == name
+        ]
         
         return list_matches_id
 
     def update_tree(self, keep_selection:bool=True):
         # Store the current selections
         list_unitID = [unit.get_unit_id() for unit in self.get_selected_MappingUnit()]
+        list_matched_ids = self._filter_by_search()
         
         self._tree_hub.delete(*self._tree_hub.get_children())
         list_unit_ids, list_unit_names, list_metadata, list_num_measurements = self._MappingHub.get_summary_units()
-        for id, name, metadata, num_measurements in zip(list_unit_ids, list_unit_names, list_metadata, list_num_measurements):
-            self._tree_hub.insert("", "end", values=(id, name, metadata, num_measurements))
+        
+        for unit_id in list_matched_ids:
+            idx = list_unit_ids.index(unit_id)
+            self._tree_hub.insert("", "end", values=(
+                unit_id,
+                list_unit_names[idx],
+                list_metadata[idx],
+                list_num_measurements[idx]
+            ))
+        # for id, name, metadata, num_measurements in zip(list_unit_ids, list_unit_names, list_metadata, list_num_measurements):
+        #     self._tree_hub.insert("", "end", values=(id, name, metadata, num_measurements))
             
         # Set the selection back to the previous selection
         if keep_selection: self.set_selection_unitID(list_unitID)
