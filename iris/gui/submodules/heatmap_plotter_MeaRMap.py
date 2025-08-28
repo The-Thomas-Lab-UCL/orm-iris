@@ -121,7 +121,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         
         # Bind selections to plot the latest measurement_data df
         self._combo_plot_mappingUnitName.bind("<<ComboboxSelected>>",func=lambda event:
-            self._update_currentMappingUnit_observer(replot=True))
+            self._update_currentMappingUnit_observer(self._combo_plot_mappingUnitName.get(),replot=True))
         self._combo_plot_SpectralPosition.bind("<<ComboboxSelected>>",func=lambda event:
             self.replot_heatmap())
         self._combo_plot_SpectralPosition.bind("<Return>",func=lambda event:
@@ -436,7 +436,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         if mappingUnit_name is None: mappingUnit_name = current_name
         if wavelength is None: wavelength = current_wavelength
             
-        self._update_currentMappingUnit_observer(replot=True)
+        self._update_currentMappingUnit_observer(mappingUnit_name, replot=True)
         
     def refresh_comboboxes(self, preserve_unit_name:str|None=None, preserve_wavelength:float|None=None) -> None:
         """
@@ -509,11 +509,12 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         """
         return self._current_mappingUnit
     
-    def _update_currentMappingUnit_observer(self, replot:bool) -> None:
+    def _update_currentMappingUnit_observer(self, mappingUnit_name:str, replot:bool) -> None:
         """
         Update the currently selected mapping unit according to the new combobox selection
         
         Args:
+            mappingUnit_name (str): The name of the mapping unit to be set.
             replot (bool): If True, the heatmap will be replotted after updating the mapping unit.
         """
         # Remove observer
@@ -521,7 +522,6 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         except: pass
         
         # Get the new mappingUnit
-        mappingUnit_name = self._combo_plot_mappingUnitName.get()
         self._current_mappingUnit = self._mappingHub.get_MappingUnit(unit_name=mappingUnit_name)
         self._current_mappingUnit.add_observer(self.replot_heatmap)
         
