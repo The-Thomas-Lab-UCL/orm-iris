@@ -397,6 +397,8 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
             idx = self._current_mappingUnit.get_wavelength_idx(current_spectralPosition)
         self._combo_plot_SpectralPosition.current(idx)
         
+        self.replot_heatmap()
+        
     def _reset_plot_combobox(self):
         """
         Resets the status of the combobox for next use cases
