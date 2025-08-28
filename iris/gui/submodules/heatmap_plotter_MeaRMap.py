@@ -297,12 +297,6 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         """
         Initialise the auto plot for the mapping plot
         """
-        pass # work here # Now that we're no longer using the auto-plot, this function should be modified to properly reinitialise the combobox, widgets, plot fig/ax, etc.
-        
-        # Store the combobox values
-        mappingUnit_name = self._combo_plot_mappingUnitName.get()
-        spectralPosition = self._combo_plot_SpectralPosition.get()
-        
         # Destroy the previous canvas plot and widget to prevent memory leak
         try:
             if isinstance(self._plt_cbar,matplotlib.colorbar.Colorbar):
@@ -346,15 +340,9 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         # Reset the click event for the plot
         self._canvas_id_interaction = self._plt_fig.canvas.mpl_connect('button_press_event',self._retrieve_click_idxcol)
         
-        # Set the combobox values again
-        try:
-            if mappingUnit_name in self._combo_plot_mappingUnitName.cget('values'):
-                self._combo_plot_mappingUnitName.set(mappingUnit_name)
-            if spectralPosition in self._combo_plot_SpectralPosition.cget('values'):
-                self._combo_plot_SpectralPosition.set(spectralPosition)
-        except Exception as e: print('_reinitialise_auto_plot',e)
-        
         self._lbl_coordinates.config(text='Figures are reset')
+        
+        self.refresh_comboboxes()
     
     def _set_current_mappingUnit(self,mappingUnit:MeaRMap_Unit):
         """
@@ -450,11 +438,20 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
             preserve_wavelength (float|None): Wavelength to be selected after the refresh if possible. It will\
                 be set to Raman shift automatically according to the checkbox state.
         """
+        def reset_comboboxes():
+            self._combo_plot_mappingUnitName.configure(values=[])
+            self._combo_plot_SpectralPosition.configure(values=[])
+            self._combo_plot_mappingUnitName.set('')
+            self._combo_plot_SpectralPosition.set('')
         # Check if there are any measurements in the mappingHub for the refresh. Returns if not
-        if not self._mappingHub.check_measurement_exist(): return
+        if not self._mappingHub.check_measurement_exist():
+            reset_comboboxes()
+            return
         list_valid_names = [unit.get_unit_name() for unit in self._mappingHub.get_list_MappingUnit()\
             if unit.check_measurement_and_metadata_exist()]
-        if len(list_valid_names) == 0: return
+        if len(list_valid_names) == 0:
+            reset_comboboxes()
+            return
         
         # Get the mappingUnit to be set
         list_names = self._mappingHub.get_list_MappingUnit_names()
@@ -525,8 +522,10 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         try: self._current_mappingUnit.remove_observer(self.replot_heatmap)
         except: pass
         
-        try: self._current_mappingUnit = self._mappingHub.get_MappingUnit(unit_name=mappingUnit_name)
-        except ValueError: pass # Raised when using the dummy mappingUnit MeaRMap_Unit()
+        try:
+            self._current_mappingUnit = self._mappingHub.get_MappingUnit(unit_name=mappingUnit_name)
+            assert self._current_mappingUnit.check_measurement_and_metadata_exist(),\
+                "Mapping unit is not valid."
         except Exception as e:
             list_valid_names = [unit.get_unit_name() for unit in self._mappingHub.get_list_MappingUnit() if unit.check_measurement_and_metadata_exist()]
             if len(list_valid_names) > 0: self._current_mappingUnit = self._mappingHub.get_MappingUnit(unit_name=list_valid_names[0])
@@ -722,7 +721,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
             ret = None
         else:
             try: current_val = float(self._combo_plot_SpectralPosition.get())
-            except Exception as e: print('get_current_wavelength',e); return None
+            except: return None
             if self._bool_plot_in_RamanShift.get():
                 ret = self._current_mappingUnit.convert(Raman_shift=current_val)
             else: ret = current_val
@@ -752,9 +751,10 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
 
 def test_plotter():
     from iris.data.measurement_RamanMap import generate_dummy_mappingHub, test_datasaveload_system
+    from iris.gui.dataHub_MeaRMap import Frm_DataHub_Mapping
     
-    mappinghub = generate_dummy_mappingHub(numx=3,numy=3,repeat=1)
-    mappinghub.test_generate_dummy()
+    mappinghub = MeaRMap_Hub()
+    mappinghub.test_generate_dummy(1)
     # test_datasaveload_system(mappinghub)
     
     root = tk.Tk()
@@ -766,7 +766,14 @@ def test_plotter():
         callback_click=queue_click.put
         )
     plotter.refresh_plotter()
-    plotter.pack(fill=tk.BOTH,expand=True)
+    plotter.pack(side=tk.RIGHT,fill=tk.BOTH,expand=True)
+
+    dataHub = Frm_DataHub_Mapping(
+        root,
+        mappingHub=mappinghub
+    )
+    dataHub.pack(side=tk.LEFT,fill=tk.BOTH,expand=True)
+    dataHub.update_tree()
     
     def retrieve_click():
         while True:

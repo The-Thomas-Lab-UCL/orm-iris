@@ -1164,11 +1164,11 @@ class MeaRMap_Hub():
             print(f'{key}: {attributes[key]}')
         print()
         
-    def test_generate_dummy(self):
+    def test_generate_dummy(self, number:int=10):
         """
         Generates dummy measurements for testing purposes
         """
-        for i in range(10):
+        for i in range(number):
             unit = MeaRMap_Unit(unit_name='dummy {}'.format(i))
             unit.test_generate_dummy()
             self.append_mapping_unit(unit)
