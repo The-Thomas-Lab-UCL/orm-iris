@@ -13,6 +13,9 @@ from typing import Callable
 
 import queue
 import threading
+
+from rapidfuzz import process, fuzz
+
 if __name__ == '__main__':
     import sys
     import os
@@ -65,40 +68,47 @@ class Frm_DataHub_Mapping(tk.Frame):
         if not os.path.exists(self._temp_savedir): os.makedirs(self._temp_savedir)
         
         # Widgets to show the stored data
+        self._str_search = tk.StringVar(value='')
+        entry_searchbar = tk.Entry(frm_tree, textvariable=self._str_search)
         self._tree_hub = ttk.Treeview(frm_tree, columns=("Unit ID", "Unit name", "Metadata", "# Measurements"), show="headings",
                                       height=int(10*self._height_rel))
         self._tree_scroll_v = ttk.Scrollbar(frm_tree, orient=tk.VERTICAL, command=self._tree_hub.yview)
         self._tree_scroll_h = ttk.Scrollbar(frm_tree, orient=tk.HORIZONTAL, command=self._tree_hub.xview)
         self._init_tree()
-        self._tree_hub.grid(row=0, column=0, sticky="nsew")
-        self._tree_scroll_v.grid(row=0, column=1, sticky="ns")
-        self._tree_scroll_h.grid(row=1, column=0, sticky="ew")
+        entry_searchbar.grid(row=0, column=0, sticky="ew")
+        self._tree_hub.grid(row=1, column=0, sticky="nsew")
+        self._tree_scroll_v.grid(row=1, column=1, sticky="ns")
+        self._tree_scroll_h.grid(row=2, column=0, sticky="ew")
+
+        # Bind keypresses to search
+        entry_searchbar.bind("<KeyRelease>", lambda event: self.update_tree(keep_selection=False))
         
         # Bind ctrl+all to select all items in the treeview
         self._tree_hub.bind('<Control-a>', lambda event: self._tree_hub.selection_set(self._tree_hub.get_children()))
         
         # Widgets to manipulate entries
         self._bool_save_raw_MappingUnit_ext = tk.BooleanVar(value=True)
+        btn_refresh = tk.Button(frm_control, text="Refresh", command=self.update_tree)
         btn_rename_entry = tk.Button(frm_control, text="Rename Entry", command=self.rename_unit)
         btn_delete_entry = tk.Button(frm_control, text="Remove Entry", command=self.delete_unit)
-        self._btn_save_MappingUnit_ext = tk.Button(frm_control, text="Save selected Mapping Unit [ext]", command=self.save_selected_mappingUnit_ext)
-        self._chk_save_raw_MappingUnit_txt = tk.Checkbutton(frm_control, text="Save raw data [ext]", variable=self._bool_save_raw_MappingUnit_ext)
-        self._btn_save_MappingHub = tk.Button(frm_control, text="Save Mapping Hub", command=self.save_dataHub)
-        self._btn_load_MappingHub = tk.Button(frm_control, text="Load Mapping Hub", command=self.load_dataHub)
+        self._btn_save_MappingUnit_ext = tk.Button(frm_control, text="Save selected [.csv, etc]", command=self.save_selected_mappingUnit_ext)
+        self._chk_save_raw_MappingUnit_txt = tk.Checkbutton(frm_control, text="Save raw [.csv, etc]", variable=self._bool_save_raw_MappingUnit_ext)
+        self._btn_save_MappingHub = tk.Button(frm_control, text="Save Mapping Hub [.db]", command=self.save_dataHub)
+        self._btn_load_MappingHub = tk.Button(frm_control, text="Load Mapping Hub [.db]", command=self.load_dataHub)
         
-        btn_rename_entry.grid(row=0, column=0, sticky="nsew", pady=(0,5))
-        btn_delete_entry.grid(row=0, column=1, sticky="nsew", pady=(0,5))
-        self._btn_save_MappingUnit_ext.grid(row=1, column=0, sticky="nsew", pady=(0,10))
-        self._chk_save_raw_MappingUnit_txt.grid(row=1, column=1, sticky="nsew", pady=(0,10))
-        self._btn_save_MappingHub.grid(row=2, column=0, sticky="nsew")
-        self._btn_load_MappingHub.grid(row=2, column=1, sticky="nsew")
+        btn_refresh.grid(row=0, column=0, sticky="nsew")
+        btn_rename_entry.grid(row=1, column=0, sticky="nsew")
+        btn_delete_entry.grid(row=1, column=1, sticky="nsew")
+        self._btn_save_MappingUnit_ext.grid(row=0, column=2, sticky="nsew")
+        self._chk_save_raw_MappingUnit_txt.grid(row=1, column=2, sticky="nsew")
+        self._btn_save_MappingHub.grid(row=0, column=3, sticky="nsew")
+        self._btn_load_MappingHub.grid(row=1, column=3, sticky="nsew")
         
         # Grid configuration
         frm_tree.grid_columnconfigure(0, weight=1)
         frm_tree.grid_rowconfigure(0, weight=1)
-        
-        frm_control.grid_columnconfigure(0, weight=1)
-        frm_control.grid_columnconfigure(1, weight=1)
+
+        [frm_control.grid_columnconfigure(i, weight=1) for i in range(4)]
         frm_control.grid_rowconfigure(0, weight=1)
         
     # > Autosave info <
@@ -232,7 +242,20 @@ class Frm_DataHub_Mapping(tk.Frame):
         
     def get_MappingHub(self) -> MeaRMap_Hub:
         return self._MappingHub
+
+    def _filter_by_search(self) -> list[str]:
+        """
+        Filters the treeview items based on the search query.
+        """
+        search_query = self._str_search.get().lower()
+        list_unit_names = self._MappingHub.get_list_MappingUnit_names()
         
+        list_matches = process.extract(search_query, list_unit_names, scorer=fuzz.token_set_ratio)
+        
+        list_matches_id = [self._MappingHub.get_dict_nameToID()[name] for name,_,_ in list_matches]
+        
+        return list_matches_id
+
     def update_tree(self, keep_selection:bool=True):
         # Store the current selections
         list_unitID = [unit.get_unit_id() for unit in self.get_selected_MappingUnit()]
@@ -771,7 +794,7 @@ def test_dataHub():
     datahub = Frm_DataHub_Mapping(root)
     datahub.pack()
     
-    mappinghub = generate_dummy_mappingHub(numx=2, numy=2, repeat=1)
+    mappinghub = MeaRMap_Hub()
     mappinghub.test_generate_dummy()
     datahub.set_MappingHub(mappinghub)
     datahub.add_observer_selection(lambda: print("Selection changed:", [unit.get_unit_name() for unit in datahub.get_selected_MappingUnit()]))
