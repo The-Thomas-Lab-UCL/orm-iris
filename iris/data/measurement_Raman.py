@@ -258,7 +258,8 @@ class MeaRaman():
         
         idx = self.get_wavelength_index(wavelength)
         
-        intensity = self._spectrum_analysed[self.label_intensity][idx]
+        idx_start = self._spectrum_analysed.index[0]
+        intensity = self._spectrum_analysed[self.label_intensity][idx+idx_start]
         
         return intensity
 

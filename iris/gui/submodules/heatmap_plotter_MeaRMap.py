@@ -739,12 +739,15 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
             
             clicked_measurementId = self._current_mappingUnit.get_measurementId_from_coor(coor=(coorx,coory))
             ramanMea = self._current_mappingUnit.get_RamanMeasurement(clicked_measurementId)
-            try: intensity = f'{ramanMea.get_intensity(wavelength=self.get_current_wavelength()):.1f}'
+            try:
+                wavelength = float(self.get_current_wavelength())
+                intensity = ramanMea.get_intensity(wavelength=wavelength)
+                intensity_str = f"{intensity:.1f}"
             except Exception as e:
                 print('_retrieve_click_idxcol: ',e)
-                intensity = 'error'
-            
-            self._lbl_coordinates.config(text=f"Clicked: x={coorx:.3f}, y={coory:.3f}, intensity={intensity}")
+                intensity_str = 'error'
+
+            self._lbl_coordinates.config(text=f"Clicked: x={coorx:.3f}, y={coory:.3f}, intensity={intensity_str}")
 
             if self._callback_click:
                 self._callback_click((clicked_measurementId,(coorx,coory)))
