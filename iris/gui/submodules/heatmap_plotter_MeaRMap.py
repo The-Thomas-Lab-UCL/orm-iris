@@ -121,7 +121,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         
         # Bind selections to plot the latest measurement_data df
         self._combo_plot_mappingUnitName.bind("<<ComboboxSelected>>",func=lambda event:
-            self._update_currentMappingUnit_observer(self._combo_plot_mappingUnitName.get(),replot=True))
+            self._update_currentMappingUnit_observer(mappingUnit_name=self._combo_plot_mappingUnitName.get(),replot=True))
         self._combo_plot_SpectralPosition.bind("<<ComboboxSelected>>",func=lambda event:
             self.replot_heatmap())
         self._combo_plot_SpectralPosition.bind("<Return>",func=lambda event:
@@ -132,11 +132,12 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         self._lbl_coordinates.grid(row=row,column=1,sticky='we')
         
         # Set the callbacks
-        self._mappingHub.add_observer(lambda: self.refresh_comboboxes(
-            preserve_unit_name=self._combo_plot_mappingUnitName.get(),
-            preserve_wavelength=self.get_current_wavelength(),
+        self._mappingHub.add_observer(lambda:
+            self._update_currentMappingUnit_observer(
+            mappingUnit_name=self._current_mappingUnit.get_unit_name(),
+            replot=True
         ))
-
+        
     def _init_plot_control_widgets(self):
         """
         Initializes the widgets for the plot controls (save options, color limits, axis limits)
@@ -438,7 +439,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         if mappingUnit_name is None: mappingUnit_name = current_name
         if wavelength is None: wavelength = current_wavelength
             
-        self._update_currentMappingUnit_observer(mappingUnit_name, replot=True)
+        self._update_currentMappingUnit_observer(mappingUnit_name=mappingUnit_name, replot=True)
         
     def refresh_comboboxes(self, preserve_unit_name:str|None=None, preserve_wavelength:float|None=None) -> None:
         """
@@ -516,16 +517,22 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
         Update the currently selected mapping unit according to the new combobox selection
         
         Args:
-            mappingUnit_name (str): The name of the mapping unit to be set.
+            mappingUnit_name (str): The name of the mapping unit to be set. If it doesn't exist, the
+                first valid mapping unit will be selected.
             replot (bool): If True, the heatmap will be replotted after updating the mapping unit.
         """
         # Remove observer
         try: self._current_mappingUnit.remove_observer(self.replot_heatmap)
         except: pass
         
-        # Get the new mappingUnit
-        self._current_mappingUnit = self._mappingHub.get_MappingUnit(unit_name=mappingUnit_name)
-        self._current_mappingUnit.add_observer(self.replot_heatmap)
+        try: self._current_mappingUnit = self._mappingHub.get_MappingUnit(unit_name=mappingUnit_name)
+        except ValueError: pass # Raised when using the dummy mappingUnit MeaRMap_Unit()
+        except Exception as e:
+            list_valid_names = [unit.get_unit_name() for unit in self._mappingHub.get_list_MappingUnit() if unit.check_measurement_and_metadata_exist()]
+            if len(list_valid_names) > 0: self._current_mappingUnit = self._mappingHub.get_MappingUnit(unit_name=list_valid_names[0])
+            else: self._current_mappingUnit = MeaRMap_Unit()
+        finally:
+            self._current_mappingUnit.add_observer(self.replot_heatmap)
         
         self.refresh_comboboxes()
         

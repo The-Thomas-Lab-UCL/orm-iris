@@ -231,8 +231,18 @@ class MeaRMap_Unit():
         """
         Check if the measurement data and metadata exist
         """
-        if len(self._dict_measurement[self._label_ts]) == 0: self._flg_measurement_exist = False
-        if len(self._dict_metadata) == 0: self._flg_metadata_exist = False
+        # Note: KeyError and AttributeError are bypassed as there are cases where the object (self)
+        # itself have been deleted but the reference to it still remains in other parts of the program
+        # This would typically trigger KeyError as self._dict_measurement becomes empty. An example of
+        # This issue happens with the heatmap plotter when a unit currently being plot is suddenly
+        # deleted in the mappingHub (e.g., through the dataHub gui).
+        try:
+            if len(self._dict_measurement[self._label_ts]) == 0: self._flg_measurement_exist = False
+        except (KeyError, AttributeError): self._flg_measurement_exist = False
+        
+        try:
+            if len(self._dict_metadata) == 0: self._flg_metadata_exist = False
+        except (KeyError, AttributeError): self._flg_metadata_exist = False
         
         return self._flg_measurement_exist and self._flg_metadata_exist
         
@@ -1024,6 +1034,8 @@ class MeaRMap_Hub():
         assert unit_name in self._dict_mappingUnit_NameID, 'remove_mapping_measurement_unit: The measurement name does not exist.'
         unit_id = self._dict_mappingUnit_NameID[unit_name]
         self.remove_mapping_unit_id(unit_id)
+        
+        self._notify_observers()
     
     def remove_mapping_unit_id(self,unit_id:str) -> None:
         """
