@@ -14,7 +14,7 @@ from typing import Callable
 import queue
 import threading
 
-from rapidfuzz import process, fuzz
+
 
 if __name__ == '__main__':
     import sys
@@ -132,7 +132,7 @@ class Frm_DataHub_Mapping(tk.Frame):
         self._flg_isrunning = threading.Event()
         self._flg_isrunning.set()
         self._flg_issaving = threading.Event()
-        self._thread_autosave = self._autosave_dataHub(suppress_errors=not autosave)
+        self._thread_autosave = self._autosave_dataHub(suppress_errors=False)
         
         # Interaction/callback setup
         self._list_observer_load = []
@@ -148,8 +148,8 @@ class Frm_DataHub_Mapping(tk.Frame):
         Args:
             suppress_errors (bool, optional): If True, will suppress errors in the autosave thread. Defaults to False.
         """
-        if not self._flg_autosave and not suppress_errors:
-            print("Autosave is disabled. Exiting autosave thread.")
+        if not self._flg_autosave:
+            if not suppress_errors: print("Autosave is disabled. Exiting autosave thread.")
             return
         
         while self._flg_isrunning.is_set():
