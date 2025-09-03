@@ -281,8 +281,8 @@ class Frm_HiLvlTiling(tk.Frame):
             return
         result = self._coorgen.get_tiling_coordinates_mm_and_cropFactors_rel()
         if result is None: messagebox.showerror('Error','No coordinates generated'); return
-        list_coor, cropx_ratio_red, cropy_ratio_red = result
-        if not list_coor: messagebox.showerror('Error','No coordinates found'); return
+        map_coor, cropx_ratio_red, cropy_ratio_red = result
+        if not map_coor: messagebox.showerror('Error','No coordinates found'); return
         
         # > Modify the calibration file
         img_test = self._motion_controller.get_current_image(wait_newimage=True)
@@ -312,15 +312,23 @@ class Frm_HiLvlTiling(tk.Frame):
         cal.id += f'_{cropx_ratio_red}X,{cropy_ratio_red}Ycrop'
         
         # > Prep the image storage
-        imgname = messagebox_request_input('Image name','Enter the name of the image:')
-        if not imgname: return
+        list_names = self._dataHub_img.get_ImageMeasurement_Hub().get_list_ImageUnit_ids()
+        while True:
+            imgname = messagebox_request_input('Image name','Enter the name of the image:', default=map_coor.mappingUnit_name)
+            if not imgname: return
+            if imgname in list_names:
+                retry = messagebox.askretrycancel('Error','Image name already exists. Please enter a different name.')
+                if not retry: return
+                else: continue
+            break
+        
         imgUnit = MeaImg_Unit(unit_name=imgname,calibration=cal)
         
         # > Go through the coordinates to take the images
-        totalcoor = len(list_coor)
+        totalcoor = len(map_coor.mapping_coordinates)
         flg_stop.clear()
         self.update_statusbar('Taking images: {} of {}'.format(1,totalcoor))
-        for i,coor in enumerate(list_coor):
+        for i,coor in enumerate(map_coor.mapping_coordinates):
             if flg_stop.is_set(): break
             x,y,z = coor
             self._motion_controller.go_to_coordinates(
