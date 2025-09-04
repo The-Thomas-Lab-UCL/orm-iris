@@ -72,22 +72,22 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
         [self.grid_rowconfigure(i,weight=1) for i in range(row+1)]  # Make the rows expandable
         [self.grid_columnconfigure(i,weight=1) for i in range(col+1)]  # Make the columns expandable
 
-    def get_tiling_coordinates_mm_and_cropFactors_rel(self) -> tuple[list[tuple[float,float,float]],float,float]|None:
+    def get_tiling_coordinates_mm_and_cropFactors_rel(self) -> tuple[list[MeaCoor_mm],float,float]|None:
         """
         Returns the mapping coordinates and the cropping factors
         
         Returns:
-            tuple: The mapping coordinates (list of (x,y,z) tuples), crop factor x, and crop factor y
+            tuple[list[MeaCoor_mm], float, float]|None: The mapping coordinates (list of MeaCoor_mm objects), crop factor x, and crop factor y
         """
         # Make sure to keep the generated coordinates up to date
-        tiling_coordinates = self._generate_tiling_coordinates()
+        list_meaCoor_mm = self._generate_tiling_coordinates()
         
-        if tiling_coordinates is None or len(tiling_coordinates) == 0:
+        if list_meaCoor_mm is None:
             messagebox.showerror('Error','No mapping coordinates generated. Please generate the coordinates first.')
             return None
         else:
             cropx_reduction, cropy_reduction = self._get_crop_factors()
-            return (tiling_coordinates,cropx_reduction,cropy_reduction)
+            return (list_meaCoor_mm,cropx_reduction,cropy_reduction)
     
     def _get_xy_scales_mmPerPixel(self) -> tuple[float,float]:
         """
@@ -114,19 +114,19 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
             assert 0 <= cropx_reduction < 1 and 0 <= cropy_reduction < 1, 'Cropping factors must be between 0 and 1'
             return (cropx_reduction,cropy_reduction)
         except Exception as e:
-            messagebox.showerror('Error',e+'\nUsing the default cropping factors (0.0, 0.0) instead')
+            messagebox.showerror('Error',f'{e}\nUsing the default cropping factors (0.0, 0.0) instead')
             return (0.0,0.0)
     
-    def _generate_tiling_coordinates(self) -> list[tuple[float,float,float]]|None:
+    def _generate_tiling_coordinates(self) -> list[MeaCoor_mm]|None:
         """
         Generates the mapping coordinates. Also stores them in its own variable and the main
         operation variable.
         
         Returns:
-            list|None: The mapping coordinates (list of (x,y,z) tuples) or None if an error occurs
+            list[MeaCoor_mm]|None: The mapping coordinates (list of (x,y,z) tuples) or None if an error occurs
         """
-        list_mapCoor_mm = self._frm_tv_mapCoor.get_selected_mappingCoor()
-        if len(list_mapCoor_mm) != 1: messagebox.showerror('Error','Please select exactly one mapping coordinate'); return
+        list_meaCoor_mm = self._frm_tv_mapCoor.get_selected_mappingCoor()
+        if len(list_meaCoor_mm) < 1: messagebox.showerror('Error','Please select at least one mapping coordinate'); return
         
         cropx_reduction, cropy_reduction = self._get_crop_factors()
         
@@ -141,8 +141,31 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
             return
         
         # Define the grid boundaries
-        mapCoor_mm = list_mapCoor_mm[0]
-        list_coor_mm = mapCoor_mm.mapping_coordinates
+        list_ret_MeaCoor_mm = [self._calculate_tiling_coordinates(meaCoor_mm, cropx_reduction, cropy_reduction, image, cal) for meaCoor_mm in list_meaCoor_mm]
+        list_ret_MeaCoor_mm = [meaCoor_mm for meaCoor_mm in list_ret_MeaCoor_mm if len(meaCoor_mm.mapping_coordinates) > 0]
+        if len(list_ret_MeaCoor_mm) == 0:
+            messagebox.showerror('Error','No valid mapping coordinates generated. Please check the input parameters.')
+            return None
+        
+        return list_ret_MeaCoor_mm
+
+    def _calculate_tiling_coordinates(self, meaCoor_mm: MeaCoor_mm, cropx_reduction: float,
+        cropy_reduction: float, image: Image.Image, cal: ImgMea_Cal) -> MeaCoor_mm:
+        """
+        Calculates the tiling coordinates based on the input parameters.
+
+        Args:
+            meaCoor_mm (MeaCoor_mm): The mapping coordinates to tile.
+            cropx_reduction (float): The cropping factor for the x direction.
+            cropy_reduction (float): The cropping factor for the y direction.
+            image (Image.Image): An example image to be used for the size calculation. (Typically this would be\
+                an image from the video camera)
+            cal (ImgMea_Cal): The objective calibration object.
+
+        Returns:
+            MeaCoor_mm: The calculated mapping coordinates with the original MeaCoor_mm mapping unit name.
+        """
+        list_coor_mm = meaCoor_mm.mapping_coordinates
         x_min = min([coor[0] for coor in list_coor_mm])
         x_max = max([coor[0] for coor in list_coor_mm])
         y_min = min([coor[1] for coor in list_coor_mm])
@@ -188,11 +211,11 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
         )
         
         list_xyz_mm = [(x, y, z) for (x, y), z in zip(list_xy_mm, list_z_mm) if not np.isnan(z)]
-        if len(list_xyz_mm) == 0:
-            messagebox.showerror('Error','No valid mapping coordinates generated. Please check the input parameters.')
-            return None
-        
-        return list_xyz_mm
+        ret_mapCoor_mm = MeaCoor_mm(
+            mappingUnit_name=meaCoor_mm.mappingUnit_name,
+            mapping_coordinates=list_xyz_mm,
+        )
+        return ret_mapCoor_mm
             
 def test_rect2():
     root = tk.Tk()

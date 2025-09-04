@@ -281,8 +281,8 @@ class Frm_HiLvlTiling(tk.Frame):
             return
         result = self._coorgen.get_tiling_coordinates_mm_and_cropFactors_rel()
         if result is None: messagebox.showerror('Error','No coordinates generated'); return
-        list_coor, cropx_ratio_red, cropy_ratio_red = result
-        if not list_coor: messagebox.showerror('Error','No coordinates found'); return
+        list_meaCoor_mm, cropx_ratio_red, cropy_ratio_red = result
+        if not list_meaCoor_mm: messagebox.showerror('Error','No coordinates found'); return
         
         # > Modify the calibration file
         img_test = self._motion_controller.get_current_image(wait_newimage=True)
@@ -311,44 +311,71 @@ class Frm_HiLvlTiling(tk.Frame):
         
         cal.id += f'_{cropx_ratio_red}X,{cropy_ratio_red}Ycrop'
         
-        # > Prep the image storage
-        imgname = messagebox_request_input('Image name','Enter the name of the image:')
-        if not imgname: return
-        imgUnit = MeaImg_Unit(unit_name=imgname,calibration=cal)
+        # > Prep the image storage <
+        list_imgUnit = []
+        for meaCoor_mm in list_meaCoor_mm:
+            list_Hub_names = self._dataHub_img.get_ImageMeasurement_Hub().get_list_ImageUnit_ids()
+            # Request for the names and check its validity
+            while True:
+                imgname = messagebox_request_input('Image name','Enter the name of the image:', default=meaCoor_mm.mappingUnit_name)
+                if not imgname: return
+                if imgname in list_Hub_names:
+                    retry = messagebox.askretrycancel('Error','Image name already exists. Please enter a different name.')
+                    if not retry: return
+                    else: continue
+                break
+            list_imgUnit.append(MeaImg_Unit(unit_name=imgname,calibration=cal))
         
         # > Go through the coordinates to take the images
-        totalcoor = len(list_coor)
+        for imgUnit, meaCoor_mm in zip(list_imgUnit,list_meaCoor_mm):
+            if flg_stop.is_set(): break
+            self._execute_image_capture(flg_stop, shape, cropx_pixel, cropy_pixel, cropx_mm, cropy_mm, meaCoor_mm, imgUnit)
+            self._dataHub_img.append_ImageMeasurementUnit(imgUnit,flg_nameprompt=False)
+            
+        self.update_statusbar('Capture complete')
+
+    def _execute_image_capture(self, flg_stop:threading.Event, shape:tuple[int,int], cropx_pixel:int, cropy_pixel:int,
+        cropx_mm:float, cropy_mm:float, meaCoor_mm:MeaCoor_mm, imgUnit:MeaImg_Unit) -> None:
+        """
+        Capture images based on the coordinates in meaCoor_mm and store them in the given imgUnit.
+        
+        Args:
+            flg_stop (threading.Event): Flag to stop the capturing process
+            shape (tuple[int,int]): Shape of the image (width, height)
+            cropx_pixel (int): Cropped pixel x-distance from the edge
+            cropy_pixel (int): Cropped pixel y-distance from the edge
+            cropx_mm (float): Cropped x-distance in mm
+            cropy_mm (float): Cropped y-distance in mm
+            meaCoor_mm (MeaCoor_mm): Measurement coordinates
+            imgUnit (MeaImg_Unit): Image unit to store the captured images
+        """
+        totalcoor = len(meaCoor_mm.mapping_coordinates)
         flg_stop.clear()
         self.update_statusbar('Taking images: {} of {}'.format(1,totalcoor))
-        for i,coor in enumerate(list_coor):
+        for i,coor in enumerate(meaCoor_mm.mapping_coordinates):
             if flg_stop.is_set(): break
             x,y,z = coor
             self._motion_controller.go_to_coordinates(
-                coor_x_mm=x,coor_y_mm=y,coor_z_mm=z)
+                    coor_x_mm=x,coor_y_mm=y,coor_z_mm=z)
             img = self._motion_controller.get_current_image(wait_newimage=True)
-            
+                
             if not isinstance(img,Image.Image): messagebox.showerror('Error','No image received from the controller'); continue
-            
+                
             img = img.crop((cropx_pixel,cropy_pixel,shape[0]-cropx_pixel,shape[1]-cropy_pixel))
-            
+                
             imgUnit.add_measurement(
-                timestamp=get_timestamp_us_str(),
-                x_coor=x-cropx_mm,
-                y_coor=y-cropy_mm,
-                z_coor=z,
-                image=img
-            )
-            
+                    timestamp=get_timestamp_us_str(),
+                    x_coor=x-cropx_mm,
+                    y_coor=y-cropy_mm,
+                    z_coor=z,
+                    image=img
+                )
+                
             self.update_statusbar('Taking images: {} of {}'.format(i+1,totalcoor))
-            
-            # Show the images
+                
+                # Show the images
             self._img_shown = imgUnit.get_image_all_stitched(low_res=self._bool_lowResImg.get())[0]
             self._canvas_img.set_image(self._img_shown)
-            
-        self.update_statusbar('Capture complete')
-        
-        # > Prompt the user for an image name
-        self._dataHub_img.append_ImageMeasurementUnit(imgUnit,flg_nameprompt=False)
         
     def update_statusbar(self,text:str=''):
         """

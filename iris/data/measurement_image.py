@@ -719,6 +719,15 @@ class MeaImg_Hub():
         """
         return self._dict_ImageUnits['unit_id']
     
+    def get_list_ImageUnit_names(self) -> list[str]:
+        """
+        Returns the list of the ImageMeasurement_Unit names
+
+        Returns:
+            list[str]: List of the ImageMeasurement_Unit names
+        """
+        return list(self._dict_unit_IDName.values())
+
     def get_summary_units(self) -> tuple[list,list]:
         """
         Returns the summary of the ImageMeasurement_Units
