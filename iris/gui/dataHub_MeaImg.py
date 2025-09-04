@@ -208,10 +208,12 @@ class Frm_DataHub_Image(tk.Frame):
         self._btn_save = tk.Button(frm_control, text='Save Image Hub', command=self.save_ImageMeasurementHub)
         self._btn_load = tk.Button(frm_control, text='Load Image Hub', command=self.load_ImageMeasurementHub)
         self._btn_remove = tk.Button(frm_control, text='Remove Selected', command=self.remove_selected_ImageMeasurementUnit)
+        self._btn_save_png = tk.Button(frm_control, text='Export selected units\nas PNG (stitched)', command=self.export_selected_as_png)
         
         self._btn_save.grid(row=0, column=0, sticky='ew')
         self._btn_load.grid(row=0, column=1, sticky='ew')
         self._btn_remove.grid(row=0, column=2, sticky='ew')
+        self._btn_save_png.grid(row=0, column=3, sticky='ew')
         
         frm_control.grid_rowconfigure(0, weight=0)
         frm_control.grid_columnconfigure(0, weight=1)
@@ -292,6 +294,46 @@ class Frm_DataHub_Image(tk.Frame):
         finally:
             self._btn_save.config(state='normal',text='Save Image Hub')
         
+    @thread_assign
+    def export_selected_as_png(self):
+        """
+        Exports the selected ImageMeasurement_Units as PNG files.
+        """
+        def reset(): self._btn_save_png.config(state='normal', text='Export selected units\nas PNG (stitched)')
+        self._btn_save_png.config(state='disabled', text='Exporting...')
+        while True:
+            resolution = messagebox_request_input('Export Resolution', 'Enter the resolution (percentage) for the PNG export:', default='100')
+            try:
+                resolution = float(resolution)
+                if resolution <= 0 or resolution > 100: raise ValueError
+                break
+            except: messagebox.showerror('Error', 'Invalid resolution value. Please enter a number between 0 and 100.')
+            
+        # Prompt for the directory to save the PNG files
+        while True:
+            dirpath = filedialog.askdirectory(title='Select the folder to save the PNG files')
+            if not os.path.isdir(dirpath):
+                messagebox.showerror('Error', 'Invalid folder selected. Please select a valid folder.')
+                continue
+            break
+        
+        try:
+            tree = self._tree_hub
+            selected = tree.selection()
+            if len(selected) == 0:
+                raise Exception('No entry selected.')
+            
+            for item in selected:
+                unit_id = tree.item(item, 'values')[0]
+                unit = self.ImageHub.get_ImageMeasurementUnit(unit_id)
+                stitched_img = unit.get_image_all_stitched(low_res=False)[0]
+                stitched_img.thumbnail((int(stitched_img.width*resolution/100), int(stitched_img.height*resolution/100)))
+                stitched_img.save(os.path.join(dirpath, f'{unit.get_IdName()[1]}.png'))
+        except Exception as e:
+            messagebox.showerror('Error', str(e))
+        finally:
+            reset()
+                
     def append_ImageMeasurementUnit(self, unit:MeaImg_Unit, flg_nameprompt:bool=True):
         """
         Appends the given ImageMeasurement_Unit to the ImageMeasurement_Hub and
