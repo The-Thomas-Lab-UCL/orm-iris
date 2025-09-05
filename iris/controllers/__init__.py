@@ -193,6 +193,8 @@ dict_controllerSpecific_default = {
     'm30xym_serial': '',  # Serial number of the M30XYM stage
     # > Z825B stage parameters <
     'z825b_serial': '',  # Serial number of the Z825B stage
+    # > Thorlabs MCM301 stage parameters <
+    'mcm301_sdk_dirpath': r'C:\Program Files (x86)\Thorlabs\MCM301\Sample\Thorlabs_MCM301_PythonSDK',    # Dirpath to the MCM301 Thorlabs stage's Python SDK
 }
 
 dict_controllerSpecific_comments = {
@@ -236,6 +238,8 @@ dict_controllerSpecific_comments = {
     'm30xym_serial': 'Serial number of the M30XYM stage',
     # > Z825B stage parameters <
     'z825b_serial': 'Serial number of the Z825B stage',
+    # > Thorlabs MCM301 stage parameters <
+    'mcm301_sdk_dirpath': "Dirpath to the MCM301 Thorlabs stage's Python SDK",
 }
 
 dict_controllerSpecific_read = read_update_config_file_section(
@@ -288,11 +292,18 @@ class ControllerSpecificConfigEnum(Enum):
     M30XYM_SERIAL = dict_controllerSpecific_read['m30xym_serial']
     # > Z825B stage parameters <
     Z825B_SERIAL = dict_controllerSpecific_read['z825b_serial']
+    # > Thorlabs MCM301 stage parameters <
+    MCM301_SDK_DIRPATH = dict_controllerSpecific_read['mcm301_sdk_dirpath']
 
 ################################################################################
 # >>>>> Imports for the controllers <<<<<
 ################################################################################
-    
+
+import sys
+import os
+sys.path.append(os.path.dirname(ControllerSpecificConfigEnum.OCEANINSIGHT_API_DIRPATH.value))
+sys.path.append(os.path.dirname(ControllerSpecificConfigEnum.MCM301_SDK_DIRPATH.value))
+
 if ControllerConfigEnum.CAMERA_CONTROLLER.value == 'webcam':
     from .camera_controller_webcam import CameraController_Webcam as CameraController
 elif ControllerConfigEnum.CAMERA_CONTROLLER.value == 'thorlabs_mono':
@@ -306,13 +317,13 @@ else:
 
 # Spectrometer controller imports
 if ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'qepro':
-    from .raman_spectrometer_controller_QEPro import SpectrometerController_QEPro as SpectrometerController
+    from .raman_spectrometer_controller_QEPro import SpectrometerController_QEPro as Controller_Spectrometer
 elif ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'pi_legacy':
-    from .raman_spectrometer_controller_PI_pylablib import SpectrometerController_PI as SpectrometerController
+    from .raman_spectrometer_controller_PI_pylablib import SpectrometerController_PI as Controller_Spectrometer
 elif ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'pi_dll':
-    from .raman_spectrometer_controller_PI_dll import SpectrometerController_PI as SpectrometerController
+    from .raman_spectrometer_controller_PI_dll import SpectrometerController_PI as Controller_Spectrometer
 elif ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'andor':
-    from .raman_spectrometer_controller_Andor_pylablib import SectrometerController_AndorSDK2 as SpectrometerController
+    from .raman_spectrometer_controller_Andor_pylablib import SectrometerController_AndorSDK2 as Controller_Spectrometer
 else:
     if not ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'dummy':
         print(f'\n>>>>> Spectrometer controller {ControllerConfigEnum.SPECTROMETER_CONTROLLER.value} not available. Using dummy spectrometer controller instead.')
@@ -320,25 +331,25 @@ else:
 
 # XY stage controller imports
 if ControllerConfigEnum.STAGEXY_CONTROLLER.value == 'm30xym':
-    from .xy_stage_controller_m30xy import XYController_M30XYM as XYController
+    from .xy_stage_controller_m30xy import XYController_M30XYM as Controller_XY
 elif ControllerConfigEnum.STAGEXY_CONTROLLER.value == 'zaber':
-    from .xy_stage_controller_zaber import XYController_Zaber as XYController
+    from .xy_stage_controller_zaber import XYController_Zaber as Controller_XY
 elif ControllerConfigEnum.STAGEXY_CONTROLLER.value == 'pi':
     # from .xy_stage_controller_PI import XYController_PI as XYController
-    from .xy_stage_controller_PI_dll import XYController_PI as XYController
-elif ControllerConfigEnum.STAGEXY_CONTROLLER.value == 'dummy':
+    from .xy_stage_controller_PI_dll import XYController_PI as Controller_XY
+else:
     if not ControllerConfigEnum.STAGEXY_CONTROLLER.value == 'dummy':
         print(f'\n>>>>> XY stage controller {ControllerConfigEnum.STAGEXY_CONTROLLER.value} not available. Using dummy XY stage controller instead.')
     from .xy_stage_controller_dummy import XYController_Dummy as Controller_XY
 
 # Z stage controller imports
 if ControllerConfigEnum.STAGEZ_CONTROLLER.value == 'z825b':
-    from .z_stage_controller_z825b import ZController_Z825B as ZController
+    from .z_stage_controller_z825b import ZController_Z825B as Controller_Z
 elif ControllerConfigEnum.STAGEZ_CONTROLLER.value == 'mcm301':
-    from .z_stage_controller_mcm301 import ZController_MCM301 as ZController
+    from .z_stage_controller_mcm301 import ZController_MCM301 as Controller_Z
 elif ControllerConfigEnum.STAGEZ_CONTROLLER.value == 'pfm450':
-    from .z_stage_controller_pfm450 import ZController_PFM450 as ZController
-elif ControllerConfigEnum.STAGEZ_CONTROLLER.value == 'dummy':
+    from .z_stage_controller_pfm450 import ZController_PFM450 as Controller_Z
+else:
     if not ControllerConfigEnum.STAGEZ_CONTROLLER.value == 'dummy':
         print(f'\n>>>>> Z stage controller {ControllerConfigEnum.STAGEZ_CONTROLLER.value} not available. Using dummy Z stage controller instead.')
     from .z_stage_controller_dummy import ZController_Dummy as Controller_Z

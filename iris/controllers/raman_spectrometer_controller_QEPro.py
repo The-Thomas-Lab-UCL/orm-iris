@@ -14,25 +14,25 @@ from multiprocessing import Lock
 from typing import Literal
 # matplotlib.use('Agg')
 
-if __name__ == '__main__':
-    import sys
-    import os
-    SCRIPT_DIR = os.path.abspath(r'.\library')
-    API_DIR = os.path.abspath(r'.\API')
-    sys.path.append(os.path.dirname(SCRIPT_DIR))
-    sys.path.append(os.path.dirname(API_DIR))
-    
-
+from iris.controllers import ControllerSpecificConfigEnum
 from iris.utils.general import *
 from iris.controllers.class_spectrometer_controller import Class_SpectrometerController
 
-from API.OceanOptics.OceanDirectAPI import OceanDirectAPI, OceanDirectError, FeatureID
+# Import Ocean Direct using the wrapper to handle SDK import issues
+from iris.controllers.oceandirect_wrapper import get_oceandirect_classes
 
 from iris import DataAnalysisConfigEnum
-from iris.controllers import ControllerSpecificConfigEnum
 
 class SpectrometerController_QEPro(Class_SpectrometerController):
     def __init__(self) -> None:
+        # Get the Ocean Direct classes from the wrapper
+        OceanDirectAPI, OceanDirectError, FeatureID = get_oceandirect_classes()
+        
+        # Store the classes as instance variables for use in other methods
+        self.OceanDirectAPI = OceanDirectAPI
+        self.OceanDirectError = OceanDirectError
+        self.FeatureID = FeatureID
+        
         self.od = OceanDirectAPI()                          # Ocean Direct API
         self.dev_count = self.od.find_usb_devices()         # Device count
         self.dev_ids = self.od.get_device_ids()             # Device IDs (if multiple)
@@ -265,7 +265,7 @@ class SpectrometerController_QEPro(Class_SpectrometerController):
             # minimum integration time when averaging is enabled can be determined using odapi_get_minimum_averaging_integration_time_micros.
             print("scanToAverageBoxcar(): minAverageIntegrationTimeUs =  %d" % minAveIntTime)
             print("")
-        except OceanDirectError as err:
+        except self.OceanDirectError as err:
             [errorCode, errorMsg] = err.get_error_details()
             print("scanToAverageBoxcar(): set/get / %d = %s" % (errorCode, errorMsg))
 
@@ -273,7 +273,7 @@ class SpectrometerController_QEPro(Class_SpectrometerController):
             # Sets the number of spectra to average.
             print("scanToAverageBoxcar(): set_scans_to_average        =  %d" % scanToAve)
             device.set_scans_to_average(scanToAve)
-        except OceanDirectError as err:
+        except self.OceanDirectError as err:
             [errorCode, errorMsg] = err.get_error_details()
             print("scanToAverageBoxcar(): ERROR with code/scanToAverage, %d = %s ************" % (errorCode, scanToAve))
 
@@ -282,7 +282,7 @@ class SpectrometerController_QEPro(Class_SpectrometerController):
             value = device.get_scans_to_average()
             print("scanToAverageBoxcar(): get_scans_to_average        =  %d" % value)
 
-        except OceanDirectError as err:
+        except self.OceanDirectError as err:
             [errorCode, errorMsg] = err.get_error_details()
             print("scanToAverageBoxcar(device): set/get / %d = %s" % (errorCode, errorMsg))
 
@@ -295,7 +295,7 @@ class SpectrometerController_QEPro(Class_SpectrometerController):
             value = device.get_boxcar_width()
             print("scanToAverageBoxcar(): get_boxcar_width            =  %d" % value)
 
-        except OceanDirectError as err:
+        except self.OceanDirectError as err:
             [errorCode, errorMsg] = err.get_error_details()
             print("scanToAverageBoxcar(): set/get / %d = %s" % (errorCode, errorMsg))
         print("")
@@ -358,7 +358,7 @@ class SpectrometerController_QEPro(Class_SpectrometerController):
             for i in range(10):
                 spectra = device.get_formatted_spectrum()
                 print("spectra[100]: %d, %d, %d, %d" % (spectra[100], spectra[101], spectra[102], spectra[103]), flush=True)
-        except OceanDirectError as err:
+        except self.OceanDirectError as err:
             [errorCode, errorMsg] = err.get_error_details()
             print("get_spec_formatted(device): exception / %d = %s" % (errorCode, errorMsg))
             
@@ -371,7 +371,7 @@ class SpectrometerController_QEPro(Class_SpectrometerController):
         try:
             periodInc = device.Advanced.get_continuous_strobe_period_increment()
             print("continuousStrobe(device): period increment =  %d " % periodInc)
-        except OceanDirectError as err:
+        except self.OceanDirectError as err:
             [errorCode, errorMsg] = err.get_error_details()
             print("continuousStrobe(device): get_continuous_strobe_period_increment() %d = %s" % (errorCode, errorMsg))
 
@@ -392,14 +392,14 @@ class SpectrometerController_QEPro(Class_SpectrometerController):
         try:
             periodMin = device.Advanced.get_continuous_strobe_period_minimum()
             print("continuousStrobe(device): periodMin          =  %d " % periodMin)
-        except OceanDirectError as err:
+        except self.OceanDirectError as err:
             [errorCode, errorMsg] = err.get_error_details()
             print("continuousStrobe(device): get_continuous_strobe_period_minimum() %d = %s" % (errorCode, errorMsg))
 
         try:
             periodMax = device.Advanced.get_continuous_strobe_period_maximum()
             print("continuousStrobe(device): periodMax          =  %d " % periodMax)
-        except OceanDirectError as err:
+        except self.OceanDirectError as err:
             [errorCode, errorMsg] = err.get_error_details()
             print("continuousStrobe(device): get_continuous_strobe_period_maximum() %d = %s" % (errorCode, errorMsg))
 
@@ -413,14 +413,14 @@ class SpectrometerController_QEPro(Class_SpectrometerController):
             try:
                 device.Advanced.set_continuous_strobe_period(period)
                 print("continuousStrobe(device): set strobePeriod =  %d " % period)
-            except OceanDirectError as err:
+            except self.OceanDirectError as err:
                 [errorCode, errorMsg] = err.get_error_details()
                 print("continuousStrobe(device): set_continuous_strobe_period() %d = %s" % (errorCode, errorMsg))
 
             try:
                 period = device.Advanced.get_continuous_strobe_period()
                 print("continuousStrobe(device): get strobePeriod =  %d " % period)
-            except OceanDirectError as err:
+            except self.OceanDirectError as err:
                 [errorCode, errorMsg] = err.get_error_details()
                 print("continuousStrobe(device): get_continuous_strobe_period() %d = %s" % (errorCode, errorMsg))
             print("")
@@ -432,7 +432,7 @@ class SpectrometerController_QEPro(Class_SpectrometerController):
 
             strobeWidth = device.Advanced.get_continuous_strobe_width()
             print("continuousStrobe(device): get strobeWidth    =  %d " % strobeWidth)
-        except OceanDirectError as err:
+        except self.OceanDirectError as err:
             [errorCode, errorMsg] = err.get_error_details()
             print("continuousStrobe(device): %d = %s" % (errorCode, errorMsg))
 

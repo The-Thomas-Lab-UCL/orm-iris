@@ -11,7 +11,7 @@ import sys
 import os
 
 if __name__ == '__main__':
-    SCRIPT_DIR = os.path.abspath(r'.\library')
+    SCRIPT_DIR = os.path.abspath(r'.\iris')
     sys.path.append(os.path.dirname(SCRIPT_DIR))
 
 from tkinter import filedialog
