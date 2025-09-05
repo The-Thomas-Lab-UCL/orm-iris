@@ -13,7 +13,7 @@ import threading
 from typing import Callable, Literal
 
 if __name__ == '__main__':
-    SCRIPT_DIR = os.path.abspath(r'.\library')
+    SCRIPT_DIR = os.path.abspath(r'.\iris')
     sys.path.append(os.path.dirname(SCRIPT_DIR))
 
 from iris.gui.submodules.meaCoor_generator.rectangle_endToEnd import Rect_EndToEnd as Map1

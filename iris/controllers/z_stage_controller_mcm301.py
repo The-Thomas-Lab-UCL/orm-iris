@@ -6,26 +6,21 @@ This implementation is based on the .NET Kinesis Libraries to connect to and con
 import os
 import time
 import sys
-import clr
 import numpy as np
 import threading
 
-if __name__ == '__main__':
-    import sys
-    import os
-    SCRIPT_DIR = os.path.abspath(r'.\library')
-    CONTROLLER_DIR = os.path.abspath(r'.\API')
-    sys.path.append(os.path.dirname(SCRIPT_DIR))
-    sys.path.append(os.path.dirname(CONTROLLER_DIR))
-
+from iris.controllers import ControllerSpecificConfigEnum
 from iris.controllers.class_z_stage_controller import Class_ZController
 from iris.controllers import ControllerDirectionEnum
 
-from API.MCM301_sdk.MCM301_COMMAND_LIB import MCM301
-# from library.controllers.MCM301_sdk.MCM301_COMMAND_LIB import MCM301
+# Import MCM301 using the wrapper to handle SDK import issues
+from iris.controllers.mcm301_wrapper import get_mcm301_class
 
 class ZController_MCM301(Class_ZController):
     def __init__(self,sim=False) -> None:
+        # Get the MCM301 class from the wrapper
+        MCM301 = get_mcm301_class()
+        
         self.controller = MCM301()
         self.devs = MCM301.list_devices()
         
