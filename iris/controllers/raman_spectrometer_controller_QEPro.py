@@ -19,7 +19,7 @@ from iris.utils.general import *
 from iris.controllers.class_spectrometer_controller import Class_SpectrometerController
 
 # Import Ocean Direct using the wrapper to handle SDK import issues
-from iris.controllers.oceandirect_wrapper import get_oceandirect_classes
+from iris.controllers.oceandirect_wrapper import get_oceandirect_classes, create_oceandirect_api
 
 from iris import DataAnalysisConfigEnum
 
@@ -33,7 +33,8 @@ class SpectrometerController_QEPro(Class_SpectrometerController):
         self.OceanDirectError = OceanDirectError
         self.FeatureID = FeatureID
         
-        self.od = OceanDirectAPI()                          # Ocean Direct API
+        # Create the API instance with proper path handling
+        self.od = create_oceandirect_api()                  # Ocean Direct API
         self.dev_count = self.od.find_usb_devices()         # Device count
         self.dev_ids = self.od.get_device_ids()             # Device IDs (if multiple)
         self.api_info = self.od.get_api_version_numbers()   # API info
@@ -314,7 +315,7 @@ class SpectrometerController_QEPro(Class_SpectrometerController):
         with self._lock:
             if self._mode == 'continuous':
                 timestamp = get_timestamp_us_int()
-                intensity = self.dev.get_formatted_spectrum()
+                intensity_raw = self.dev.get_formatted_spectrum()
                 timestamp = int((timestamp + get_timestamp_us_int())/2)
             
             if self._mode == 'discreet':
@@ -332,11 +333,27 @@ class SpectrometerController_QEPro(Class_SpectrometerController):
                 adv.abort_acquisition()
                 adv.clear_data_buffer()
                 
-                intensity = self._temp_list_mea[-1]
+                intensity_raw = self._temp_list_mea[-1]
                 timestamp = self._temp_list_ts[-1] + self._init_timestamp - self._offset_timestamp
                 
             wavelength = self._wavelength
             integration_time = self.dev.get_integration_time()
+        
+        # Convert ctypes LP_c_double objects to Python floats
+        # The Ocean Direct API returns ctypes objects that need to be converted
+        try:
+            # For continuous mode: intensity_raw is a ctypes array
+            # For discrete mode: intensity_raw is a ctypes POINTER(c_double)
+            if hasattr(intensity_raw, '_length_'):
+                # It's a ctypes array, convert each element
+                intensity = [float(intensity_raw[i]) for i in range(len(intensity_raw))]
+            else:
+                # It's a ctypes pointer, convert each element by indexing
+                # Get the length from wavelength array since they should match
+                intensity = [float(intensity_raw[i]) for i in range(len(wavelength))]
+        except (TypeError, AttributeError):
+            # Fallback: if intensity_raw is already a list of floats, use as-is
+            intensity = intensity_raw
         
         spectra = pd.DataFrame({
             DataAnalysisConfigEnum.WAVELENGTH_LABEL.value: wavelength,

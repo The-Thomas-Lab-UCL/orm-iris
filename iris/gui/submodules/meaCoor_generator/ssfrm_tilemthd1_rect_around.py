@@ -57,6 +57,14 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
         
     # >>> Widgets <<<
         # Make the widgets to store the coordinates
+        self._bool_overrideZ = tk.BooleanVar(value=False)
+        chk_overrideZ = tk.Checkbutton(frm_control,text='Override Z-coordinate for the tiling',variable=self._bool_overrideZ)
+        lbl_coorz = tk.Label(frm_control,text='Z-coordinate override for the tiling [μm]:')
+        self._str_coorz_override = tk.StringVar(value='')
+        self._entry_coorz = tk.Entry(frm_control, state='disabled', textvariable=self._str_coorz_override)
+        btn_coorz_set = tk.Button(frm_control,text='Set current-Z coordinate',command=self._set_z_override)
+        chk_overrideZ.bind('<Button-1>', lambda e: self._entry_coorz.config(state='normal' if not self._bool_overrideZ.get() else 'disabled'))
+        
         self._lbl_crop = tk.Label(frm_control,text='Cropping factors (X,Y) [a.u.]:')
         self._entry_cropx = tk.Entry(frm_control)
         self._entry_cropy = tk.Entry(frm_control)
@@ -64,14 +72,25 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
         self._entry_cropy.insert(0,'0.0')  # Default cropping factor y
         
         # Pack the widgets
-        row=0; col=0
-        self._lbl_crop.grid(row=row,column=0,columnspan=2,sticky='w');row+=1
-        self._entry_cropx.grid(row=row,column=0);col+=1
-        self._entry_cropy.grid(row=row,column=1)
+        chk_overrideZ.grid(row=0,column=0,columnspan=2,sticky='w')
+        lbl_coorz.grid(row=1,column=0,columnspan=2,sticky='w')
+        self._entry_coorz.grid(row=2,column=0)
+        btn_coorz_set.grid(row=2,column=1,sticky='w')
         
-        [self.grid_rowconfigure(i,weight=1) for i in range(row+1)]  # Make the rows expandable
-        [self.grid_columnconfigure(i,weight=1) for i in range(col+1)]  # Make the columns expandable
+        self._lbl_crop.grid(row=3,column=0,columnspan=2,sticky='w')
+        self._entry_cropx.grid(row=4,column=0)
+        self._entry_cropy.grid(row=4,column=1)
 
+        [self.grid_rowconfigure(i,weight=1) for i in range(5)]  # Make the rows expandable
+        [self.grid_columnconfigure(i,weight=1) for i in range(2)]  # Make the columns expandable
+        
+    def _set_z_override(self):
+        try:
+            z = str(float(self._motion_controller.get_coordinates_closest_mm()[2]*1e3))
+            self._str_coorz_override.set(z)
+        except Exception as e:
+            messagebox.showerror('Error',f'Invalid Z-coordinate: {e}')
+        
     def get_tiling_coordinates_mm_and_cropFactors_rel(self) -> tuple[list[MeaCoor_mm],float,float]|None:
         """
         Returns the mapping coordinates and the cropping factors
@@ -209,6 +228,13 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
             method='linear',
             fill_value=np.nan
         )
+        
+        if self._bool_overrideZ.get():
+            try:
+                z_override = float(self._entry_coorz.get()) * 1e-3
+                list_z_mm = [z_override for _ in list_z_mm]
+            except Exception as e:
+                messagebox.showerror('Error',f'Invalid Z-coordinate override: {e}\nUsing the interpolated Z-coordinates instead.')
         
         list_xyz_mm = [(x, y, z) for (x, y), z in zip(list_xy_mm, list_z_mm) if not np.isnan(z)]
         ret_mapCoor_mm = MeaCoor_mm(
