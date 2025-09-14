@@ -6,6 +6,8 @@ For: The Thomas Group, Biochemical Engineering Dept., UCL
 """
 import os
 import threading
+import PySide6.QtWidgets as qw
+import PySide6.QtCore as qc
 import tkinter as tk
 import time
 import datetime as dt
@@ -201,23 +203,24 @@ def thread_assign(func):
         return thread  # You could optionally return the thread object
     return wrapper
 
-def get_all_widgets(parent_frame:tk.Frame,get_all=True) -> list[tk.Widget]:
+def get_all_widgets(parent_widget:qw.QWidget,get_all=True) -> list[qw.QWidget]:
     """
     A function that returns all widgets in a frame and optionally, its subframes (all levels)
 
     Args:
-        parent_frame (tk.Frame): Frame which widgets needs to be listed
-        get_all (bool, optional): If True it will get the widgets in the sub-frames as well
+        parent_widget (qw.QWidget): Widget which children need to be listed
+        get_all (bool, optional): If True it will get the widgets in the sub-widgets as well
 
     Returns:
-        list[tk.Widget]: List of all widgets in the frame
+        list[qw.QWidget]: List of all widgets in the widget
     """
-    widget_list = []
-    for child_widget in parent_frame.winfo_children():
-        widget_list.append(child_widget)
-        if get_all:
-            widget_list.extend(get_all_widgets(child_widget))  # Recursion
-    return widget_list
+    if get_all:
+        return parent_widget.findChildren(qw.QWidget)   # The default findChildren() is already recursive
+    else:
+        # findChildren() with a search option that limits depth
+        # For a single level, findChildren(type, options) is useful
+        # We find widgets that are immediate children of the parent.
+        return parent_widget.findChildren(qw.QWidget, qc.Qt.FindChildOption.FindDirectChildrenOnly) # type: ignore
 
 def check_and_create_config_file(config_file_path:str='config.ini'):
     """

@@ -644,12 +644,10 @@ class DataStreamer_StageCam(mp.Process):
         """
         with self._lock_pipe:
             self._coor_pipe_main.send((self.Enum_CoorType.INTERPOLATE,timestamp))
-            # print('get_coordinates_interpolate: Sent request')
             coor = self._coor_pipe_main.recv()
-            # print('get_coordinates_interpolate: Received data')
         return coor
     
-    def get_coordinates_closest(self,timestamp:int) -> tuple[float,float]|tuple[None,None]:
+    def get_coordinates_closest(self,timestamp:int) -> tuple[float,float,float]|None:
         """
         Get the closest coordinates to the timestamp
         
@@ -657,13 +655,11 @@ class DataStreamer_StageCam(mp.Process):
             timestamp (int): Timestamp in us
         
         Returns:
-            tuple: Timestamp, coordinates or a tuple of None,None if no coordinates are found
+            tuple: Coordinates in [x,y,z] or None if no coordinates are found
         """
         with self._lock_pipe:
             self._coor_pipe_main.send((self.Enum_CoorType.CLOSEST,timestamp))
-            # print('get_coordinates_closest: Sent request')
             coor = self._coor_pipe_main.recv()
-            # print('get_coordinates_closest: Received data')
         return coor
         
 def initialise_manager_stage(manager:mpm.SyncManager):
