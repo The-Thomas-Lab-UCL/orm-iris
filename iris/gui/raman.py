@@ -1,8 +1,10 @@
 """
 A class that manages the motion controller aspect for the Ocean Direct Raman spectrometer
 """
-import tkinter as tk
-from tkinter import ttk
+import PySide6.QtWidgets as qw
+import PySide6.QtCore as qc
+from PySide6.QtCore import Qt as qt, Signal, Slot, QObject, QThread, QTimer
+from PySide6.QtGui import QPixmap
 
 import os
 import multiprocessing as mp
@@ -29,7 +31,7 @@ if __name__ == '__main__':
     import sys
     import os
     libdir = os.path.abspath(r'.\iris')
-    sys.path.append(os.path.dirname(libdir))
+    sys.path.insert(0, os.path.dirname(libdir))
 
 
 from iris.utils.general import *
@@ -43,12 +45,9 @@ from iris.controllers import Controller_Spectrometer
 from iris import DataAnalysisConfigEnum
 from iris.gui import AppRamanEnum, AppPlotEnum
 
-class Frm_RamanSpectrometerController(tk.Frame):
+class Frm_RamanSpectrometerController(qw.QGroupBox):
     """
     A class defining the app subwindow for the Raman spectrometer.
-    
-    Args:
-        tk (None): No args needed
     """
     def __init__(self, parent,processor:mpp.Pool,controller:Controller_Spectrometer,
                  ramanHub:DataStreamer_Raman, dataHub:Frm_DataHub_Mapping,main:bool=False):

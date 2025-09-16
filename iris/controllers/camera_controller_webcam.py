@@ -10,7 +10,7 @@ if __name__ == '__main__':
     import sys
     import os
     libdir = os.path.abspath(r'.\iris')
-    sys.path.append(os.path.dirname(libdir))
+    sys.path.insert(0, os.path.dirname(libdir))
     
 
 from iris.controllers import ControllerConfigEnum
