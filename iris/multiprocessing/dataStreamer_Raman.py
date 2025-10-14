@@ -86,7 +86,7 @@ class DataStreamer_Raman(mp.Process):
         Args:
             controller (raman_spectrometer_controller): The controller for the spectrometer
             dict_measurements (mpm.DictProxy): A dictionary to store the measurements
-            pipe_cal_update (mpc.PipeConnection): A pipe to update the calibration
+            pipe_cal_update (mpc.Connection): A pipe to update the calibration
         """
         super().__init__()
         self._controller = controller
@@ -141,12 +141,12 @@ class DataStreamer_Raman(mp.Process):
         # Locks
         self._lock_meaCal_pipe = mp.Lock() # A lock for the pipe to calibrate a measurement
         
-    def get_calibrator_pipe(self) -> mpc.PipeConnection:
+    def get_calibrator_pipe(self) -> mpc.Connection:
         """
         Returns the pipe to update the calibrator
         
         Returns:
-            mpc.PipeConnection: The pipe to update the calibrator
+            mpc.Connection: The pipe to update the calibrator
         """
         return self._pipe_cal_update_front
         

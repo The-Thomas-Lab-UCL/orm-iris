@@ -108,12 +108,12 @@ class DataStreamer_StageCam(mp.Process):
         A coordinate storage and processor for the stage hub, to be run 
         in a separate process.
         """
-        def __init__(self,pipe:mpc.PipeConnection):
+        def __init__(self,pipe:mpc.Connection):
             """
             Stores and interpolates the coordinates from the stage controllers.
 
             Args:
-                pipe (mpc.PipeConnection): _description_
+                pipe (mpc.Connection): _description_
             """
             self._pipe = pipe   # Pipe for communication with the main process
             
@@ -279,12 +279,12 @@ class DataStreamer_StageCam(mp.Process):
         """
         Child process to acquire the camera images, correct them, and send them to the main process
         """
-        def __init__(self,pipe:mpc.PipeConnection, cam_controller:CameraController):
+        def __init__(self,pipe:mpc.Connection, cam_controller:CameraController):
             """
             Initialise the child process.
             
             Args:
-                pipe (mpc.PipeConnection): Pipe for communication with the main process
+                pipe (mpc.Connection): Pipe for communication with the main process
                 cam_controller (CameraController): Camera controller
                 
             Usage:
