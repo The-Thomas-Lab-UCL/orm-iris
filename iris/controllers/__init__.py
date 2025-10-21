@@ -11,7 +11,7 @@ from enum import Enum
 if __name__ == '__main__':
     import sys
     SCRIPT_DIR = os.path.abspath(r'.\library')
-    sys.path.append(os.path.dirname(SCRIPT_DIR))
+    sys.path.insert(0, os.path.dirname(SCRIPT_DIR))
 
 
 from iris.utils.general import read_update_config_file_section
@@ -63,7 +63,7 @@ dict_controller_options_read = read_update_config_file_section(
 # > Controller choices <
 dict_controller_choices = {
     'camera_controller': 'dummy',         # select between: 'dummy', 'webcam', 'thorlabs_mono', 'thorlabs_color'    
-    'spectrometer_controller': 'dummy',   # select between: 'dummy', 'pi', 'qepro', 'andor'
+    'spectrometer_controller': 'dummy',   # select between: 'dummy', 'pi', 'qepro', 'andor', 'wasatch_enlighten'
     'stagexy_controller': 'dummy',        # select between: 'dummy', 'm30xym', 'zaber', 'pi'
     'stagez_controller': 'dummy',         # select between: 'dummy', 'z825b', 'mcm301', 'pfm450'
     }
@@ -71,7 +71,7 @@ dict_controller_choices = {
 # > Controller choices <
 dict_controller_choices_comments = {
     'camera_controller': 'select between: "dummy", "webcam", "thorlabs_mono", "thorlabs_color"',
-    'spectrometer_controller': 'select between: "dummy", "pi", "qepro", "andor"',
+    'spectrometer_controller': 'select between: "dummy", "pi", "qepro", "andor", "wasatch_enlighten"',
     'stagexy_controller': 'select between: "dummy", "m30xym", "zaber", "pi"',
     'stagez_controller': 'select between: "dummy", "z825b", "mcm301", "pfm450"',
     }
@@ -195,6 +195,9 @@ dict_controllerSpecific_default = {
     'z825b_serial': '',  # Serial number of the Z825B stage
     # > Thorlabs MCM301 stage parameters <
     'mcm301_sdk_dirpath': r'C:\Program Files (x86)\Thorlabs\MCM301\Sample\Thorlabs_MCM301_PythonSDK',    # Dirpath to the MCM301 Thorlabs stage's Python SDK
+    # > Wasatch Enlighten spectrometer parameters <
+    'wasatch_laser_enable': True,  # Enable or disable the laser on the Wasatch spectrometer (through Englighten)
+    'wasatch_laser_power_mw': 450,  # Set the laser power in [mW] for the Wasatch spectrometer (through Englighten)
 }
 
 dict_controllerSpecific_comments = {
@@ -240,6 +243,9 @@ dict_controllerSpecific_comments = {
     'z825b_serial': 'Serial number of the Z825B stage',
     # > Thorlabs MCM301 stage parameters <
     'mcm301_sdk_dirpath': "Dirpath to the MCM301 Thorlabs stage's Python SDK",
+    # > Wasatch Enlighten spectrometer parameters <
+    'wasatch_laser_enable': 'Enable or disable the laser on the Wasatch spectrometer (through Enlighten)',
+    'wasatch_laser_power_mw': 'Set the laser power in [mW] for the Wasatch spectrometer (through Enlighten)',
 }
 
 dict_controllerSpecific_read = read_update_config_file_section(
@@ -294,6 +300,9 @@ class ControllerSpecificConfigEnum(Enum):
     Z825B_SERIAL = dict_controllerSpecific_read['z825b_serial']
     # > Thorlabs MCM301 stage parameters <
     MCM301_SDK_DIRPATH = dict_controllerSpecific_read['mcm301_sdk_dirpath']
+    # > Wasatch Enlighten spectrometer parameters <
+    WASATCH_LASER_ENABLE = dict_controllerSpecific_read['wasatch_laser_enable']
+    WASATCH_LASER_POWER_MW = dict_controllerSpecific_read['wasatch_laser_power_mw']
 
 ################################################################################
 # >>>>> Imports for the controllers <<<<<
@@ -324,6 +333,8 @@ elif ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'pi_dll':
     from .raman_spectrometer_controller_PI_dll import SpectrometerController_PI as Controller_Spectrometer
 elif ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'andor':
     from .raman_spectrometer_controller_Andor_pylablib import SectrometerController_AndorSDK2 as Controller_Spectrometer
+elif ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'wasatch_enlighten':
+    from .raman_spectrometer_controller_WasatchEnlighten import SpectrometerController_WasatchEnlighten as Controller_Spectrometer
 else:
     if not ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'dummy':
         print(f'\n>>>>> Spectrometer controller {ControllerConfigEnum.SPECTROMETER_CONTROLLER.value} not available. Using dummy spectrometer controller instead.')
