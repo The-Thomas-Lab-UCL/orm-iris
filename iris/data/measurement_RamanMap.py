@@ -25,6 +25,7 @@ from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 from matplotlib.colorbar import Colorbar
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 # matplotlib.use('Agg')
 
 if __name__ == '__main__':
@@ -2153,7 +2154,8 @@ class MeaRMap_Plotter:
     
     def plot_heatmap_scatter(self, mapping_unit:MeaRMap_Unit|None=None, wavelength:float|None=None,
                      clim:tuple[float,float]|None=None, title = '2D Mapping', size:float|None=None,
-                     fig:Figure|None=None, ax:Axes|None=None, clrbar:Colorbar|None=None) -> tuple[Figure,Axes,Colorbar]:
+                     fig:Figure|None=None, ax:Axes|None=None, clrbar:Colorbar|None=None,
+                     plt_kwargs:dict|None=None) -> tuple[Figure|None,Axes|None,Colorbar|None]:
         """
         Plots a heatmap plot from a mapping unit, given its coordinates, and labels indicating the data column info.
         
@@ -2204,7 +2206,7 @@ class MeaRMap_Plotter:
         
         if any([not isinstance(mapping_unit,MeaRMap_Unit), wavelength is None]):
             return (fig,ax,None)
-        
+                
         # Check if the the data can be plot using tripcolor
         if any([len(intensity) < 3, len(set(x_val)) < 2, len(set(y_val)) < 2]):
             return (fig,ax,None)
@@ -2214,10 +2216,19 @@ class MeaRMap_Plotter:
         
         figsize = fig.get_size_inches()
         number_of_points = len(x_val)
-        
         point_size = (figsize[0]*figsize[1])/number_of_points*750 if not isinstance(size,float) else size
-        ax.scatter(x_val, y_val, c=intensity, cmap=AppPlotEnum.PLT_COLOUR_MAP.value, s=point_size, linewidths=0, marker='s')
-
+        
+        plt_kwargs_ori = {
+            'c': intensity,
+            'cmap': AppPlotEnum.PLT_COLOUR_MAP.value,
+            's': point_size,
+            'linewidths': 0,
+            'marker': 's'
+        }
+        for key in plt_kwargs.keys():
+            plt_kwargs_ori[key] = plt_kwargs[key]
+        ax.scatter(x_val, y_val, **plt_kwargs_ori)
+        
         # Add colourbar and labels
         cbar:Colorbar = fig.colorbar(ax.collections[0], ax=ax)
         ax.set_title(title)
