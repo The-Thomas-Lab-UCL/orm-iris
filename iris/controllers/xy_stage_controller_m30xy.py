@@ -110,8 +110,8 @@ class XYController_M30XYM(Class_XYController):
         # Continue by setting up the motors and initializing (calibrating) the coordinate system of the motors
         try:
             self._set_vel_acc()
-            if not self.issimulation or (self._motorx.NeedsHoming or self._motory.NeedsHoming):
-                self.homing_n_coor_calibration()
+            # if not self.issimulation or (self._motorx.NeedsHoming or self._motory.NeedsHoming):
+            #     self.homing_n_coor_calibration()
         except Exception as e:
             print('Coordinate calibration has failed:')
             print(e)
