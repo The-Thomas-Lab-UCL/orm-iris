@@ -256,9 +256,27 @@ class XYController_PI(Class_XYController):
         self._flg_useDrec = ControllerSpecificConfigEnum.PISTAGE_DEVTIMESTAMP.value # To activate/deactivate the data recorder
         
         # Initialises the device
+        self._identifier = None
         try: self.initialisation()
         except Exception as e: print(f'__init__ Error: {e}')
         
+    def get_identifier(self) -> str:
+        if self._identifier is None:
+            self._identifier = self._get_hardware_identifier()
+        return self._identifier
+    
+    def _get_hardware_identifier(self) -> str:
+        """
+        Returns the hardware identifier of the stage.
+
+        Returns:
+            str: The hardware identifier of the stage
+        """
+        if self._devname is None:
+            with self._lock: self._devname = self.device.devname
+        serialnum = self._serial_no
+        return f"Physik Instrumente device model: {self._devname}, S/N:{serialnum}"
+
     def auto_reconnect(self) -> None:
         """
         Automatically reconnect to the device after some time

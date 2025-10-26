@@ -44,6 +44,17 @@ class Class_ZController():
             print(e)
             self.terminate()
         
+    def get_identifier(self) -> str:
+        """
+        Returns the identifier of the camera.
+
+        Returns:
+            str: The identifier of the camera
+        """
+        # <<<<< Insert the command to get the camera identifier here
+        identifier = "ZStageController_ID: Not set"
+        return identifier
+        
     def initialisation(self) -> None:
         """
         Initialises the parameters

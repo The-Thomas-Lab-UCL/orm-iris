@@ -90,15 +90,38 @@ class SpectrometerController_WasatchEnlighten(Class_SpectrometerController):
         
         self._lock = Lock()     # Lock for the acquisition process
         
+        self._identifier = None
         # Start the initialisation process
         self.initialisation()
+        
+    def get_identifier(self) -> str:
+        """
+        Returns the identifier of the spectrometer.
 
+        Returns:
+            str: The identifier of the spectrometer
+        """
+        if self._identifier is None: self._identifier = self._get_hardware_identifier()
+        return self._identifier
+        
+    def _get_hardware_identifier(self) -> str:
+        """
+        Returns the hardware identifier of the spectrometer.
+
+        Returns:
+            str: The hardware identifier of the spectrometer
+        """
+        model = self.device.settings.eeprom.model
+        serial_number = self.device.settings.eeprom.serial_number
+        return f"WasatchEnlighten_{model}_S/N:{serial_number}"
+        
 # Core functionalities (initialisation, termination)
     def initialisation(self) -> None:
         """
         Initializes the Raman spectrometer controller.
         """
         self.device.connect()
+        self._identifier = self._get_hardware_identifier()
         self._list_pixels = self.device.settings.pixels()
         
         self._wavelengths = np.asarray(self.device.settings.wavelengths)

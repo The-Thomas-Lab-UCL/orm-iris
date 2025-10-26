@@ -139,6 +139,26 @@ class XYController_PI(Class_XYController):
         try: self.initialisation()
         except Exception as e: print(e)
         
+    def get_identifier(self) -> str:
+        """
+        Returns the identifier of the stage controller.
+
+        Returns:
+            str: The identifier of the stage controller
+        """
+        if self._identifier is None: self._identifier = self._get_hardware_identifier()
+        return self._identifier
+        
+    def _get_hardware_identifier(self) -> str:
+        """
+        Returns the hardware identifier of the stage controller.
+
+        Returns:
+            str: The hardware identifier of the stage controller
+        """
+        if self._model is None: self._model = self.device.qIDN().strip()
+        return f"Physik Instrumente device model: {self._model}, S/N:{self._serial_no}"
+
     def _remap_coordinates_flip(self,coor:tuple[float,float],get:bool) -> tuple[float,float]:
         """
         Remaps the coordinates if the x and y axes are flipped

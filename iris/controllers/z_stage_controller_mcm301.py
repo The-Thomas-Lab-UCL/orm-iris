@@ -25,7 +25,7 @@ class ZController_MCM301(Class_ZController):
         self.devs = MCM301.list_devices()
         
         if len(self.devs) <= 0:
-            raise("MCM301: There is no devices connected")
+            raise ConnectionError("MCM301: There is no devices connected")
         
         self.BitPerSec = 115200 # Baud rate
         self.timeout_connect = 3 # Connection timeout in seconds
@@ -35,10 +35,10 @@ class ZController_MCM301(Class_ZController):
         self.hdl = self.controller.open(self.serial_no, self.BitPerSec, self.timeout_connect)
         
         if self.hdl < 0:
-            raise("MCM301: Open failed")
+            raise ConnectionError("MCM301: Open failed")
         if self.controller.is_open(self.serial_no) == 0:
-            raise("MCM301: MCM301IsOpen failed")
-        
+            raise ConnectionError("MCM301: MCM301IsOpen failed")
+
         # Motor parameters setup
         self.slot = 4               # Slot number of the motor
         self.mot_waittime = 0.005   # Wait time for the motor to stop moving [sec]
@@ -68,6 +68,7 @@ class ZController_MCM301(Class_ZController):
         
         
         # Start by initializing the connection, device, motors, and their parameters
+        self._identifier = None
         try:
             self.initialisation()
         except Exception as e:
@@ -83,6 +84,20 @@ class ZController_MCM301(Class_ZController):
             print('Coordinate calibration has failed:')
             print(e)
             self.terminate()
+            
+    def get_identifier(self) -> str:
+        if self._identifier is None:
+            self._identifier = self._get_hardware_identifier()
+        return self._identifier
+            
+    def _get_hardware_identifier(self) -> str:
+        """
+        Returns the hardware identifier of the stage.
+
+        Returns:
+            str: The hardware identifier of the stage
+        """
+        return f"MCM301, S/N:{self.serial_no}"
         
     def initialisation(self):
         """

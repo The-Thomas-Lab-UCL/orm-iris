@@ -122,15 +122,15 @@ class Frm_HighLvlController_Raman(tk.Frame):
         self._frm_coorGen = frm_coorGen
         
         # Add shortcuts to the frm_coorGen
-        self._btn_perform_discreetMapping_single = self._frm_coorGen.add_shortcut(
-            btn_label='Perform discreet mapping',
-            command=self.perform_discreetMapping,)
+        self._btn_perform_discreteMapping_single = self._frm_coorGen.add_shortcut(
+            btn_label='Perform discrete mapping',
+            command=self.perform_discreteMapping,)
         
         self._btn_perform_continuousMapping_single = self._frm_coorGen.add_shortcut(
             btn_label='Perform continuous mapping',
             command=self.perform_continuousMapping,
         )
-        self._list_shortcut_widgets = [self._btn_perform_discreetMapping_single,self._btn_perform_continuousMapping_single]
+        self._list_shortcut_widgets = [self._btn_perform_discreteMapping_single,self._btn_perform_continuousMapping_single]
         
     # >>> Controller initialisation <<<
         # To gain access to the other 2 controllers and data save manager
@@ -211,13 +211,13 @@ class Frm_HighLvlController_Raman(tk.Frame):
         self._ssfrm_scan_options.grid(row=2,column=0,sticky='nsew')
 
         # >> Mapping options widgets setup <<
-        self._btn_perform_discreetMapping_multi = tk.Button(self._ssfrm_mapping_options,text='Perform multi-discreet mapping\nof the selected coordinates',
-                                                            command=lambda: self.perform_discreetMapping_multi())
+        self._btn_perform_discreteMapping_multi = tk.Button(self._ssfrm_mapping_options,text='Perform multi-discrete mapping\nof the selected coordinates',
+                                                            command=lambda: self.perform_discreteMapping_multi())
         self._btn_perform_continuousMapping_multi = tk.Button(self._ssfrm_mapping_options,text='Perform multi-continuous mapping\nof the selected coordinates',
                                                                 command=lambda: self.perform_continuousMapping_multi())
         self._init_scanoptions()
                 
-        self._btn_perform_discreetMapping_multi.grid(row=4,column=0,sticky='ew',pady=(5,0))
+        self._btn_perform_discreteMapping_multi.grid(row=4,column=0,sticky='ew',pady=(5,0))
         self._btn_perform_continuousMapping_multi.grid(row=4,column=1,sticky='ew',pady=(5,0))
         
     # >>> Mapping scrambler options setup <<<
@@ -288,7 +288,27 @@ class Frm_HighLvlController_Raman(tk.Frame):
             rb_scan_dir = tk.Radiobutton(self._ssfrm_scan_options, text=scan_dir.value,
                                         variable=self._str_scanDir, value=scan_dir.value)
             rb_scan_dir.grid(row=1,column=i, sticky='w', padx=5, pady=5)
-
+            
+    def _generate_metadata_dict(self, map_method:Literal['discrete', 'continuous']) -> dict:
+        """
+        Generates extra metadata for the mapping measurement
+        
+        Returns:
+            dict: The extra metadata
+        """
+        controller_ids = self.motion_controller.get_controller_identifiers()
+        extra_metadata = {
+            'camera_id': controller_ids[0],
+            'xystage_id': controller_ids[1],
+            'zstage_id': controller_ids[2],
+            'mapping_method': map_method,
+            'scan_method': self._str_scanMethod.get(),
+            'scan_direction': self._str_scanDir.get(),
+            'scramble_random': self._bool_randomise_mappingCoor.get(),
+            'scramble_jump': self._bool_jump_mappingCoor.get(),
+        }
+        return extra_metadata
+            
     def get_mappingUnit_data(self) -> MeaRMap_Unit:
         """
         Gets the mapping data from the controller
@@ -527,13 +547,13 @@ class Frm_HighLvlController_Raman(tk.Frame):
         btn.configure(text=text,command=command,bg=self.bg_colour)
         self.status_update()
     
-    def _scramble_mapping_coordinates(self, list_mappingCoor:list, mode:Literal['discreet','continuous']) -> list:
+    def _scramble_mapping_coordinates(self, list_mappingCoor:list, mode:Literal['discrete','continuous']) -> list:
         """
         Scrambles the mapping coordinates based on the selected mode.
         
         Args:
             list_mappingCoor (list): The list of coordinates to be scrambled
-            mode (str): The mode to scramble the coordinates. Can be 'discreet' or 'continuous'.
+            mode (str): The mode to scramble the coordinates. Can be 'discrete' or 'continuous'.
             
         Returns:
             list: The scrambled coordinates
@@ -542,7 +562,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
             ValueError: If the jump value is not a positive integer
             
         NOTE:
-            The 'discreet' mode will scramble the coordinates randomly, while the 'continuous' mode will always group the
+            The 'discrete' mode will scramble the coordinates randomly, while the 'continuous' mode will always group the
             start and end coordinates of the lines together.
         """
         list_init = list_mappingCoor.copy()
@@ -599,28 +619,28 @@ class Frm_HighLvlController_Raman(tk.Frame):
         return list_final
     
     @thread_assign
-    def perform_discreetMapping(self,mapping_coordinates:MeaCoor_mm):
+    def perform_discreteMapping(self,mapping_coordinates:MeaCoor_mm):
         """
-        Performs a discreet mapping based on the information stored in the mapping method
+        Performs a discrete mapping based on the information stored in the mapping method
         
         Args:
             mapping_coordinates (MappingCoordinates_mm): The mapping coordinates to be used for the mapping measurement.
         """
         def reset():
             self.reset_mapping_widgets(
-                self._btn_perform_discreetMapping_single,
-                'Perform discreet mapping',
-                lambda: self.perform_discreetMapping(self._frm_coorGen.generate_current_mapping_coordinates())
+                self._btn_perform_discreteMapping_single,
+                'Perform discrete mapping',
+                lambda: self.perform_discreteMapping(self._frm_coorGen.generate_current_mapping_coordinates())
             )
             
         # >>> Initial checks <<<
         # Disable the mapping widgets
         self._disable_mapping_widgets()
         
-        ## Change the 'Perform discreet mapping' button into a stop button
-        self.after(10,self._btn_perform_discreetMapping_single.configure(state='active',\
-            text='STOP',command=lambda:self.abort_mapping_run(self._btn_perform_discreetMapping_single,\
-            'Perform discreet mapping',lambda: self.perform_discreetMapping(self._frm_coorGen.generate_current_mapping_coordinates())),bg='red'))
+        ## Change the 'Perform discrete mapping' button into a stop button
+        self.after(10,self._btn_perform_discreteMapping_single.configure(state='active',\
+            text='STOP',command=lambda:self.abort_mapping_run(self._btn_perform_discreteMapping_single,\
+            'Perform discrete mapping',lambda: self.perform_discreteMapping(self._frm_coorGen.generate_current_mapping_coordinates())),bg='red'))
         
         # Check if the raman controller is currently running
         mapping_hub = self._dataHub_map.get_MappingHub()
@@ -630,7 +650,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
         list_coors = self._convertCoor_byScanOptions(list_coors)
         
         try:
-            self._perform_discreetMapping(
+            self._perform_discreteMapping(
                 mapping_hub=mapping_hub,
                 mapping_coordinates=list_coors,
                 unit_name=unit_name
@@ -645,20 +665,20 @@ class Frm_HighLvlController_Raman(tk.Frame):
         reset()
         
     @thread_assign
-    def perform_discreetMapping_multi(self):
+    def perform_discreteMapping_multi(self):
         """
-        Performs multiple discreet mapping based on the information stored in the dictionary
+        Performs multiple discrete mapping based on the information stored in the dictionary
         """
         def reset():
-            self.reset_mapping_widgets(self._btn_perform_discreetMapping_multi,'Perform multi-discreet mapping\nof the selected coordinates',self.perform_discreetMapping_multi)
+            self.reset_mapping_widgets(self._btn_perform_discreteMapping_multi,'Perform multi-discrete mapping\nof the selected coordinates',self.perform_discreteMapping_multi)
         # >>> Initial checks <<<
         # Disable the mapping widgets
         self._disable_mapping_widgets()
         
-        ## Change the 'Perform discreet mapping' button into a stop button
-        self.after(10,self._btn_perform_discreetMapping_multi.configure(state='active',\
-            text='STOP',command=lambda:self.abort_mapping_run(self._btn_perform_discreetMapping_multi,\
-            'Perform multi-discreet mapping\nof the selected coordinates',self.perform_discreetMapping_multi),bg='red'))
+        ## Change the 'Perform discrete mapping' button into a stop button
+        self.after(10,self._btn_perform_discreteMapping_multi.configure(state='active',\
+            text='STOP',command=lambda:self.abort_mapping_run(self._btn_perform_discreteMapping_multi,\
+            'Perform multi-discrete mapping\nof the selected coordinates',self.perform_discreteMapping_multi),bg='red'))
         
         # Check if the raman controller is currently running
         self.flg_isrunning_mapping = True
@@ -680,7 +700,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
             mapping_coordinates = self._convertCoor_byScanOptions(mapping_coordinates)
             
             try:
-                self._perform_discreetMapping(
+                self._perform_discreteMapping(
                     mapping_hub=mapping_hub,
                     mapping_coordinates=mapping_coordinates,
                     unit_name=unit_name
@@ -698,7 +718,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
         messagebox.showinfo('Mapping measurement complete','The mapping measurement is complete and added to the data hub')
         reset()
         
-    def _perform_discreetMapping(self, mapping_hub:MeaRMap_Hub,mapping_coordinates:list, unit_name:str):
+    def _perform_discreteMapping(self, mapping_hub:MeaRMap_Hub,mapping_coordinates:list, unit_name:str):
         """
         Performs the mapping with the main coordinates stored in the mapping methods:
             1. Checks if the coordinates for mapping is ready
@@ -722,23 +742,26 @@ class Frm_HighLvlController_Raman(tk.Frame):
         """
         
     # >>> Initialisations <<<
+        # Generate the extra metadata for the mapping measurement
+        extra_metadata = self._generate_metadata_dict('discrete')
+        
         # Initialise the mapping measurement data class
-        self.measurement_data_2D_unit = MeaRMap_Unit(unit_name)
+        self.measurement_data_2D_unit = MeaRMap_Unit(unit_name, extra_metadata=extra_metadata)
         self._dataHub_map.append_MappingUnit(self.measurement_data_2D_unit)
         
         # Scramble the mapping coordinates if requested
-        mapping_coordinates = self._scramble_mapping_coordinates(mapping_coordinates,'discreet')
+        mapping_coordinates = self._scramble_mapping_coordinates(mapping_coordinates,'discrete')
         
         # Set up a flag to abort the mapping measurement if needed
         self.flg_isrunning_mapping = True
         
         # Perform the mapping measurement itself
-        thread_plot = self._scan_discreet(mapping_coordinates)
+        thread_plot = self._scan_discrete(mapping_coordinates)
         
         # Update the data hub tree view and request to save the data
         self._dataHub_map.update_tree()
         
-    def measurement_autosaver_discreet(self,mapping_unit:MeaRMap_Unit,flg_isrunning:threading.Event
+    def measurement_autosaver_discrete(self,mapping_unit:MeaRMap_Unit,flg_isrunning:threading.Event
                               ,queue_measurement:queue.Queue):
         """
         A function to automatically grabs the measurement data form the
@@ -773,7 +796,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 print('Error in autosaver:',e)
                 self.status_update('Error in autosaver',bg_colour='red')
     
-    def _scan_discreet(self, mapping_coordinates:list):
+    def _scan_discrete(self, mapping_coordinates:list):
         total_coordinates = len(mapping_coordinates)  # Total number of coordinates
         list_time_estimation = []   # List to store the time estimation
         # thread_save = threading.Thread()
@@ -784,7 +807,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
         flg_isrunning_autosaver = threading.Event()
         flg_isrunning_autosaver.set()
         queue_measurement = queue.Queue()
-        thread_autosaver = threading.Thread(target=self.measurement_autosaver_discreet,kwargs={
+        thread_autosaver = threading.Thread(target=self.measurement_autosaver_discrete,kwargs={
             'mapping_unit':self.measurement_data_2D_unit,
             'flg_isrunning':flg_isrunning_autosaver,
             'queue_measurement':queue_measurement
@@ -818,7 +841,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
                             flg_isrunning=flg_isrunning_autosaver,
                             q_measurement_old=queue_measurement,
                             q_measurement_new=queue_measurement_new,
-                            mode='discreet',
+                            mode='discrete',
                             thread_autosaver=thread_autosaver,
                         )
                         queue_measurement = queue_measurement_new                    
@@ -827,7 +850,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 time_0start = time.time()
                 
                 if not self.flg_isrunning_mapping: break   # Stops the measurement immediately when required.
-                if i%AppRamanEnum.AUTOSAVE_FREQ_DISCREET.value == 0 and i > 0 and not thread_offload.is_alive():
+                if i%AppRamanEnum.AUTOSAVE_FREQ_DISCRETE.value == 0 and i > 0 and not thread_offload.is_alive():
                     thread_offload = self._frm_coorHub_treeview.offload_mappingCoor(unit_name,mapping_coordinates,i+1)
                 
                 # Go to the requested coordinates
@@ -957,7 +980,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 self.status_update('Error in autosaver',bg_colour='red')
         
     def init_measurement_autosaver(self,mapping_unit:MeaRMap_Unit,flg_isrunning:threading.Event,q_measurement_old:queue.Queue,
-        q_measurement_new:queue.Queue,mode:Literal['discreet','continuous'],thread_autosaver:threading.Thread|None=None)\
+        q_measurement_new:queue.Queue,mode:Literal['discrete','continuous'],thread_autosaver:threading.Thread|None=None)\
             -> tuple[threading.Thread,queue.Queue,threading.Event]:
         """
         Initialises the measurement autosaver thread. It will try to wait for the previous autosaver to finish
@@ -970,7 +993,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
             q_measurement_new (queue.Queue): The new queue to store the measurement data
             stageHub (stage_measurement_hub): The stage hub to get the coordinates
             flg_autosaver_ready (threading.Event): The flag to indicate that the autosaver is ready
-            mode (str): The mode of the measurement, either 'discreet' or 'continuous'
+            mode (str): The mode of the measurement, either 'discrete' or 'continuous'
             thread_autosaver (threading.Thread): autosaver thread from the previous measurement
             
         Returns:
@@ -991,8 +1014,8 @@ class Frm_HighLvlController_Raman(tk.Frame):
         # > Initialise the new autosaver thread
         flg_isrunning.set()     # Reset the flag to allow the new autosaver to start
         # Restart the autosaver thread
-        if mode == 'discreet':
-            thread_autosaver = threading.Thread(target=self.measurement_autosaver_discreet,kwargs=({
+        if mode == 'discrete':
+            thread_autosaver = threading.Thread(target=self.measurement_autosaver_discrete,kwargs=({
                 'mapping_unit': mapping_unit,
                 'flg_isrunning': flg_isrunning,
                 'q_measurement': q_measurement_new,
@@ -1062,7 +1085,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
         # Disable the mapping widgets
         self._disable_mapping_widgets()
         
-        ## Change the 'Perform discreet mapping' button into a stop button
+        ## Change the 'Perform discrete mapping' button into a stop button
         self.after(10,self._btn_perform_continuousMapping_multi.configure(state='active',\
             text='STOP',command=lambda:self.abort_mapping_run(btn=self._btn_perform_continuousMapping_multi,\
             text='Perform multi-continuous mapping\nof the selected coordinates',command=self.perform_continuousMapping_multi),bg='red'))
@@ -1129,8 +1152,11 @@ class Frm_HighLvlController_Raman(tk.Frame):
         mapping_coordinates_ends = self._convertCoor_byScanOptions(mapping_coordinates,ends_only=True)
         
     # >>> Initialisations <<<
+        # Generate the extra metadata for the mapping measurement
+        extra_metadata = self._generate_metadata_dict('continuous')
+        
         # Initialise the mapping measurement data class
-        self.measurement_data_2D_unit = MeaRMap_Unit(unit_name)
+        self.measurement_data_2D_unit = MeaRMap_Unit(unit_name, extra_metadata=extra_metadata)
         self._dataHub_map.append_MappingUnit(self.measurement_data_2D_unit)
         
         # Scramble the mapping coordinates if requested

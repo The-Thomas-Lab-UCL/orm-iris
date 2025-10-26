@@ -53,9 +53,10 @@ class MeaRMap_Unit():
     A mapping_measurement_unit object can then be appended to a mapping_measurement object,
     which keeps track of the collection of mapping_measurement_unit objects.
     """
-    def __init__(self, unit_name='raw_measurement', unit_id:str|None=None) -> None:
+    def __init__(self, unit_name='raw_measurement', unit_id:str|None=None, extra_metadata:dict={}) -> None:
         # Make sure that mea_id is a valid name for a database table
         assert isinstance(unit_name, str), 'mapping_measurement_unit: The input data type is not correct. Expected a string.'
+        assert isinstance(extra_metadata, dict), 'mapping_measurement_unit: The input data type is not correct. Expected a dictionary.'
         if unit_id is None: unit_id = uuid.uuid4().hex
         else: unit_id = unit_id; assert unit_id.isidentifier, 'mapping_measurement_unit: The input unit_id is not a valid identifier.'
         
@@ -82,10 +83,11 @@ class MeaRMap_Unit():
         self._dflabel_wavelength = DAEnum.WAVELENGTH_LABEL.value    # Wavelength column name corresponding to the dataframe of the measurements
         self._dflabel_intensity = DAEnum.INTENSITY_LABEL.value      # Intensity column name corresponding to the dataframe of the measurements
         
+        self._extra_metadata = extra_metadata   # Extra metadata to be stored in the measurement unit
         self._dict_metadata = {
             self._unit_id_key: self._unit_id,
             self._unit_name_key: unit_name,
-            'measurement_metadata': None
+            'measurement_metadata': extra_metadata.copy()
         }
         
         self._dict_metadata_types = {   # Type definition for loading the metadata from the database
@@ -241,7 +243,7 @@ class MeaRMap_Unit():
         except (KeyError, AttributeError): self._flg_measurement_exist = False
         
         try:
-            if len(self._dict_metadata) == 0: self._flg_metadata_exist = False
+            if len(self._dict_metadata) == len(self._extra_metadata): self._flg_metadata_exist = False
         except (KeyError, AttributeError): self._flg_metadata_exist = False
         
         return self._flg_measurement_exist and self._flg_metadata_exist
@@ -363,12 +365,14 @@ class MeaRMap_Unit():
         assert isinstance(measurement_metadata, dict), 'set_metadata: The input data type is not correct. Expected a dictionary.'
         
         if not self._flg_metadata_exist:
-            self._dict_metadata['measurement_metadata'] = measurement_metadata
+            self._dict_metadata['measurement_metadata'].update(measurement_metadata)
             self._flg_metadata_exist = True
         else:
-            assert self._dict_metadata['measurement_metadata'] == measurement_metadata,\
+            assert all([key in self._dict_metadata['measurement_metadata'].keys() for key in measurement_metadata.keys()]),\
                 'set_metadata: The input metadata is different from the stored metadata.'
-        
+            assert all([val == self._dict_metadata['measurement_metadata'][key] for key,val in measurement_metadata.items()]),\
+                'set_metadata: The input metadata is different from the stored metadata.'
+                
     def append_dict_measurement_data(self,dict_measurement:dict):
         """
         Appends the measurement data into the list of stored measurements.
@@ -407,7 +411,8 @@ class MeaRMap_Unit():
         # Check if the measurement metadata is the same as the stored metadata
         measurement_metadata = measurement.get_metadata()
         if not self._flg_metadata_exist: self._set_measurement_metadata(measurement_metadata)
-        elif measurement_metadata != self._dict_metadata['measurement_metadata']:
+        elif not all([key in measurement_metadata.keys() for key in self._dict_metadata['measurement_metadata'].keys()]) and \
+            not all([val == self._dict_metadata['measurement_metadata'][key] for key,val in measurement_metadata.items()]):
             raise ValueError('append_measurement_data: The measurement metadata does not match the stored metadata.')
         
         with self._lock_measurement:

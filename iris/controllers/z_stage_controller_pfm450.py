@@ -64,12 +64,28 @@ class ZController_PFM450(Class_ZController):
         
         
         # Start by initializing the connection, device, motors, and their parameters
+        self._identifier = None
         try: self.initialisation()
         except Exception as e:
             print('Run ABORTED due to error in intialization: ',e)
             self.terminate(error_flag=True)
         
         # The piezo controller does not need homing (not sure?) and so won't be used here
+
+    def get_identifier(self) -> str:
+        if self._identifier is None:
+            self._identifier = self._get_hardware_identifier()
+        return self._identifier
+
+    def _get_hardware_identifier(self) -> str:
+        """
+        Returns the hardware identifier of the stage.
+
+        Returns:
+            str: The hardware identifier of the stage
+        """
+        identifier = f"PFM450 Piezo Stage, S/N:{self._serial_no}"
+        return identifier
     
     def initialisation(self):
         """

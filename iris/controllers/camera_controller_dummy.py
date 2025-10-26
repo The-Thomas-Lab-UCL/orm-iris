@@ -31,6 +31,9 @@ class CameraController_Dummy(Class_CameraController):
         
         print('\n>>>>> DUMMY camera controller is used <<<<<')
         
+    def get_identifier(self) -> str:
+        return "Dummy camera controller"
+        
     def camera_intialisation(self):
         self.flg_initialised = True
         

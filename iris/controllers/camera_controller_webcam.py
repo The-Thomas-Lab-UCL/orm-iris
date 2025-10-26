@@ -44,6 +44,15 @@ class CameraController_Webcam(Class_CameraController):
         
         self.flg_initialised = True
 
+    def get_identifier(self) -> str:
+        """
+        Returns the identifier of the camera.
+
+        Returns:
+            str: The identifier of the camera
+        """
+        return f"Webcam, index {self.camera_index}"
+
     def camera_intialisation(self):
         self.vc = cv2.VideoCapture(0)
         self.flg_initialised = True
