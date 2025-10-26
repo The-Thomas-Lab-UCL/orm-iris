@@ -186,8 +186,29 @@ class SpectrometerController_PI(Class_SpectrometerController):
         self.integration_time_inc = 1           # int: Stores the spectrometer's allowable integration time increment [millisec]
         
         # Start the initialisation process
+        self._identifier = None
         self.initialisation()
+        
+    def get_identifier(self) -> str:
+        """
+        Returns the identifier of the spectrometer.
 
+        Returns:
+            str: The identifier of the spectrometer
+        """
+        if self._identifier is None:
+            self._identifier = self._get_hardware_identifier()
+        return self._identifier
+    
+    def _get_hardware_identifier(self) -> str:
+        """
+        Returns the hardware identifier of the spectrometer.
+
+        Returns:
+            str: The hardware identifier of the spectrometer
+        """
+        return f"Princeton Instrument_{self._dev.get_device_info()}"
+    
 # Core functionalities (initialisation, termination)
     def initialisation(self):
         if isinstance(self._dev,pic.PicamCamera): self.terminate()

@@ -32,7 +32,18 @@ class Class_CameraController:
         self._mirrory = ControllerConfigEnum.CAMERA_MIRRORY.value
         
         self.flg_initialised = True
+        
+    def get_identifier(self) -> str:
+        """
+        Returns the identifier of the camera.
 
+        Returns:
+            str: The identifier of the camera
+        """
+        # <<<<< Insert the command to get the camera identifier here
+        identifier = "CameraController_ID: Not set"
+        return identifier
+        
     def camera_termination(self) -> None:
         """
         To terminate the connections to the camera prior exit

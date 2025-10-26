@@ -169,6 +169,10 @@ class Frm_MotionController(tk.Frame):
         self.ctrl_xy = xy_controller    # The xy-stage controller (proxy)
         self.ctrl_z = z_controller      # The z-stage controller (proxy)
         
+        self._controller_id_camera = self._stageHub.get_camera_controller().get_identifier()
+        self._controller_id_xy = self.ctrl_xy.get_identifier()
+        self._controller_id_z = self.ctrl_z.get_identifier()
+        
         self._current_coor:np.array = np.zeros(3)  # The current coordinates of the stage, only to be used internally!
         self._flg_ontarget_gotocoor = threading.Event() # A flag to check if the stage is on target for the go to coordinates
         
@@ -593,6 +597,16 @@ class Frm_MotionController(tk.Frame):
         if isinstance(xy_speed,float) and isinstance(z_speed,float):
             self.after(10,self.lbl_speed_xy.configure(text='XY speed: {:.2f}%'.format(xy_speed)))
             self.after(10,self.lbl_speed_z.configure(text='Z speed: {:.2f}%'.format(z_speed)))
+        
+    def get_controller_identifiers(self) -> tuple:
+        """
+        Returns the controller identifiers for the camera, xy-stage, and z-stage
+        Returns:
+            tuple: (camera-id, xy-stage-id, z-stage-id)
+        """
+        return (self._controller_id_camera,
+                self._controller_id_xy,
+                self._controller_id_z)
         
     def get_VelocityParameters(self):
         """

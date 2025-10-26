@@ -9,7 +9,7 @@ from typing import Any, Callable
 import threading
 import multiprocessing as mp
 from multiprocessing.managers import DictProxy
-from multiprocessing.connection import PipeConnection, Pipe
+from multiprocessing.connection import Connection, Pipe
 
 import tkinter as tk
 from tkinter import ttk
@@ -58,7 +58,7 @@ class SpectrometerCalibrator():
     """
     The backend for the wavelength calibration to be used in the RamanMeasurementHub
     """
-    def __init__(self, pipe_update: PipeConnection, pipe_measurement: PipeConnection):
+    def __init__(self, pipe_update: Connection, pipe_measurement: Connection):
         self._cal_params = CalibrationParams()
         
         # The table to map the measured wavelengths to the reference wavelengths
@@ -178,10 +178,10 @@ class Frm_SpectrometerCalibrationGenerator(tk.LabelFrame):
 
     Args:
         master (tk.Tk): The root window
-        pipe_update (PipeConnection): The pipe to update the calibration parameters in the backend
+        pipe_update (Connection): The pipe to update the calibration parameters in the backend
         dict_cal (DictCalibration): The calibration parameters dictionary
     """
-    def __init__(self, parent, pipe_update: PipeConnection):
+    def __init__(self, parent, pipe_update: Connection):
         super().__init__(parent,text='Spectrometer calibration')
         
     # >> General parameters <<

@@ -60,9 +60,21 @@ class CameraController_ThorlabsColor(Class_CameraController):
         
         self.flg_initialised = False
         
+        self._identifier = None
         try: self._initialisation()
         except Exception as e: print('CameraController_ThorlabsColor initialisation error:\n{}'.format(e))
         
+    def get_identifier(self) -> str:
+        """
+        Returns the identifier of the camera.
+
+        Returns:
+            str: The identifier of the camera
+        """
+        if self._identifier is None:
+            self._identifier = f"Thorlabs_{self.camera.model}, S/N:{self.camera.serial_number}"
+        return self._identifier
+
     def reinitialise_connection(self) -> None:
         """
         Reinitialise the camera connection
@@ -126,6 +138,9 @@ class CameraController_ThorlabsColor(Class_CameraController):
         self._mirrory = ControllerConfigEnum.CAMERA_MIRRORY.value
             
         self.flg_initialised = True
+        
+        # Set the identifier
+        self._identifier = f"Thorlabs_{self.camera.model}, S/N:{self.camera.serial_number}"
         
         self._lock.release()
         print('>>>>> Thorlabs color camera initialised <<<<<')

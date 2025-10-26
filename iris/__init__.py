@@ -46,6 +46,7 @@ dict_dataAnalysis_default = {
     'laser_wavelength_nm': float(785),
     'similarity_threshold': 0.1,
     'laser_power_milliwatt': float(50),
+    'objective_info': 'NA',
     # > Labels <
     'wavelength_label': 'Wavelength [nm]',  # Label for the wavelength dataframe column and plot axis
     'intensity_label': 'Intensity [a.u.]',  # Label for the intensity dataframe column and plot axis
@@ -54,9 +55,10 @@ dict_dataAnalysis_default = {
 
 dict_dataAnalysis_comments = {
     # > Basic data analysis parameters <
-    'laser_wavelength_nm': 'Laser excitation wavelength in [nm]',
+    'laser_wavelength_nm': 'Default value for the laser excitation wavelength in [nm] metadata',
     'similarity_threshold': 'Threshold for the similarity of the spectra for wavelength similarity check',
-    'laser_power_milliwatt': 'Laser power in [mW]',
+    'laser_power_milliwatt': 'Default value for the laser power in [mW] metadata',
+    'objective_info': 'Default value for the information about the objective used metadata',
     # > Labels <
     'wavelength_label': 'Label for the wavelength dataframe column and plot axis',
     'intensity_label': 'Label for the intensity dataframe column and plot axis',
@@ -75,8 +77,9 @@ class DataAnalysisConfigEnum(Enum):
     """
     # > Basic data analysis parameters <
     LASER_WAVELENGTH_NM = dict_dataAnalysis_read['laser_wavelength_nm']
-    SIMILARIY_THRESHOLD = dict_dataAnalysis_read['similarity_threshold']
+    SIMILARITY_THRESHOLD = dict_dataAnalysis_read['similarity_threshold']
     LASER_POWER_MILLIWATT = dict_dataAnalysis_read['laser_power_milliwatt']
+    OBJECTIVE_INFO = dict_dataAnalysis_read['objective_info']
     # > Labels <
     WAVELENGTH_LABEL = dict_dataAnalysis_read['wavelength_label']
     INTENSITY_LABEL = dict_dataAnalysis_read['intensity_label']

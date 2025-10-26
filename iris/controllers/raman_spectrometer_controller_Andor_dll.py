@@ -984,12 +984,26 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         self._theoretical_wait_time_sec:float = 0.0
         
         # Initialise the device for acquisition
+        self._identifier = None
         self.initialisation()
+        
+    def get_identifier(self) -> str:
+        """
+        Returns the unique identifier of the spectrometer controller.
+        
+        Returns:
+            str: The unique identifier of the spectrometer controller.
+        """
+        if self._identifier is None:
+            self._identifier = f"Andor_{getCameraSerialNumber()}"
+        return self._identifier
         
     def initialisation(self):
         """
         Initialises the spectrometer controller
         """
+        self._identifier = f"Andor_{getCameraSerialNumber()}"
+        
         self._initialise_cooler()
         self._integration_time_us = self.get_integration_time_us()
         self._start_acquisition()

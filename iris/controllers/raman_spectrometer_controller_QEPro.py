@@ -77,7 +77,16 @@ class SpectrometerController_QEPro(Class_SpectrometerController):
         
         # Start the initialisation process
         self.initialisation()
+        
+    def get_identifier(self) -> str:
+        """
+        Returns the identifier of the spectrometer.
 
+        Returns:
+            str: The identifier of the spectrometer
+        """
+        return self._identifier
+        
 # Core functionalities (initialisation, termination)
     def initialisation(self):
         """
@@ -111,6 +120,8 @@ class SpectrometerController_QEPro(Class_SpectrometerController):
         self.dev_serial = self.dev.get_serial_number()
         print("First Device : %d       " % self.dev_id)
         print("Serial Number: %s     \n" % self.dev_serial)
+        
+        self._identifier = f"Ocean Insight, device id: {self.dev_id}, S/N:{self.dev_serial}"
         
         # Retrieve the integration time requirements of the device
         self.integration_time_max = self.dev.get_maximum_integration_time()

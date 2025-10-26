@@ -31,7 +31,7 @@ from iris.controllers import ControllerConfigEnum, ControllerSpecificConfigEnum,
 class XYController_Zaber(Class_XYController):
     def __init__(self,**kwargs) -> None:
         self.conn:Connection = None         # Connection to the device
-        self.dev:zma.device = None          # Device object (for the motors)
+        self.dev:zma.device.Device = None          # Device object (for the motors)
         
         self.unit_vel = Units.VELOCITY_MILLIMETRES_PER_SECOND
         self.unit_len = Units.LENGTH_MILLIMETRES
@@ -84,6 +84,7 @@ class XYController_Zaber(Class_XYController):
         self._lock = Lock()
         
         # Start by initializing the connection, device, motors, and their parameters
+        self._identifier = None
         try:
             self.initialisation(ControllerSpecificConfigEnum.ZABER_COMPORT.value)
         except Exception as e:
@@ -99,6 +100,26 @@ class XYController_Zaber(Class_XYController):
             print('Coordinate calibration has failed:')
             print(e)
             self.terminate()
+    
+    def get_identifier(self) -> str:
+        if self._identifier is None:
+            self._identifier = self._get_hardware_identifier()
+        return self._identifier
+    
+    def _get_hardware_identifier(self) -> str:
+        """
+        Returns the hardware identifier of the stage.
+
+        Returns:
+            str: The hardware identifier of the stage
+        """
+        device_info = self.dev.identify()
+        name = device_info.name
+        dev_id = device_info.device_id
+        firmware = device_info.firmware_version
+        serial = device_info.serial_number
+        return f"Zaber XY Stage, Name: {name}, ID: {dev_id}, firmware: {firmware}, S/N: {serial}"
+        
     
     def reinitialise_connection(self):
         """

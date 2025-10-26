@@ -157,6 +157,9 @@ class XYController_M30XYM(Class_XYController):
         # a matrix multiplication is not commutative. i.e., A*B != B*A
         return (x,y)
     
+    def get_identifier(self) -> str:
+        return f"M30XY/M Stage, {self._dev_info}"
+    
     def reset_state(self):
         self._isrunning_motorx = 0       # Running state of the x-motor. 1: forward, -1: backward, 0: not moving
         self._isrunning_motory = 0       # Running state of the y-motor. 1: forward, -1: backward, 0: not moving

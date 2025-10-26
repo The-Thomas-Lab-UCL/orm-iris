@@ -73,6 +73,9 @@ class Frm_RamanSpectrometerController(tk.Frame):
         self._ramanHub = ramanHub       # Raman measurement hub
         self._dataHub = dataHub         # Data hub for the measurements
         
+# >>> Get controller parameters <<<
+        self._controller_id = self._controller.get_identifier()
+        
 # >>> Spectrometer control and data handling setup <<<
         # Spectrometer parameters setup
         self.integration_time_ms = AppRamanEnum.DEFAULT_INTEGRATION_TIME_MS.value 
@@ -270,23 +273,32 @@ class Frm_RamanSpectrometerController(tk.Frame):
         # Metadata parameters
         self._laserpower_mW = DataAnalysisConfigEnum.LASER_POWER_MILLIWATT.value
         self._laserwavelength_nm = DataAnalysisConfigEnum.LASER_WAVELENGTH_NM.value
+        self._objective_info = DataAnalysisConfigEnum.OBJECTIVE_INFO.value
         
         # Metadata widgets
         self._str_lbl_laserpower = tk.StringVar(value='Laser power: {} mW'.format(self._laserpower_mW))
         self._str_lbl_laserwavelength = tk.StringVar(value='Laser wavelength: {} nm'.format(self._laserwavelength_nm))
+        self._str_lbl_objectiveinfo = tk.StringVar(value='Objective info: {}'.format(self._objective_info))
         lbl_laserpower = tk.Label(self._sfrm_data,textvariable=self._str_lbl_laserpower)
         lbl_laserwavelength = tk.Label(self._sfrm_data,textvariable=self._str_lbl_laserwavelength)
+        lbl_objectiveinfo = tk.Label(self._sfrm_data,textvariable=self._str_lbl_objectiveinfo)
+        
+         # Entry widgets and button to set the metadata
         self._entry_laserpower = tk.Entry(self._sfrm_data)
         self._entry_laserwavelength = tk.Entry(self._sfrm_data)
+        self._entry_objectiveinfo = tk.Entry(self._sfrm_data)
         btn_set_lasermetadata = tk.Button(self._sfrm_data,text='Set laser metadata',state='normal',
                                             command=lambda: self._set_laserMetadata())
         
         self._entry_laserpower.insert(0,DataAnalysisConfigEnum.LASER_POWER_MILLIWATT.value)
         self._entry_laserwavelength.insert(0,DataAnalysisConfigEnum.LASER_WAVELENGTH_NM.value)
-        
+        self._entry_objectiveinfo.insert(0,DataAnalysisConfigEnum.OBJECTIVE_INFO.value)
+
         self._entry_laserpower.bind('<Return>',lambda event: self._set_laserMetadata())
         self._entry_laserwavelength.bind('<Return>',lambda event: self._set_laserMetadata())
-        
+        self._entry_objectiveinfo.bind('<Return>',lambda event: self._set_laserMetadata())
+        self._entry_objectiveinfo.bind('<Return>',lambda event: self._set_objectiveMetadata())
+
         # Grid the widgets
         self.btn_saveto_datahub.grid(row=0,column=0,pady=5,sticky='ew')
         btn_set_lasermetadata.grid(row=0,column=1,pady=5,sticky='ew')
@@ -294,6 +306,8 @@ class Frm_RamanSpectrometerController(tk.Frame):
         self._entry_laserpower.grid(row=1,column=1,sticky='ew')
         lbl_laserwavelength.grid(row=2,column=0,sticky='ew')
         self._entry_laserwavelength.grid(row=2,column=1,sticky='ew')
+        lbl_objectiveinfo.grid(row=3,column=0,sticky='ew')
+        self._entry_objectiveinfo.grid(row=3,column=1,sticky='ew')
         
         for row in range(self._sfrm_data.grid_size()[1]):
             self._sfrm_data.grid_rowconfigure(row,weight=1)
@@ -303,6 +317,17 @@ class Frm_RamanSpectrometerController(tk.Frame):
     # >>> Finalise the setup <<<
         # Update the statusbar
         self.status_update('Raman setup ready')
+    
+    def _set_objectiveMetadata(self):
+        """
+        Sets the objective metadata based on the entry widgets
+        """
+        try:
+            objective_info = self._entry_objectiveinfo.get()
+            self._str_lbl_objectiveinfo.set('Objective info: {}'.format(objective_info))
+            
+            self._objective_info = objective_info
+        except Exception as e: print('_set_objectiveMetadata',e); self.status_update('Objective metadata setup failed',bg_colour='red')
     
     def _set_laserMetadata(self):
         """
@@ -317,6 +342,28 @@ class Frm_RamanSpectrometerController(tk.Frame):
             self._laserpower_mW = laserpower_mW
             self._laserwavelength_nm = laserwavelength_nm
         except Exception as e: print('_set_laserMetadata',e); self.status_update('Laser metadata setup failed',bg_colour='red')
+    
+    def _generate_metadata_dict(self) -> dict:
+        """
+        Generates the metadata dictionary for the measurement based on the current settings
+        
+        Returns:
+            dict: The metadata dictionary
+        """
+        dict_metadata = {
+            'objective_info': self._objective_info,
+            'spectrometer_id': self._controller_id
+        }
+        return dict_metadata
+    
+    def get_controller_identifier(self):
+        """
+        Returns the identifier of the spectrometer controller
+
+        Returns:
+            str: The identifier of the spectrometer controller
+        """
+        return self._controller_id
     
     def get_single_measurement(self):
         return self._sgl_measurement
@@ -594,13 +641,16 @@ class Frm_RamanSpectrometerController(tk.Frame):
         # Flag for the running operation status and turn off the plot auto updater
         self._flg_isrunning.set()
         
+        dict_metadata_extra = self._generate_metadata_dict()
         while self._flg_isrunning.is_set(): # Run till stopped
             # Initializes the measurement
             measurement = MeaRaman(
                 timestamp=get_timestamp_us_int(),
                 int_time_ms=int_time_ms,
                 laserPower_mW=self._laserpower_mW,
-                laserWavelength_nm=self._laserwavelength_nm)
+                laserWavelength_nm=self._laserwavelength_nm,
+                extra_metadata=dict_metadata_extra,
+                )
             
             # Performs a measurement and add it to the storage
             timestamp_request = get_timestamp_us_int()
@@ -679,9 +729,11 @@ class Frm_RamanSpectrometerController(tk.Frame):
         raw_list = []
         thread = threading.Thread()
         
+        dict_metadata_extra = self._generate_metadata_dict()
         # Initializes the measurement
         measurement = MeaRaman(timestamp=get_timestamp_us_int(),int_time_ms=int_time_ms,
-                                       laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm)
+                                       laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm,
+                                       extra_metadata=dict_metadata_extra)
         acq_count = 0   # Counts the number of measurement done for indexing the result
         
         # Flag for the running operation status and turn off the plot auto updater
@@ -800,8 +852,10 @@ class Frm_RamanSpectrometerController(tk.Frame):
         self.update_label_device_parameters(self.contMea_accumulation)
         
         # Initialise the analyser and plotter
+        dict_metadata_extra = self._generate_metadata_dict()
         measurement = MeaRaman(timestamp=get_timestamp_us_int(),
-            int_time_ms=int_time_ms,laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm)
+            int_time_ms=int_time_ms,laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm,
+            extra_metadata=dict_metadata_extra)
         
         # Initialise the worker thread
         thread_plot = threading.Thread()
@@ -833,6 +887,7 @@ class Frm_RamanSpectrometerController(tk.Frame):
             if trigger == 1:
                 continue
             
+            dict_extra_metadata = self._generate_metadata_dict()
             list_measurement = []
             list_thread = []
             for ts_int,spectrum_raw,int_time_ms in zip(list_timestamp_mea_int,list_spectrum,list_integration_time_ms):
@@ -840,7 +895,8 @@ class Frm_RamanSpectrometerController(tk.Frame):
                 # ts = convert_timestamp_us_int_to_str(ts)
                 
                 measurement = MeaRaman(timestamp=ts_int,int_time_ms=int_time_ms,
-                    laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm)
+                    laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm,
+                    extra_metadata=dict_extra_metadata)
                 measurement.set_raw_list(df_mea=spectrum_raw)
                 
                 list_measurement.append(measurement)
@@ -939,8 +995,10 @@ class Frm_RamanSpectrometerController(tk.Frame):
         thread = threading.Thread()
         
         # Initialise the measurement
+        dict_metadata_extra = self._generate_metadata_dict()
         self._sgl_measurement = MeaRaman(timestamp=get_timestamp_us_int(),
-            int_time_ms=int_time_ms, laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm)
+            int_time_ms=int_time_ms, laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm,
+            extra_metadata=dict_metadata_extra)
         
         # Performs the measurements
         self._flg_isrunning.set()
@@ -1039,9 +1097,11 @@ class Frm_RamanSpectrometerController(tk.Frame):
         thread = threading.Thread()
         
         # Initialise the measurement
+        dict_metadata_extra = self._generate_metadata_dict()
         self._sgl_measurement = MeaRaman(timestamp=get_timestamp_us_int(),
-            int_time_ms=int_time_ms, laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm)
-        
+            int_time_ms=int_time_ms, laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm,
+            extra_metadata=dict_metadata_extra)
+
         # Performs the measurements
         self._flg_isrunning.set()
         accum = self.singMea_accumulation if accum == 'single' else self.contMea_accumulation
