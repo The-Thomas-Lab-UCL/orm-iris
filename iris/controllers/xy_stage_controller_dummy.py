@@ -45,6 +45,8 @@ class XYController_Dummy(Class_XYController):
         
         print('\n>>>>> DUMMY XY controller is used <<<<<')
         
+    def get_identifier(self) -> str:
+        return "Dummy XY Stage Controller"
         
     def initialisation(self,commport:str):
         """

@@ -73,6 +73,7 @@ class ZController_Z825B(Class_ZController):
         
         
         # Start by initializing the connection, device, motors, and their parameters
+        self._identifier = None
         try:
             self.initialisation()
         except Exception as e:
@@ -89,6 +90,20 @@ class ZController_Z825B(Class_ZController):
             print('Coordinate calibration has failed:')
             print(e)
             self.terminate(error_flag=True)
+    
+    def get_identifier(self) -> str:
+        if self._identifier is None:
+            self._identifier = self._get_hardware_identifier()
+        return self._identifier
+    
+    def _get_hardware_identifier(self) -> str:
+        """
+        Returns the hardware identifier of the stage.
+
+        Returns:
+            str: The hardware identifier of the stage
+        """
+        return f"Z825B, S/N:{self.serial_no}"
     
     def initialisation(self):
         """

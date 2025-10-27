@@ -156,17 +156,30 @@ class SectrometerController_AndorSDK2(Class_SpectrometerController):
         # Internal parameters
         self._integration_time_devUnit = 0.0    # Integration time (stored in the object, NOT the unit) in the device's unit
         
+        self._identifier = None
         # Start the initialisation process
         self.initialisation()
         
         print('NOT YET IMPLEMENTED: ROI AND BINNING')
-
+        
+    def get_identifier(self) -> str:
+        """
+        Returns the unique identifier of the spectrometer controller.
+        
+        Returns:
+            str: The unique identifier of the spectrometer controller.
+        """
+        if self._identifier is None:
+            self._identifier = f"Andor_{self._dev.get_device_info()}"
+        return self._identifier
+        
 # Core functionalities (initialisation, termination)
     def initialisation(self) -> None:
         """
         Initializes the Raman spectrometer controller.
         """
         self._dev = Andor.AndorSDK2Camera()
+        self._identifier = f"Andor_{self._dev.get_device_info()}"
         print(f'>>>>> CONNECTED TO {self._dev.get_device_info()} <<<<<')
         
         # > Monitor temperature if requested

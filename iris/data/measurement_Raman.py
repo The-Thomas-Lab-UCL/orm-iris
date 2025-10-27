@@ -50,8 +50,13 @@ from iris.gui import AppPlotEnum
 class MeaRaman():
     """Analyses the data given a dataset and plot it
     """
-    def __init__(self,timestamp:int|None=None,int_time_ms:int|None=None,laserPower_mW:float|None=None,
-                 laserWavelength_nm:float|None=None,reconstruct:bool=False) -> None:
+    def __init__(self,
+                 timestamp:int|None=None,
+                 int_time_ms:int|None=None,
+                 laserPower_mW:float|None=None,
+                 laserWavelength_nm:float|None=None,
+                 extra_metadata:dict={},
+                 reconstruct:bool=False) -> None:
         """
         Initialises the raman measurement.
         
@@ -60,14 +65,16 @@ class MeaRaman():
             int_time (int): integration time used for the measurement
             laserPower_mW (float, optional): laser power in mW
             laserWavelength_nm (float, optional): laser wavelength in nm
+            dict_extra_metadata (dict, optional): extra metadata to be stored. Defaults to None.
             reconstruct (bool, optional): reconstruct the measurement from a saved file. Defaults to False.
         
         Note:
             - If reconstruct is True, the parameter checks are bypassed
         """
         if not reconstruct: assert all([isinstance(timestamp,(int,float)),isinstance(int_time_ms,(int,float)),isinstance(laserPower_mW,(int,float)),
-            isinstance(laserWavelength_nm,(int,float))]), 'Timestamp, integration time, and laser power, and laser wavelength should be integers, integers, and floats respectively'
-            
+            isinstance(laserWavelength_nm,(int,float)),isinstance(extra_metadata,(dict,type(None)))]),\
+            'Timestamp, integration time, and laser power, and laser wavelength should be integers, integers, and floats respectively'
+        
     # >>> Class version <<<
         self.version = '0.2.0_2024.08.22'  # Version of the class
         
@@ -85,7 +92,7 @@ class MeaRaman():
         self.label_intensity = DataAnalysisConfigEnum.INTENSITY_LABEL.value
         
     # >>> Analysis parameters <<<
-        self._tolerance = DataAnalysisConfigEnum.SIMILARIY_THRESHOLD.value  # Tolerance to see if a wavelength is close to another for operations
+        self._tolerance = DataAnalysisConfigEnum.SIMILARITY_THRESHOLD.value  # Tolerance to see if a wavelength is close to another for operations
         
     # >>> Data verification related <<<
         self._flg_uptodate = True    # Indicates if the stored background averaged spectrum is up to date with the raw_list measurements
@@ -101,6 +108,10 @@ class MeaRaman():
         
         self._noneditable_metadata_keys = ['version','integration_time_ms','accumulation']
         assert all([key in self._dict_metadata.keys() for key in self._noneditable_metadata_keys]), 'Non-editable metadata keys are not in the metadata dictionary'
+        
+        assert all([key not in self._dict_metadata.keys() for key in extra_metadata.keys()]),\
+            'Extra metadata keys should not overlap with the default metadata keys'
+        self._dict_metadata.update(extra_metadata) # Add extra metadata if any
         
     def reconstruct(self,measurement_id:int,metadata:dict,spec_analysed:pd.DataFrame,spec_rawlist:list[pd.DataFrame]|None=None):
         """

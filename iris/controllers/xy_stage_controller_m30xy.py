@@ -110,8 +110,8 @@ class XYController_M30XYM(Class_XYController):
         # Continue by setting up the motors and initializing (calibrating) the coordinate system of the motors
         try:
             self._set_vel_acc()
-            if not self.issimulation or (self._motorx.NeedsHoming or self._motory.NeedsHoming):
-                self.homing_n_coor_calibration()
+            # if not self.issimulation or (self._motorx.NeedsHoming or self._motory.NeedsHoming):
+            #     self.homing_n_coor_calibration()
         except Exception as e:
             print('Coordinate calibration has failed:')
             print(e)
@@ -156,6 +156,9 @@ class XYController_M30XYM(Class_XYController):
         # The flip is done before/after the inversion of the axes depending on the get flag because
         # a matrix multiplication is not commutative. i.e., A*B != B*A
         return (x,y)
+    
+    def get_identifier(self) -> str:
+        return f"M30XY/M Stage, {self._dev_info}"
     
     def reset_state(self):
         self._isrunning_motorx = 0       # Running state of the x-motor. 1: forward, -1: backward, 0: not moving

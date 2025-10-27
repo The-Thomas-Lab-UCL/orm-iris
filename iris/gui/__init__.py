@@ -43,7 +43,7 @@ class AppRamanEnum(Enum):
     CONTINUOUS_SPEED_MODIFIER = dict_appConfig_read['continuous_speed_modifier']
     # > Autosave features <
     TEMPORARY_FOLDER = r'./temp' # Temporary folder for the data acquisition
-    AUTOSAVE_FREQ_DISCREET = dict_appConfig_read['autosave_freq_discreet'] # Autosave frequency for the discrete measurements coordinates (NOT the actual data!). e.g., 10 means the remaining unscanned coordinates are saved every 10 measurements
+    AUTOSAVE_FREQ_DISCRETE = dict_appConfig_read['autosave_freq_discreet'] # Autosave frequency for the discrete measurements coordinates (NOT the actual data!). e.g., 10 means the remaining unscanned coordinates are saved every 10 measurements
     AUTOSAVE_FREQ_CONTINUOUS = dict_appConfig_read['autosave_freq_continuous'] # Autosave frequency for the continuous measurements coordinates (NOT the actual data!). e.g., 10 means the remaining unscanned coordinates are saved every 10 measurements
     
     if not os.path.exists(TEMPORARY_FOLDER):

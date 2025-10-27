@@ -55,7 +55,18 @@ class Class_XYController():
             print('Coordinate calibration has failed:')
             print(e)
             self.terminate()
+            
+    def get_identifier(self) -> str:
+        """
+        Returns the identifier of the camera.
 
+        Returns:
+            str: The identifier of the camera
+        """
+        # <<<<< Insert the command to get the camera identifier here
+        identifier = "XYStageController_ID: Not set"
+        return identifier
+            
     def reinitialise_connection(self) -> None:
         """
         Reinitialise the connection to the device

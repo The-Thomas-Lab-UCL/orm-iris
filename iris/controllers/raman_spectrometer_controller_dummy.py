@@ -52,7 +52,10 @@ class SpectrometerController_Dummy(Class_SpectrometerController):
         # Start the initialisation process
         print("\n>>>>> DUMMY Raman controller is used <<<<<")
         self.initialisation()
-
+        
+    def get_identifier(self) -> str:
+        return "Dummy Spectrometer Controller"
+        
 # Core functionalities (initialisation, termination)
     def initialisation(self):
         pass

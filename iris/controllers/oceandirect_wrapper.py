@@ -40,46 +40,44 @@ def setup_oceandirect_imports():
 # Cache the imported classes to avoid repeated imports
 _oceandirect_classes = None
 
-class OceanDirectAPIWrapper:
-    """
-    Wrapper class for OceanDirectAPI that handles DLL loading path issues.
-    """
-    def __init__(self):
-        # Get the SDK directory path
-        sdk_path = os.path.abspath(ControllerSpecificConfigEnum.OCEANINSIGHT_API_DIRPATH.value)
-        sdk_parent_path = os.path.dirname(sdk_path)
-        
-        # Change to SDK directory temporarily for DLL loading
-        original_cwd = os.getcwd()
-        try:
-            os.chdir(sdk_parent_path)
-            
-            # Import and instantiate the actual OceanDirectAPI
-            from oceandirect.OceanDirectAPI import OceanDirectAPI
-            self._api = OceanDirectAPI()
-            
-        finally:
-            # Always restore the original working directory
-            os.chdir(original_cwd)
-    
-    def __getattr__(self, name):
-        """Delegate all attribute access to the wrapped API object."""
-        return getattr(self._api, name)
-
 def get_oceandirect_classes():
     """
     Get the Ocean Direct classes, importing them if necessary.
     
     Returns:
-        tuple: (OceanDirectAPIWrapper, OceanDirectError, FeatureID) classes from the SDK
+        tuple: (OceanDirectAPI, OceanDirectError, FeatureID) classes from the SDK
     """
     global _oceandirect_classes
     
     if _oceandirect_classes is None:
-        # Import the base classes
-        OceanDirectAPI_orig, OceanDirectError, FeatureID = setup_oceandirect_imports()
-        
-        # Return our wrapper instead of the original API class
-        _oceandirect_classes = (OceanDirectAPIWrapper, OceanDirectError, FeatureID)
+        # Import the base classes directly without wrapping
+        _oceandirect_classes = setup_oceandirect_imports()
     
     return _oceandirect_classes
+
+def create_oceandirect_api():
+    """
+    Create an OceanDirectAPI instance with proper path handling.
+    This function handles the DLL path issues during instantiation.
+    
+    Returns:
+        OceanDirectAPI: Properly instantiated API object
+    """
+    # Get the SDK directory path
+    sdk_path = os.path.abspath(ControllerSpecificConfigEnum.OCEANINSIGHT_API_DIRPATH.value)
+    sdk_parent_path = os.path.dirname(sdk_path)
+    
+    # Change to SDK directory temporarily for DLL loading
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(sdk_parent_path)
+        
+        # Get the original classes
+        OceanDirectAPI, _, _ = get_oceandirect_classes()
+        
+        # Create and return the API instance
+        return OceanDirectAPI()
+        
+    finally:
+        # Always restore the original working directory
+        os.chdir(original_cwd)

@@ -34,7 +34,10 @@ class ZController_Dummy(Class_ZController):
         
         self._isrunning_motor = False   # Flag to check if the motor is running
         print('\n>>>>> DUMMY Z controller is used <<<<<')
-                
+        
+    def get_identifier(self) -> str:
+        return "Dummy Z stage controller"
+        
     def initialisation(self):
         """
         Initialises the parameters

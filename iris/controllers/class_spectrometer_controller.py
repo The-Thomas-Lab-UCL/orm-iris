@@ -24,7 +24,18 @@ class Class_SpectrometerController():
         
         # Start the initialisation process
         self.initialisation()
+        
+    def get_identifier(self) -> str:
+        """
+        Returns the identifier of the camera.
 
+        Returns:
+            str: The identifier of the camera
+        """
+        # <<<<< Insert the command to get the camera identifier here
+        identifier = "SpectrometerController_ID: Not set"
+        return identifier
+        
 # Core functionalities (initialisation, termination)
     def initialisation(self) -> None:
         """

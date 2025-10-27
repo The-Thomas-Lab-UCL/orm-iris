@@ -134,8 +134,28 @@ class SpectrometerController_PI(Class_SpectrometerController):
         self._lock = mp.Lock()
         
         # Start the initialisation process
+        self._identifier = None
         self.initialisation()
+        
+    def get_identifier(self) -> str:
+        """
+        Returns the identifier of the spectrometer.
 
+        Returns:
+            str: The identifier of the spectrometer
+        """
+        if self._identifier is None: self._identifier = self._get_hardware_identifier()
+        return self._identifier
+        
+    def _get_hardware_identifier(self) -> str:
+        """
+        Returns the hardware identifier of the spectrometer.
+
+        Returns:
+            str: The hardware identifier of the spectrometer
+        """
+        return f"Princeton Instrument camera model: {self._cameraModel}, S/N: {self._cameraSerialNumber}"
+        
 # Core functionalities (initialisation, termination)
     def initialisation(self):
         # > Get the camera handle and initialise the connection
@@ -146,7 +166,10 @@ class SpectrometerController_PI(Class_SpectrometerController):
             
             self._cameraId = self._get_cameraId()
             self._cameraHandle = func_Picam_OpenCamera(self._cameraId)
-        
+            
+            self._cameraModel = self._cameraId.model.decode('utf-8')
+            self._cameraSerialNumber = self._cameraId.serial_number.decode('utf-8')
+            
             # > Set the timestamp parameters
             # Enable the timestamp metadata
             func_Picam_SetParameterIntegerValue(self._cameraHandle, PicamParameter.PicamParameter_TimeStamps, PicamTimeStampsMask.PicamTimeStampsMask_ExposureStarted)
