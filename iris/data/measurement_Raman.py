@@ -83,7 +83,6 @@ class MeaRaman():
         self._integration_time_ms:int = int_time_ms    # Integration time used for the measuremrent in milliseconds
         
         self._spectrum_rawlist:list[pd.DataFrame] = []      # list of pandas df (of the raw measurements): for storage
-        self._spectrum_rawlist_temp:list[pd.DataFrame] = [] # temporary storage for the raw measurements list
         
         self._spectrum_analysed:pd.DataFrame|None = None            # pandas df: stores the averaged spectrum
         
@@ -312,50 +311,28 @@ class MeaRaman():
         """
         return self._spectrum_rawlist
     
-    def set_raw_list(self,df_mea:pd.DataFrame=None,timestamp_int:int|None=None,idx:int|None=None):
+    def set_raw_list(self,df_mea:pd.DataFrame,timestamp_int:int,max_accumulation:int=1000) -> list[pd.DataFrame]:
         """
         Adds a measurement dataframe to the stored list of continuous measurements
         
         Args:
             df_mea (pd.DataFrame, optional): df of the measurement. Defaults to None.
-            timestmap_int (int, optional): timestamp of the measurement in integer [microsec].
+            timestamp_int (int, optional): timestamp of the measurement in integer [microsec].
             If none, takes the current timestamp. Defaults to None.
-            idx (int, optional): storage location (index) for the given measurement. If none, appends the measurement. Defaults to None.
         """
-        assert isinstance(idx,(type(None),int)), "'idx' should be an integer or None"
         assert isinstance(df_mea,pd.DataFrame), "'df_mea' should be a pandas DataFrame"
-        assert isinstance(timestamp_int,(type(None),int)), "'timestamp_int' should be an integer or None"
+        assert isinstance(timestamp_int,int), "'timestamp_int' should be an integer"
         
-        if isinstance(timestamp_int,type(None)):
-            timestamp_int = get_timestamp_us_int()
         self._measurement_time = timestamp_int
         
-        # Updates the flag to let the class know that a new measurement has been added to the list    
+        # Updates the flag to let the class know that a new measurement has been added to the list
         self._flg_uptodate = False
-        
-        # Checks the length of the current list
-        list_len = len(self._spectrum_rawlist)
-        # Appends the measurement if no index is given, or if the given index is just right next
-        if isinstance(idx,type(None)):
-            self._spectrum_rawlist.append(df_mea.copy())
-        elif idx == list_len:
-            self._spectrum_rawlist.append(df_mea.copy())
-        elif idx > list_len or idx < 0:
-            raise IndexError('set_raw_list: Index out of range')
+
+        if len(self._spectrum_rawlist) < max_accumulation:
+            self._spectrum_rawlist.append(df_mea)
         else:
-            self._spectrum_rawlist[idx] = df_mea.copy()
-        
-        # Safety to prevent memory leak. Warns the user if the list length is excessively long and automatically stores them away if so
-        if list_len > 250:
-            # print('Continuous measurement stored list is MORE THAN 250 DF LONG!!!')
-            # print('If the stored list length exceeds 2000 everything will be removed!')
-            pass
-        elif list_len > 2000:
-            print('Continuous measurement stored list is MORE THAN 2000 DF LONG!!!')
-            print('Stored list has been ERASED')
-            self._spectrum_rawlist_temp = self._spectrum_rawlist.copy()
-            self._spectrum_rawlist = []
-        pass
+            self._spectrum_rawlist.pop(0)
+            self._spectrum_rawlist.append(df_mea)
         return self._spectrum_rawlist
         
     def get_average_rawlist(self,spectrum_rawlist) -> pd.DataFrame:

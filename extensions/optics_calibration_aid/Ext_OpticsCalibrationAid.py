@@ -235,10 +235,7 @@ class Ext_OpticsCalibrationAid(Extension_TopLevel):
         list_mea = []
         queue_mea = queue.Queue()
         self._frm_raman.perform_continuous_single_measurements(
-            widget_override=False,
-            waitforplot=False,
-            delay=0,
-            queue_response=queue_mea,
+            queue_mea=queue_mea,
         )
         
         self._btn_start.config(state='disabled')
@@ -250,7 +247,7 @@ class Ext_OpticsCalibrationAid(Extension_TopLevel):
         self._flg_isrunning.set()
         while self._flg_isrunning.is_set():
             try:
-                _,mea = queue_mea.get_nowait()
+                mea = queue_mea.get_nowait()
                 list_mea.append(mea)
                 list_y, max_y = self._process_listMea(list_mea, max_y)
                 self._update_plot(list_y, max_y)
