@@ -14,7 +14,7 @@ import multiprocessing.pool as mpp
 
 import threading
 import queue
-from typing import Callable, Literal
+from typing import Callable, Literal, Any
 
 import time
 
@@ -25,6 +25,7 @@ from pandas import DataFrame as df
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 mpl.use('Agg')
 
 if __name__ == '__main__':
@@ -49,13 +50,20 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
     """
     A class defining the app subwindow for the Raman spectrometer.
     """
-    def __init__(self, parent,processor:mpp.Pool,controller:Controller_Spectrometer,
-                 ramanHub:DataStreamer_Raman, dataHub:Frm_DataHub_Mapping,main:bool=False):
+    def __init__(
+        self,
+        parent:Any,
+        processor:mpp.Pool,
+        controller:Controller_Spectrometer,
+        ramanHub:DataStreamer_Raman,
+        dataHub:Frm_DataHub_Mapping|None,
+        main:bool=False
+        ) -> None:
         """
         Initialises the Raman spectrometer controller window
         
         Args:
-            parent (tk.Tk): The main tkinter window
+            parent (Any): The parent PyQt widget, window, etc.
             processor (mpp.Pool): The multiprocessing pool for the data processing
             controller (raman_spectrometer_controller): The Raman spectrometer controller
             ramanHub (RamanMeasurementHub): The Raman measurement hub to retrieve measurements from
@@ -105,169 +113,149 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
         
 # >>> Control frames setup <<<
     # Create the subframes to show the plots and controls
-        sfrm_plots = tk.Frame(self)     # Subframe for the plots
-        self._sfrm_controls = tk.Frame(self)  # Subframe for the Raman spectrometer controls
-        self._sfrm_data = tk.Frame(self)      # Subframe for the data management
+        main_layout = qw.QVBoxLayout()
+        self.setLayout(main_layout)
         
-        ## Pack the subframes for display
-        sfrm_plots.grid(row=0,column=0,sticky='nsew')
-        self._sfrm_controls.grid(row=1,column=0,sticky='nsew')
-        self._sfrm_data.grid(row=2,column=0,sticky='nsew')
+        slyt_plot = qw.QVBoxLayout()
+        self._slyt_controls = qw.QGridLayout()
+        self._slyt_data = qw.QGridLayout()
+        
+        main_layout.addLayout(slyt_plot)
+        main_layout.addLayout(self._slyt_controls)
+        main_layout.addLayout(self._slyt_data)
         
         # Initialise the statusbar
-        self._statbar = tk.Label(self, text="Raman controller initialisation", bd=1,relief=tk.SUNKEN,anchor=tk.W)
-        self._statbar.grid(row=3,column=0,sticky='sew')
-        self._bg_colour = self._statbar.cget('background') # gets the default bg_colour
-        
-        # Grid configurations
-        # self.rowconfigure(0,weight=1)
-        # self.rowconfigure(1,weight=1)
-        # self.rowconfigure(2,weight=1)
-        self.rowconfigure(3,weight=1)
-        self.columnconfigure(0,weight=1)
+        self._statbar = qw.QStatusBar(self)
+        self._statbar.showMessage("Raman controller initialisation")
+        main_layout.addWidget(self._statbar)
         
 # >>> Measurement control widgets setup <<<
         self._last_plotter_input = {}  # Stores the last input for the plotter
         
     # Setup the widget to show the plot
         # Subframe setups for the plot and control widgets
-        ssfrm_plot = tk.Frame(sfrm_plots)
-        ssfrm_plot_control_basic = tk.Frame(sfrm_plots) # For basic control widgets
-        ssfrm_plot_control_add = tk.Frame(sfrm_plots)   # For additional control widgets
+        sslyt_plot = qw.QVBoxLayout()
+        sslyt_plot_control_basic = qw.QGridLayout() # For basic control widgets
+        sslyt_plot_control_add = qw.QGridLayout()   # For additional control widgets
         
-        ssfrm_plot.grid(row=0,column=0,sticky='nsew')
-        ssfrm_plot_control_basic.grid(row=1,column=0,sticky='nsew')
-        ssfrm_plot_control_add.grid(row=2,column=0,sticky='nsew')
+        slyt_plot.addLayout(sslyt_plot)
+        slyt_plot.addLayout(sslyt_plot_control_basic)
+        slyt_plot.addLayout(sslyt_plot_control_add)
         
     # Plot widget setup
-        self._lbl_plot = tk.Label(image=None, master=ssfrm_plot)
+        self._plotter = MeaRaman_Plotter()
+        self._fig, self._ax = self._plotter.get_fig_ax()
+        self._fig_widget = FigureCanvas(self._fig)
+        sslyt_plot.addWidget(self._fig_widget)
         
     # Basic plot control widgets
         # Add widgets for additional plot options
-        self._bool_PlotRawOnly = tk.BooleanVar()
-        self._bool_PlotRamanShift = tk.BooleanVar()
-        chk_PlotRawOnly = tk.Checkbutton(ssfrm_plot_control_basic,text='Plot raw only',
-            variable=self._bool_PlotRawOnly, onvalue=True, offvalue=False)
-        chk_PlotRamanShift = tk.Checkbutton(ssfrm_plot_control_basic,text='Plot Raman-shift',
-            variable=self._bool_PlotRamanShift, onvalue=True, offvalue=False)
-        self._entry_ExctWavelen = tk.Entry(ssfrm_plot_control_basic)
+        self._bool_PlotRawOnly = qw.QCheckBox('Plot raw only')
+        self._bool_PlotRawOnly.setChecked(True)
         
-        chk_PlotRawOnly.select()
-        chk_PlotRamanShift.select()
+        self._bool_PlotRamanShift = qw.QCheckBox('Plot Raman-shift')
+        self._bool_PlotRamanShift.setChecked(True)
         
-        # Pack the plot widgets
-        self._lbl_plot.grid(row=0,column=0,columnspan=2)
-        chk_PlotRawOnly.grid(row=1,column=0)
-        chk_PlotRamanShift.grid(row=1,column=1)
-        
+        sslyt_plot_control_basic.addWidget(self._bool_PlotRawOnly,0,0)
+        sslyt_plot_control_basic.addWidget(self._bool_PlotRamanShift,0,1)
+
     # Additional plot control widgets
         # Widgets for the plot limits
-        lbl_xmin = tk.Label(ssfrm_plot_control_add,text='x-min: ')
-        lbl_xmax = tk.Label(ssfrm_plot_control_add,text='x-max: ')
-        lbl_ymin = tk.Label(ssfrm_plot_control_add,text='y-min: ')
-        lbl_ymax = tk.Label(ssfrm_plot_control_add,text='y-max: ')
-        self._entry_xmin = tk.Entry(ssfrm_plot_control_add)
-        self._entry_xmax = tk.Entry(ssfrm_plot_control_add)
-        self._entry_ymin = tk.Entry(ssfrm_plot_control_add)
-        self._entry_ymax = tk.Entry(ssfrm_plot_control_add)
-        btn_reset = tk.Button(ssfrm_plot_control_add,text='Reset plot',command=lambda: self._reset_plot_limits())
+        lbl_xmin = qw.QLabel(text='x-min: ')
+        lbl_xmax = qw.QLabel(text='x-max: ')
+        lbl_ymin = qw.QLabel(text='y-min: ')
+        lbl_ymax = qw.QLabel(text='y-max: ')
+        self._entry_xmin = qw.QLineEdit()
+        self._entry_xmax = qw.QLineEdit()
+        self._entry_ymin = qw.QLineEdit()
+        self._entry_ymax = qw.QLineEdit()
+        btn_reset = qw.QPushButton('Reset limits')
+        btn_reset.clicked.connect(lambda: self._reset_plot_limits())
         
-        lbl_xmin.grid(row=0,column=0)
-        lbl_xmax.grid(row=0,column=2)
-        lbl_ymin.grid(row=1,column=0)
-        lbl_ymax.grid(row=1,column=2)
+        sslyt_plot_control_add.addWidget(lbl_xmin,0,0)
+        sslyt_plot_control_add.addWidget(self._entry_xmin,0,1)
+        sslyt_plot_control_add.addWidget(lbl_xmax,0,2)
+        sslyt_plot_control_add.addWidget(self._entry_xmax,0,3)
+        sslyt_plot_control_add.addWidget(lbl_ymin,1,0)
+        sslyt_plot_control_add.addWidget(self._entry_ymin,1,1)
+        sslyt_plot_control_add.addWidget(lbl_ymax,1,2)
+        sslyt_plot_control_add.addWidget(self._entry_ymax,1,3)
+        sslyt_plot_control_add.addWidget(btn_reset,0,4,2,1)
         
-        self._entry_xmin.grid(row=0,column=1)
-        self._entry_xmax.grid(row=0,column=3)
-        self._entry_ymin.grid(row=1,column=1)
-        self._entry_ymax.grid(row=1,column=3)
-        
-        btn_reset.grid(row=0,column=4,rowspan=2)
-        
-        [widget.bind('<Return>',lambda event: self._force_update_plot())\
-            for widget in ssfrm_plot_control_add.winfo_children() if isinstance(widget,tk.Entry)] 
+        [widget.textChanged.connect(lambda: self._force_update_plot())\
+            for widget in get_all_widgets_from_layout(sslyt_plot_control_add) if isinstance(widget,qw.QLineEdit)]
         
     # Raman controller setups
-        start_state = 'normal'
-        # Add the buttons for the spectrometer controls
-        btn_single_mea = tk.Button(self._sfrm_controls,text='Single measurement',state=start_state,
-                                   command=lambda: self.perform_single_measurement(accum='single'))
-        self.btn_continuous_mea = tk.Button(self._sfrm_controls,text='Continuous measurement', 
-                                               state=start_state, command=lambda: self.perform_continuous_measurement())
+        btn_sngl_mea = qw.QPushButton('Single measurement')
+        btn_cont_mea = qw.QPushButton('Continuous measurement')
         
+        btn_sngl_mea.clicked.connect(lambda: self.perform_single_measurement(accum='single'))
+        btn_cont_mea.clicked.connect(lambda: self.perform_continuous_measurement())
         
+        self._slyt_controls.addWidget(btn_sngl_mea,0,0)
+        self._slyt_controls.addWidget(btn_cont_mea,0,1)
         
     # Add buttons and labels for device parameter setups
         ## Label to notify the users of the current device parameters
-        self.lbl_dev_stat_inttime = tk.Label(self._sfrm_controls,
-                                            text='Device integration time: {} microsec'
-                                            .format(self.integration_time_ms))
-        self.lbl_dev_stat_acq = tk.Label(self._sfrm_controls,
-                                        text='Device accumulation: {} times/average'
-                                        .format(self.contMea_accumulation))
+        self._lbl_dev_stat_inttime = qw.QLabel(
+            text='Device integration time: {} microsec'
+            .format(self.integration_time_ms))
+        self._lbl_dev_stat_acq = qw.QLabel(
+            text='Device accumulation: {} times/average'
+            .format(self.contMea_accumulation))
         
         ## Label to show the current setting, spinbox to let the user enter new parameters,
         ## button to call the command and update the label
         ### for single measurement integration time
-        lbl_inttime = tk.Label(self._sfrm_controls,text='Set integration time [ms]: ')        # label for the setting
-        self.spin_inttime = ttk.Spinbox(self._sfrm_controls,state=start_state)         # spinbox for the input
-        self.btn_inttime = tk.Button(self._sfrm_controls,text='Set',state=start_state,
-            command=lambda:self._set_integration_time(new_value_ms=int(self.spin_inttime.get())))
-        self.spin_inttime.bind('<Return>',lambda event: self._set_integration_time(new_value_ms=int(self.spin_inttime.get())))
+        lbl_inttime = qw.QLabel(text='Set integration time [ms]: ')
+        self._spin_inttime = qw.QSpinBox()
+        self._btn_inttime = qw.QPushButton('Set')
+        
+        self._spin_inttime.valueChanged.connect(lambda: self._set_integration_time(
+            new_value_ms=int(self._spin_inttime.value())))
+        self._btn_inttime.clicked.connect(lambda: self._set_integration_time(
+            new_value_ms=int(self._spin_inttime.value())))
+        
+        self._slyt_controls.addWidget(lbl_inttime,1,0)
+        self._slyt_controls.addWidget(self._spin_inttime,1,1)
+        self._slyt_controls.addWidget(self._btn_inttime,1,2)
         
         ### for single measurement number of accumulation
-        lbl_bg_acq = tk.Label(self._sfrm_controls,
-                              text='Set the single measurement accumulation: {}'.format(self.singMea_accumulation))
-        self.spin_bg_acq = ttk.Spinbox(self._sfrm_controls,state=start_state,from_=1,to=1000,increment=1)             
-        self.btn_bg_acq = tk.Button(self._sfrm_controls,text='Set',state=start_state,
-                                    command=lambda: self.set_singMea_accumulation(
-                                        new_value=int(self.spin_bg_acq.get()),tkcontainer=lbl_bg_acq))
-        self.spin_bg_acq.bind('<Return>',lambda event: self.set_singMea_accumulation(new_value=int(self.spin_bg_acq.get()),
-                                                              tkcontainer=lbl_bg_acq))
+        self._lbl_sngl_acq = qw.QLabel(text='Set the single measurement accumulation: {}'.format(self.singMea_accumulation))
+        self._spin_sngl_acq = qw.QSpinBox()
+        self._btn_sngl_acq = qw.QPushButton('Set')
         
-        ### for the measurement accumulation
-        lbl_mea_acq = tk.Label(self._sfrm_controls,
-                              text='Set the continuous measurement accumulation: {}'.format(self.contMea_accumulation))
-        self.spin_mea_acq = ttk.Spinbox(self._sfrm_controls,state=start_state,from_=1,to=1000,increment=1)             
-        self.btn_mea_acq = tk.Button(self._sfrm_controls,text='Set',state=start_state,
-                                    command=lambda: 
-                                    self.set_contMea_accumulation(new_value=int(self.spin_mea_acq.get()),
-                                                           tkcontainer=lbl_mea_acq))
-        self.spin_mea_acq.bind('<Return>',lambda event: self.set_contMea_accumulation(new_value=int(self.spin_mea_acq.get()),
-                                                                tkcontainer=lbl_mea_acq))
+        self._btn_sngl_acq.clicked.connect(lambda: self.set_singMea_accumulation(
+            new_value=int(self._spin_sngl_acq.value())))
+        self._spin_sngl_acq.valueChanged.connect(lambda: self.set_singMea_accumulation(
+            new_value=int(self._spin_sngl_acq.value())))
         
-        ## Packs the buttons and other widgets
-        row_count=0 # to automatize making new rows
-        self.lbl_dev_stat_inttime.grid(row=row_count,column=0)
+        self._slyt_controls.addWidget(self._lbl_sngl_acq,2,0)
+        self._slyt_controls.addWidget(self._spin_sngl_acq,2,1)
+        self._slyt_controls.addWidget(self._btn_sngl_acq,2,2)
         
-        row_count+=1
-        self.lbl_dev_stat_acq.grid(row=row_count,column=0)
-        
-        row_count+=1
-        btn_single_mea.grid(row=row_count,column=0,pady=10)
-        self.btn_continuous_mea.grid(row=row_count,column=1,pady=10)
-        
-        row_count+=1
-        lbl_inttime.grid(row=row_count,column=0)
-        self.spin_inttime.grid(row=row_count,column=1)
-        self.btn_inttime.grid(row=row_count,column=2)
-        
-        row_count+=1
-        lbl_bg_acq.grid(row=row_count,column=0)
-        self.spin_bg_acq.grid(row=row_count,column=1)
-        self.btn_bg_acq.grid(row=row_count,column=2)
-        
-        row_count+=1
-        lbl_mea_acq.grid(row=row_count,column=0)
-        self.spin_mea_acq.grid(row=row_count,column=1)
-        self.btn_mea_acq.grid(row=row_count,column=2)
+        ### for the continuous measurement accumulation
+        self._lbl_cont_acq = qw.QLabel(text='Set the continuous measurement accumulation: {}'.format(self.contMea_accumulation))
+        self._spin_cont_acq = qw.QSpinBox()
+        self._btn_cont_acq = qw.QPushButton('Set')
+
+        self._btn_cont_acq.clicked.connect(lambda: self.set_contMea_accumulation(
+            new_value=int(self._spin_cont_acq.value())))
+        self._spin_cont_acq.valueChanged.connect(lambda: self.set_contMea_accumulation(
+            new_value=int(self._spin_cont_acq.value())))
+
+        self._slyt_controls.addWidget(self._lbl_cont_acq,3,0)
+        self._slyt_controls.addWidget(self._spin_cont_acq,3,1)
+        self._slyt_controls.addWidget(self._btn_cont_acq,3,2)
         
         if main: self.initialise_spectrometer_n_analyser()
         
     # >>> Data management widgets setup <<<
         # Datasave widget
-        self.btn_saveto_datahub = tk.Button(self._sfrm_data,text="Save 'single measurement' to data hub'",state='normal',
-                                           command=lambda: self._dataHub.append_RamanMeasurement_multi(self._sgl_measurement))
+        self._btn_saveto_datahub = qw.QPushButton("Save 'single measurement' to data hub")
+        if isinstance(self._dataHub,Frm_DataHub_Mapping):
+            self._btn_saveto_datahub.clicked.connect(lambda data=self._sgl_measurement: self._dataHub.append_RamanMeasurement_multi(data))
+        else: self._btn_saveto_datahub.setEnabled(False)
         
         # Metadata parameters
         self._laserpower_mW = DataAnalysisConfigEnum.LASER_POWER_MILLIWATT.value
@@ -275,47 +263,40 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
         self._objective_info = DataAnalysisConfigEnum.OBJECTIVE_INFO.value
         
         # Metadata widgets
-        self._str_lbl_laserpower = tk.StringVar(value='Laser power: {} mW'.format(self._laserpower_mW))
-        self._str_lbl_laserwavelength = tk.StringVar(value='Laser wavelength: {} nm'.format(self._laserwavelength_nm))
-        self._str_lbl_objectiveinfo = tk.StringVar(value='Objective info: {}'.format(self._objective_info))
-        lbl_laserpower = tk.Label(self._sfrm_data,textvariable=self._str_lbl_laserpower)
-        lbl_laserwavelength = tk.Label(self._sfrm_data,textvariable=self._str_lbl_laserwavelength)
-        lbl_objectiveinfo = tk.Label(self._sfrm_data,textvariable=self._str_lbl_objectiveinfo)
+        self._lbl_laserpower = qw.QLabel('Laser power: {} mW'.format(self._laserpower_mW))
+        self._lbl_laserwavelength = qw.QLabel('Laser wavelength: {} nm'.format(self._laserwavelength_nm))
+        self._lbl_objectiveinfo = qw.QLabel('Objective info: {}'.format(self._objective_info))
         
-         # Entry widgets and button to set the metadata
-        self._entry_laserpower = tk.Entry(self._sfrm_data)
-        self._entry_laserwavelength = tk.Entry(self._sfrm_data)
-        self._entry_objectiveinfo = tk.Entry(self._sfrm_data)
-        btn_set_lasermetadata = tk.Button(self._sfrm_data,text='Set laser metadata',state='normal',
-                                            command=lambda: self._set_laserMetadata())
+        # Entry widgets and button to set the metadata
+        self._entry_laserpower = qw.QLineEdit()
+        self._entry_laserwavelength = qw.QLineEdit()
+        self._entry_objectiveinfo = qw.QLineEdit()
+        btn_set_lasermetadata = qw.QPushButton('Set laser metadata')
+        btn_set_lasermetadata.clicked.connect(lambda: self._set_laserMetadata())
         
-        self._entry_laserpower.insert(0,DataAnalysisConfigEnum.LASER_POWER_MILLIWATT.value)
-        self._entry_laserwavelength.insert(0,DataAnalysisConfigEnum.LASER_WAVELENGTH_NM.value)
-        self._entry_objectiveinfo.insert(0,DataAnalysisConfigEnum.OBJECTIVE_INFO.value)
-
-        self._entry_laserpower.bind('<Return>',lambda event: self._set_laserMetadata())
-        self._entry_laserwavelength.bind('<Return>',lambda event: self._set_laserMetadata())
-        self._entry_objectiveinfo.bind('<Return>',lambda event: self._set_laserMetadata())
-        self._entry_objectiveinfo.bind('<Return>',lambda event: self._set_objectiveMetadata())
+        # Default values
+        self._entry_laserpower.setText(str(DataAnalysisConfigEnum.LASER_POWER_MILLIWATT.value))
+        self._entry_laserwavelength.setText(str(DataAnalysisConfigEnum.LASER_WAVELENGTH_NM.value))
+        self._entry_objectiveinfo.setText(str(DataAnalysisConfigEnum.OBJECTIVE_INFO.value))
+        
+        # Bind the value change to setting the laser metadata
+        self._entry_laserpower.textChanged.connect(lambda: self._set_laserMetadata())
+        self._entry_laserwavelength.textChanged.connect(lambda: self._set_laserMetadata())
+        self._entry_objectiveinfo.textChanged.connect(lambda: self._set_objectiveMetadata())
 
         # Grid the widgets
-        self.btn_saveto_datahub.grid(row=0,column=0,pady=5,sticky='ew')
-        btn_set_lasermetadata.grid(row=0,column=1,pady=5,sticky='ew')
-        lbl_laserpower.grid(row=1,column=0,sticky='ew')
-        self._entry_laserpower.grid(row=1,column=1,sticky='ew')
-        lbl_laserwavelength.grid(row=2,column=0,sticky='ew')
-        self._entry_laserwavelength.grid(row=2,column=1,sticky='ew')
-        lbl_objectiveinfo.grid(row=3,column=0,sticky='ew')
-        self._entry_objectiveinfo.grid(row=3,column=1,sticky='ew')
-        
-        for row in range(self._sfrm_data.grid_size()[1]):
-            self._sfrm_data.grid_rowconfigure(row,weight=1)
-        for col in range(self._sfrm_data.grid_size()[0]):
-            self._sfrm_data.grid_columnconfigure(col,weight=1)
+        self._slyt_data.addWidget( self._btn_saveto_datahub,0,0)
+        self._slyt_data.addWidget( btn_set_lasermetadata,0,1)
+        self._slyt_data.addWidget( self._lbl_laserpower,1,0)
+        self._slyt_data.addWidget( self._entry_laserpower,1,1)
+        self._slyt_data.addWidget( self._lbl_laserwavelength,2,0)
+        self._slyt_data.addWidget( self._entry_laserwavelength,2,1)
+        self._slyt_data.addWidget( self._lbl_objectiveinfo,3,0)
+        self._slyt_data.addWidget( self._entry_objectiveinfo,3,1)
         
     # >>> Finalise the setup <<<
         # Update the statusbar
-        self.status_update('Raman setup ready')
+        self._statbar.showMessage("Raman controller ready")
     
     def _set_objectiveMetadata(self):
         """
@@ -376,13 +357,13 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
             accum (int): new accumulation to be displayed
         """
         int_time = self._controller.get_integration_time_us() # in microsec
-        self.lbl_dev_stat_inttime.configure(text='Device integration time: {} millisec'
+        self._lbl_dev_stat_inttime.configure(text='Device integration time: {} millisec'
                                             .format(int(int_time/1000)))
         if accum != None:
-            self.lbl_dev_stat_acq.configure(text='Device accumulation: {} times/average'
+            self._lbl_dev_stat_acq.configure(text='Device accumulation: {} times/average'
                                             .format(accum))
     
-    def set_contMea_accumulation(self,new_value,tkcontainer:tk.Label|None=None):
+    def set_contMea_accumulation(self,new_value):
         """
         Set the accumulation for the continuous measurement.
 
@@ -390,10 +371,9 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
             new_value (int): The new accumulation
         """
         self.contMea_accumulation = new_value
-        if tkcontainer != None:
-            tkcontainer.configure(text= 'Set the continuous measurement accumulation: {}'.format(self.contMea_accumulation))
+        self._lbl_cont_acq.setText('Set the continuous measurement accumulation: {}'.format(self.contMea_accumulation))
     
-    def set_singMea_accumulation(self,new_value,tkcontainer:tk.Label|None=None):
+    def set_singMea_accumulation(self,new_value):
         """
         Set the accumulation for the single measurement.
 
@@ -401,8 +381,7 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
             new_value (int): The new accumulation value
         """
         self.singMea_accumulation = new_value
-        if tkcontainer != None:
-            tkcontainer.configure(text= 'Set the single measurement accumulation: {}'.format(self.singMea_accumulation))
+        self._lbl_sngl_acq.setText('Set the single measurement accumulation: {}'.format(self.singMea_accumulation))
 
     def get_integration_time_ms(self):
         """
@@ -422,15 +401,15 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
             new_value_ms (int): New integration time [ms]
             tkcontainer (tk.label): Tkinter label which text is to be updated
         """
-        self.btn_inttime.configure(state='disabled')
-        self.spin_inttime.configure(state='disabled')
+        self._btn_inttime.configure(state='disabled')
+        self._spin_inttime.configure(state='disabled')
 
         new_int_time_us = self._controller.set_integration_time_us(new_value_ms*1000)
         self.integration_time_ms = int(new_int_time_us/1000)
         self.update_label_device_parameters()
 
-        self.btn_inttime.configure(state='normal')
-        self.spin_inttime.configure(state='normal')
+        self._btn_inttime.configure(state='normal')
+        self._spin_inttime.configure(state='normal')
     
     def update_plot(self):
         def request_image_update_tk(img):
@@ -1163,7 +1142,7 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
         """
         # Configure the integration time config
         intTime_min,intTime_max,intTime_inc = self._controller.get_integration_time_limits_us()
-        self.spin_inttime.configure(from_=intTime_min,to=intTime_max,increment=intTime_inc)
+        self._spin_inttime.setRange(intTime_min,intTime_max)
         
         # Set and get the current device integration time
         self._set_integration_time(self.integration_time_ms)
@@ -1180,10 +1159,10 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
         Disables all widgets in a Tkinter frame and sub-frames
         """
         widget:tk.Widget = None # for typehints
-        for widget in get_all_widgets(self._sfrm_controls):
+        for widget in get_all_widgets(self._slyt_controls):
             widget.configure(state='disabled')
             
-        for widget in get_all_widgets(self._sfrm_data):
+        for widget in get_all_widgets(self._slyt_data):
             widget.configure(state='disabled')
     
     def reset_n_enable_widgets(self):
@@ -1197,11 +1176,11 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
                 widget_list.extend(get_all_widgets(child_widget))  # Recursion
             return widget_list
         
-        for widget in get_all_widgets(self._sfrm_controls):
+        for widget in get_all_widgets(self._slyt_controls):
             widget:tk.Widget
             widget.configure(state='active')
             
-        for widget in get_all_widgets(self._sfrm_data):
+        for widget in get_all_widgets(self._slyt_data):
             widget:tk.Widget
             widget.configure(state='normal')
         
@@ -1274,17 +1253,27 @@ if __name__ == '__main__':
     
     print(os.cpu_count())
     processor = mpp.Pool()
-    root = tk.Tk()
-
-    dataHub = Frm_DataHub_Mapping(master=root)
+    
+    app = qw.QApplication()
+    main_window = qw.QMainWindow()
+    main_window.setWindowTitle("Raman Spectrometer Controller Test")
+    
+    central_widget = qw.QWidget()
+    main_window.setCentralWidget(central_widget)
+    layout = qw.QVBoxLayout(central_widget)
+    
+    # root = tk.Tk()
+    
+    # dataHub = Frm_DataHub_Mapping(master=root)
     raman_frame = Frm_RamanSpectrometerController(
-        parent=root,
+        parent=central_widget,
         processor=processor,
         controller=RamanController_proxy,
         ramanHub=RamanHub,
-        dataHub=dataHub
+        dataHub=None
     )
+    layout.addWidget(raman_frame)
+    main_window.show()
     
-    # raman_frame = raman_spectrometer_controller_frame(master=root,processor=processor)
-    raman_frame.pack()
-    root.mainloop()
+    app.exec()
+    raman_frame.terminate()

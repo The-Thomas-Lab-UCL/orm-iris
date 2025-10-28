@@ -191,7 +191,7 @@ class MeaRaman():
         Returns:
             bool: True if the measurement data exists, False otherwise
         """
-        if len(self._spectrum_rawlist) == 0: return False
+        if len(self._spectrum_rawlist) == 0 and not isinstance(self._spectrum_analysed,pd.DataFrame): return False
         self.check_uptodate(autoupdate=True)
         return True
         
@@ -386,7 +386,7 @@ class MeaRaman():
         else:
             if not spectrum_analysed.shape[1] == 2: raise ValueError("'spectrum_analysed' should have 2 columns (wavelength, intensity)")
             self._spectrum_analysed = pd.DataFrame(spectrum_analysed, columns=[self.label_wavelength, self.label_intensity])
-
+        
     def get_analysed(self, type:Literal['DataFrame','array']='DataFrame') -> pd.DataFrame|np.ndarray|None:
         """
         Get the analysed spectra.
@@ -404,7 +404,64 @@ class MeaRaman():
         else: ret = self._spectrum_analysed.to_numpy()
 
         return ret
+    
+    def _get_any_measurement(self) -> pd.DataFrame:
+        """
+        Returns a dataframe, either from the analysed or the rawlist
 
+        Returns:
+            pd.DataFrame: Dataframe of the measurement.
+        """
+        assert self.check_measurement_exist(), 'No valid measurement exists to get Raman shift array.'
+        if not isinstance(self._spectrum_analysed, pd.DataFrame):
+            return self._spectrum_rawlist[-1]
+        elif isinstance(self._spectrum_analysed, pd.DataFrame):
+            return self._spectrum_analysed
+        else: raise ValueError('Analysed spectra is not in a valid format')
+    
+    def get_arr_wavelength(self) -> np.ndarray:
+        """
+        Returns the wavelength array of the analysed spectra
+
+        Returns:
+            np.ndarray: Wavelength array
+        """
+        df = self._get_any_measurement()
+        return df[self.label_wavelength].to_numpy()
+
+    def get_arr_ramanshift(self) -> np.ndarray:
+        """
+        Returns the Raman shift array of the analysed spectra
+        
+        Returns:
+            np.ndarray: Raman shift array
+        """
+        df = self._get_any_measurement()
+        
+        laser_wavelength = self.get_laser_params()[1]
+        wavelength_array = df[self.label_wavelength].to_numpy()
+        ramanshift_array = convert_wavelength_to_ramanshift(wavelength_array, laser_wavelength)
+        
+        return ramanshift_array # type: ignore ; It's definitely a np.ndarray
+    
+    def get_arr_intensity(self, mea_type:Literal['analysed','raw','any']='analysed') -> np.ndarray:
+        """
+        Returns the intensity array of the analysed or raw spectra
+        
+        Args:
+            mea_type (Literal['analysed','raw'], optional): Type of spectra to get the intensity from. Defaults to 'analysed'.
+        
+        Returns:
+            np.ndarray: Intensity array
+        """
+        assert mea_type in ['analysed','raw','any'], "'type' should be either 'analysed', 'raw', or 'any'"
+        assert self.check_measurement_exist(), 'No valid measurement exists to get intensity array.'
+        if mea_type == 'analysed': df = self._spectrum_analysed
+        elif mea_type == 'raw': df = self._spectrum_rawlist[-1]
+        elif mea_type == 'any': df = self._get_any_measurement()
+        
+        return df[self.label_intensity].to_numpy()
+    
     def _wavelength_similarity_check(self,wavelength_list):
         """
         Check if a list of wavelength is similar, within a tolerance.
@@ -597,18 +654,75 @@ class MeaRaman_Plotter():
     """
     A class for plotting Raman spectra from a RamanMeasurement instance
     """
-    def __init__(self) -> None:
+    def __init__(self, plt_size:list|None=None) -> None:
         # >>> Plot parameters <<<
         self.plt_size = AppPlotEnum.PLT_SIZE_1D_PIXEL.value      # Plot size in [pixel x pixel]
         
         self.wavelength_name = DataAnalysisConfigEnum.WAVELENGTH_LABEL.value     # The wavelength column name
         self.intensity_name = DataAnalysisConfigEnum.INTENSITY_LABEL.value       # The spectra intensity column name
         self.ramanshift_name = DataAnalysisConfigEnum.RAMANSHIFT_LABEL.value     # The Raman shift column name
+        
+        self._fig, self._ax = plt.subplots(figsize=plt_size)
+        
+    def get_fig_ax(self) -> tuple[Figure, Axes]:
+        """
+        Returns the figure and axes used for plotting
+
+        Returns:
+            tuple[Figure, Axes]: figure and axes
+        """
+        return self._fig, self._ax
     
-    def plot_RamanMeasurement(self,measurement:MeaRaman|None=None,title='Spectra',
-                              showplot=False,plt_size:list|None=None, flg_plot_ramanshift=False,
-                              plot_raw:bool=False,
-                              limits:tuple[float,float,float,float]|tuple[None,None,None,None]=(None,None,None,None)) -> np.ndarray:
+    def plot_RamanMeasurement_new(
+        self,
+        measurement:MeaRaman,
+        title='Spectra',
+        flg_plot_ramanshift=False,
+        plot_raw:bool=False,
+        limits:tuple[float|None,float|None,float|None,float|None]=(None,None,None,None),
+        ) -> None:
+        """
+        Plot a given Ramanmeasurement into the internal figure.
+
+        Args:
+            measurement (RamanMeasurement): Measurement instance to plot.
+            title (str, optional): Title of the plot. Defaults to 'Spectra'.
+            showplot (bool, optional): Show the plot with a matplotlib window. Defaults to False.
+            flg_plot_ramanshift (bool, optional): Plot the Raman shift instead of the wavelength. Defaults to False.
+            plot_raw (bool, optional): Plot the raw data instead of the analysed data. Defaults to False.
+            limits (tuple[float,float,float,float], optional): Limits of the plot (xmin,xmax,ymin,ymax). Defaults to (None,None,None,None).
+        """
+        assert isinstance(measurement,MeaRaman), "'measurement' should be a RamanMeasurement instance"
+        assert measurement.check_measurement_exist(), "No valid measurement exists to plot."
+        
+        fig,ax = self.get_fig_ax()
+        ax.clear()
+        
+        if not plot_raw: mea_type = 'analysed'
+        else: mea_type = 'raw'
+        
+        if flg_plot_ramanshift: arr_specpos = measurement.get_arr_ramanshift()
+        else: arr_specpos = measurement.get_arr_wavelength()
+        
+        arr_intensity = measurement.get_arr_intensity(mea_type=mea_type)
+        
+        ax.plot(arr_specpos, arr_intensity)
+        ax.set_xlabel(self.ramanshift_name if flg_plot_ramanshift else self.wavelength_name)
+        ax.set_ylabel(self.intensity_name)
+        ax.set_title(title)
+        ax.set_xlim(limits[0], limits[1])
+        ax.set_ylim(limits[2], limits[3])
+    
+    def plot_RamanMeasurement(
+        self,
+        measurement:MeaRaman|None=None,
+        title='Spectra',
+        showplot=False,
+        plt_size:list|None=None,
+        flg_plot_ramanshift=False,
+        plot_raw:bool=False,
+        limits:tuple[float,float,float,float]|tuple[None,None,None,None]=(None,None,None,None),
+        ) -> np.ndarray:
         """
         Plots a given spectra.
         

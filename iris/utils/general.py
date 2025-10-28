@@ -12,6 +12,7 @@ import tkinter as tk
 import time
 import datetime as dt
 from configupdater import ConfigUpdater
+import numpy as np
 
 import threading
 import time
@@ -97,31 +98,31 @@ def messagebox_request_input(title: str, message: str, default: str = '') -> str
     tl.wait_window()  # Wait for the window to close
     return user_input[0]  # Return the updated value from the list
 
-def convert_wavelength_to_ramanshift(wavelength:float,excitation_wavelength:float) -> float:
+def convert_wavelength_to_ramanshift(wavelength:float|np.ndarray,excitation_wavelength:float) -> float|np.ndarray:
     """
     Converts wavelength to Raman shift
     
     Args:
-        wavelength (float): Wavelength in nm
+        wavelength (float|np.ndarray): Wavelength in nm
         excitation_wavelength (float): Excitation laser wavelength in nm
 
     Returns:
-        float: Raman shift in cm^-1
+        float|np.ndarray: Raman shift in cm^-1
     """
     if wavelength == 0: wavelength = 0.0001
     raman_shift = 1e7*(1/excitation_wavelength - 1/wavelength)
     return raman_shift
 
-def convert_ramanshift_to_wavelength(raman_shift:float,excitation_wavelength:float) -> float:
+def convert_ramanshift_to_wavelength(raman_shift:float|np.ndarray,excitation_wavelength:float) -> float|np.ndarray:
     """
     Converts Raman shift to wavelength
     
     Args:
-        raman_shift (float): Raman shift in cm^-1
+        raman_shift (float|np.ndarray): Raman shift in cm^-1
         excitation_wavelength (float): Excitation laser wavelength in nm
     
     Returns:
-        float: Wavelength in nm
+        float|np.ndarray: Wavelength in nm
     """
     wavelength = 1/(1/excitation_wavelength - raman_shift/1e7)
     return wavelength
@@ -221,6 +222,30 @@ def get_all_widgets(parent_widget:qw.QWidget,get_all=True) -> list[qw.QWidget]:
         # For a single level, findChildren(type, options) is useful
         # We find widgets that are immediate children of the parent.
         return parent_widget.findChildren(qw.QWidget, qc.Qt.FindChildOption.FindDirectChildrenOnly) # type: ignore
+
+def get_all_widgets_from_layout(parent_layout:qw.QLayout,get_all=True) -> list[qw.QWidget]:
+    """
+    A function that returns all widgets in a layout and optionally, its sub-layouts (all levels)
+
+    Args:
+        parent_layout (qw.QLayout): Layout which children need to be listed
+        get_all (bool, optional): If True it will get the widgets in the sub-layouts as well
+
+    Returns:
+        list[qw.QWidget]: List of all widgets in the layout
+    """
+    list_widget = []
+    for i in range(parent_layout.count()):
+        item = parent_layout.itemAt(i)
+        if item.widget():
+            list_widget.append(item.widget())
+            if get_all and isinstance(item.widget(), qw.QWidget):
+                child_widgets = get_all_widgets(item.widget(), get_all=True)
+                list_widget.extend(child_widgets)
+        elif item.layout() and get_all:
+            child_widgets = get_all_widgets_from_layout(item.layout(), get_all=True)
+            list_widget.extend(child_widgets)
+    return list_widget
 
 def check_and_create_config_file(config_file_path:str='config.ini'):
     """

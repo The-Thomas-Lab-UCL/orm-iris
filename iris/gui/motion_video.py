@@ -170,9 +170,16 @@ class Frm_MotionController(qw.QGroupBox):
     signal_statbar_message = Signal(str,str)  # A signal to update the status bar message
     signal_breathing_stopped = Signal()
     
-    def __init__(self,parent,xy_controller:Controller_XY,z_controller:Controller_Z,
-                 stageHub:DataStreamer_StageCam,getter_imgcal:Callable[[],ImgMea_Cal],
-                 flg_issimulation=True, main:bool=False):
+    def __init__(
+        self,
+        parent,
+        xy_controller:Controller_XY,
+        z_controller:Controller_Z,
+        stageHub:DataStreamer_StageCam,
+        getter_imgcal:Callable[[],ImgMea_Cal],
+        flg_issimulation=True,
+        main:bool=False
+        ):
         # Initialise the class
         super().__init__(parent)
         self._stageHub:DataStreamer_StageCam = stageHub
