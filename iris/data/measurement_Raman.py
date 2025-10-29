@@ -348,7 +348,19 @@ class MeaRaman():
         """
         spectrum_avg = self._average(spectrum_rawlist)
         return spectrum_avg
-
+    
+    def calculate_analysed(self) -> pd.DataFrame:
+        """
+        Calculates the analysed values (averaged and subtracted)
+        
+        Returns:
+            pd.DataFrame: analysed spectra
+        """
+        spectrum_analysed = self._average(self._spectrum_rawlist)
+        self._flg_uptodate = True
+        self._spectrum_analysed = spectrum_analysed
+        return spectrum_analysed
+    
     def set_analysed(self,spectrum_analysed:pd.DataFrame|np.ndarray):
         """
         Sets the analysed values (averaged and subtracted)
@@ -469,6 +481,11 @@ class MeaRaman():
         Returns:
             Dataframe: Average spectra in the same form as the input
         """
+        if len(spectra_list) == 1:
+            if queue_response:
+                queue_response.put(spectra_list[0])
+            return spectra_list[0]
+        
         intensity_list = [spectra[self.label_intensity].values for spectra in spectra_list]
         wavelength_list = [spectra[self.label_wavelength].values for spectra in spectra_list]
         

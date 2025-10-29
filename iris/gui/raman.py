@@ -2,29 +2,20 @@
 A class that manages the motion controller aspect for the Ocean Direct Raman spectrometer
 """
 import PySide6.QtWidgets as qw
-import PySide6.QtCore as qc
-from PySide6.QtCore import Qt as qt, Signal, Slot, QObject, QThread, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer
 
 import os
-import multiprocessing as mp
-from multiprocessing.synchronize import Event as EventClass
-import multiprocessing.connection as mpc
 import multiprocessing.pool as mpp
 
 import threading
 import queue
-from typing import Callable, Literal, Any
+from typing import Callable, Any
 
 import time
-
-from PIL import Image, ImageTk
 import cv2
 import numpy as np
-from pandas import DataFrame as df
 
 import matplotlib as mpl
-import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 mpl.use('Agg')
 
@@ -39,12 +30,12 @@ from iris.utils.general import *
 from iris.gui.dataHub_MeaRMap import Frm_DataHub_Mapping
 from iris.data.measurement_Raman import MeaRaman, MeaRaman_Plotter
 from iris.multiprocessing.dataStreamer_Raman import DataStreamer_Raman, initialise_manager_raman, initialise_proxy_raman
-from iris.multiprocessing.basemanager import MyManager, get_my_manager
+from iris.multiprocessing.basemanager import get_my_manager
 
 from iris.controllers import Controller_Spectrometer
 
 from iris import DataAnalysisConfigEnum
-from iris.gui import AppRamanEnum, AppPlotEnum
+from iris.gui import AppRamanEnum
 
 class RamanMeasurement_Analysis_Worker(QObject):
     """
@@ -134,12 +125,20 @@ class RamanMeasurement_Worker(QObject):
     A class defining the worker functions for Raman measurement acquisition.
     """
     finished = Signal(bool)
+    mea_acquired = Signal()
+    mea_acquired_get = Signal(MeaRaman)
     
     def __init__(self, ramanHub: DataStreamer_Raman) -> None:
         super().__init__()
         self._ramanHub = ramanHub
         self._isrunning = False
+        self._timer_single = QTimer()
         
+        self._timer_params = {}
+        self._timer_single.setInterval(1)
+        self._timer_single.setSingleShot(True)
+        self._timer_single.timeout.connect(self._acquire_single_measurement_timeout)
+
     @Slot()
     def stop_acquisition(self) -> None:
         """
@@ -155,34 +154,75 @@ class RamanMeasurement_Worker(QObject):
         laserpower_mW:float,
         laserwavelength_nm:float,
         extra_metadata:dict,
-        queue_mea:queue.Queue|None=None
+        queue_mea:queue.Queue|None=None,
+        emit_measurement:bool=False
         ):
+        self._ramanHub.resume_auto_measurement()
         self._isrunning = True
-        while self._isrunning:
-        # Initializes the measurement
-            timestamp = get_timestamp_us_int()
-            measurement = MeaRaman(
-                timestamp=timestamp,
-                int_time_ms=int_time_ms,
-                laserPower_mW=laserpower_mW,
-                laserWavelength_nm=laserwavelength_nm,
-                extra_metadata=extra_metadata,
-                )
+        
+        self._timer_params = {
+            'accumulation': accumulation,
+            'int_time_ms': int_time_ms,
+            'laserpower_mW': laserpower_mW,
+            'laserwavelength_nm': laserwavelength_nm,
+            'extra_metadata': extra_metadata,
+            'queue_mea': queue_mea,
+            'emit_measurement': emit_measurement
+        }
+        
+        self._timer_single.start()
+
+    @Slot()
+    def _acquire_single_measurement_timeout(self):
+        try:print(f'elapsed time before measurement: {time.time()-self._time:.4f} sec')
+        except: pass
+        self._time = time.time()
+        accumulation = self._timer_params['accumulation']
+        int_time_ms = self._timer_params['int_time_ms']
+        laserpower_mW = self._timer_params['laserpower_mW']
+        laserwavelength_nm = self._timer_params['laserwavelength_nm']
+        extra_metadata = self._timer_params['extra_metadata']
+        queue_mea = self._timer_params['queue_mea']
+        emit_measurement = self._timer_params['emit_measurement']
+        
+        if not self._isrunning:
+            self._timer_single.stop()
+            self._ramanHub.pause_auto_measurement()
+            self.finished.emit(True)
+            return
+        
+        timestamp = get_timestamp_us_int()
+        measurement = MeaRaman(
+            timestamp=timestamp,
+            int_time_ms=int_time_ms,
+            laserPower_mW=laserpower_mW,
+            laserWavelength_nm=laserwavelength_nm,
+            extra_metadata=extra_metadata,
+            )
             
+        for _ in range(accumulation):
             # Performs a measurement and add it to the storage
             timestamp_request = get_timestamp_us_int()
-            result = self._ramanHub.get_measurement(timestamp_request,WaitForMeasurement=False,getNewOnly=True)
-            spectrum_raw = result[1][-1]
+            print(timestamp_request)
             
-            measurement.set_raw_list(
-                df_mea=spectrum_raw,
-                timestamp_int=timestamp,
-                max_accumulation=accumulation
-                )
-            
-            if queue_mea: queue_mea.put(measurement)
-            
-        self.finished.emit(True)
+            # result = self._ramanHub.get_measurement(timestamp_request,WaitForMeasurement=False,getNewOnly=True)
+            # spectrum_raw = result[1][-1]
+                
+            # measurement.set_raw_list(
+            #     df_mea=spectrum_raw,
+            #     timestamp_int=timestamp,
+            #     max_accumulation=accumulation
+            #     )
+                
+        # if queue_mea: queue_mea.put(measurement)
+        # self.mea_acquired.emit()
+        # if emit_measurement: self.mea_acquired_get.emit(measurement)
+        
+        self._timer_single.start()
+        
+    @Slot()
+    def acquire_continuous_measurement(self):
+        pass
         
     @Slot()
     def acquire_single_measurement(
@@ -195,6 +235,7 @@ class RamanMeasurement_Worker(QObject):
         queue_mea:queue.Queue|None=None,
         measurement:MeaRaman|None=None
         ):
+        self._ramanHub.resume_auto_measurement()
         self._isrunning = True
         timestamp = get_timestamp_us_int()
         if measurement is None:
@@ -219,11 +260,61 @@ class RamanMeasurement_Worker(QObject):
                 )
             
             if queue_mea: queue_mea.put(measurement)
-        
-        # print(measurement.self_report())
-        print('done')
+            self.mea_acquired.emit()
+            
+        self._ramanHub.pause_auto_measurement()
         self.finished.emit(True)
         
+    def acquire_continuous_measurement_trigger(
+        self,
+        q_trigger:queue.Queue,
+        q_return:queue.Queue,
+        laserpower_mW:float,
+        laserwavelength_nm:float,
+        extra_metadata:dict,
+        ):
+        self._ramanHub.wait_MeasurementUpdate()
+        trigger = q_trigger.get()
+        list_timestamp_trigger = [get_timestamp_us_int()]
+        self._isrunning = True
+        while self._isrunning:
+            # Wait for the trigger to start the next measurement or to stop
+            trigger = q_trigger.get()
+            if trigger == 0: self._isrunning = False; break
+            
+            # Retrieve the measurements
+            list_timestamp_trigger.append(get_timestamp_us_int())
+            list_timestamp_mea_int,list_spectrum,list_integration_time_ms=\
+                self._ramanHub.get_measurement(
+                    timestamp_start=list_timestamp_trigger[-2],
+                    timestamp_end=list_timestamp_trigger[-1])
+            list_timestamp_trigger.pop(0) # Remove the first element (not needed anymore)
+            
+            # >>> Skips the measurement if the trigger is 1. <<<
+            # This REMOVES the measurement between the trigger timestamp
+            # and the previous timestamp
+            if trigger == 1: continue
+            
+            list_measurement = []
+            for ts_int,spectrum_raw,int_time_ms in zip(list_timestamp_mea_int,list_spectrum,list_integration_time_ms):
+                measurement = MeaRaman(
+                    timestamp=ts_int,
+                    int_time_ms=int_time_ms,
+                    laserPower_mW=laserpower_mW,
+                    laserWavelength_nm=laserwavelength_nm,
+                    extra_metadata=extra_metadata)
+                measurement.set_raw_list(df_mea=spectrum_raw, timestamp_int=ts_int)
+                list_measurement.append(measurement)
+            
+            # Return the measurement result
+            for i, measurement in enumerate(list_measurement):
+                measurement.calculate_analysed()
+                q_return.put((list_timestamp_mea_int[i], measurement))
+                self.mea_acquired_get.emit(measurement)
+                
+        self._ramanHub.pause_auto_measurement()
+        self.finished.emit(True)
+
 class Frm_RamanSpectrometerController(qw.QGroupBox):
     """
     A class defining the app subwindow for the Raman spectrometer.
@@ -460,6 +551,9 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
         self._slyt_data.addWidget( self._lbl_objectiveinfo,3,0)
         self._slyt_data.addWidget( self._entry_objectiveinfo,3,1)
         
+    # >> Thread and worker setup <<<
+
+        
     # >>> Finalise the setup <<<
         # Update the statusbar
         self._statbar.showMessage("Raman controller ready")
@@ -638,7 +732,6 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
         """
         self._flg_isrunning.clear()
     
-    @thread_assign
     def perform_continuous_single_measurements(self,queue_mea:queue.Queue|None=None):
         """
         Perform continuous measurement until stopped. Generates a single measurement for each iteration, which is put into the queue.
@@ -647,9 +740,6 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
         Args:
             queue_mea (queue.Queue, optional): A queue to put the result in. Defaults to None.
         """
-        if not self._ramanHub.isrunning_auto_measurement(): self.resume_auto_measurement()
-        else: print('!!!!! Auto-measurement is already running, a part of the program did NOT TERMINATE it properly !!!!!')
-            
         self._statbar.showMessage("Continuous single measurements in progress")
         self._statbar.setStyleSheet("background-color: yellow;")
         
@@ -664,11 +754,11 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
         
         # Start the measurement worker
         thread = QThread()
-        worker = RamanMeasurement_Worker(parent=self,ramanHub=self._ramanHub)
+        worker = RamanMeasurement_Worker(ramanHub=self._ramanHub)
         worker.moveToThread(thread)
         
         thread.started.connect(worker.acquire_single_measurement_nonstop(
-            max_accumulation=1,
+            max_accumulation=self.singMea_accumulation,
             int_time_ms=int_time_ms,
             laserpower_mW=self._laserpower_mW,
             laserwavelength_nm=self._laserwavelength_nm,
@@ -690,92 +780,47 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
         """
         Perform continuous measurement until stopped.
         """
-        if not self._ramanHub.isrunning_auto_measurement(): self.resume_auto_measurement()
-        else: print('!!!!! Auto-measurement is already running, a part of the program did NOT TERMINATE it properly !!!!!')
-            
         # Disable the widgets to prevent command overlaps
         self._statbar.showMessage("Continuous measurement in progress")
         self._statbar.setStyleSheet("background-color: yellow;")
         self.disable_widgets()
-        self.status_update("Continuous measurement in progress",bg_colour='yellow')
         
         # Turn the continuous measurement button into a stop button
-        self.btn_continuous_mea.configure(state='active',text='STOP',
-                                                  command= self._flg_isrunning.clear,bg='red')
+        self._btn_cont_mea.clicked.disconnect()
+        self._btn_cont_mea.setText('STOP')
+        self._btn_cont_mea.setStyleSheet("background-color: red;")
+        self._btn_cont_mea.setEnabled(True)
         
-        int_time_ms = self._controller.set_integration_time_us(int(self.integration_time_ms*1000))/1000
+        int_time_ms = self._controller.set_integration_time_us(int(self.integration_time_ms*1000))//1000
         self.update_label_device_parameters(self.contMea_accumulation)
         
-        # Initialise the analyser and plotter
-        raw_list = []
-        thread = threading.Thread()
-        
         dict_metadata_extra = self._generate_metadata_dict()
+        
         # Initializes the measurement
-        measurement = MeaRaman(timestamp=get_timestamp_us_int(),int_time_ms=int_time_ms,
-                                       laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm,
-                                       extra_metadata=dict_metadata_extra)
-        acq_count = 0   # Counts the number of measurement done for indexing the result
+        self._thread = QThread()
+        self._worker = RamanMeasurement_Worker(ramanHub=self._ramanHub)
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(lambda: self._worker.acquire_single_measurement_nonstop(
+            accumulation=self.contMea_accumulation,
+            int_time_ms=int_time_ms,
+            laserpower_mW=self._laserpower_mW,
+            laserwavelength_nm=self._laserwavelength_nm,
+            extra_metadata=dict_metadata_extra,
+            emit_measurement=True,
+        ))
+        self._worker.mea_acquired_get.connect(
+            lambda mea: self._update_plot(mea, title='Continuous Raman Measurement')
+        )
+        self._worker.finished.connect(lambda: self.reset_enable_widgets())
+        self._worker.finished.connect(lambda: self._statbar.showMessage("Raman controller ready"))
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.finished.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self._thread.deleteLater)
         
-        # Flag for the running operation status and turn off the plot auto updater
-        self._flg_isrunning.set()
+        self._btn_cont_mea.clicked.connect(lambda: self._worker.stop_acquisition())
         
-        while self._flg_isrunning.is_set(): # Run till stopped
-            # Performs a measurement and add it to the storage
-            timestamp_request = get_timestamp_us_int()
-            result = self._ramanHub.get_measurement(timestamp_request,WaitForMeasurement=False,getNewOnly=True)
-            spectrum_raw = result[1][-1]
+        self._thread.start()
             
-            raw_list = measurement.set_raw_list(df_mea=spectrum_raw,idx=acq_count)
-            
-            plot_add_kwargs = {'flg_plot_ramanshift':self._bool_PlotRamanShift.get()}
-            
-            if not thread.is_alive():
-                if self._bool_PlotRawOnly.get():
-                    thread = threading.Thread(target=self.Plot_rawlist_RM,kwargs={
-                        'measurement':measurement,'plot_add_kwargs':plot_add_kwargs})
-                    thread.start()
-                else:
-                    thread = threading.Thread(target=self.AnalyseAndPlot_rawlist,kwargs={
-                        'measurement':measurement,
-                        'raw_list':raw_list,
-                        'idx':acq_count,
-                        'plot_add_kwargs':plot_add_kwargs
-                        })
-                    thread.start()
-                    
-            if waitforplot: thread.join()
-                
-            # Increases the counter and resets it if it reaches the maximum
-            acq_count+=1
-            if acq_count >= self.contMea_accumulation and not store_all:
-                acq_count = 0
-            
-            # Delay the next measurement to not over-save
-            time.sleep(delay)
-            
-            # Update the statusbar
-            self.status_update("Continuous measurement in progress ({} of {})"
-                            .format(acq_count+1,self.contMea_accumulation),bg_colour='yellow')
-
-        thread_closer = threading.Thread(target=self.AnalyseAndPlot_rawlist,kwargs={
-            'measurement':measurement,
-            'raw_list':raw_list,
-            'idx':acq_count-1,
-            'plot_add_kwargs':plot_add_kwargs
-            })
-        thread_closer.start()
-        
-        if queue_response:
-            queue_response.put((thread_closer,measurement))
-        
-        if not widget_override:
-            # Enable the widgets again once done
-            self.reset_n_enable_widgets()
-            
-        self.pause_auto_measurement()
-        self.status_update() # Reset the statusbar
-    
     def perform_ContinuousMeasurement_trigger(self) -> tuple[threading.Thread,queue.Queue,Callable,Callable,Callable,Callable]:
         """
         Wraps the _perform_ContinuousMeasurement_trigger function to be used in a separate process,
@@ -796,7 +841,6 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
         
         return thread,q_return,start_measurement,store_prev_measurements,ignore_prev_measurements,stop_measurement
     
-    @thread_assign
     def _perform_ContinuousMeasurement_trigger(self,q_trigger:queue.Queue,q_return:queue.Queue) -> threading.Thread:
         """
         Perform continuous measurement until stopped.
@@ -822,112 +866,39 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
         # Disable the widgets to prevent command overlaps
         self.disable_widgets()
         
-        # Flag for the running operation status and turn off the plot auto updater
-        self.status_update("Continuous measurement in progress",bg_colour='yellow')
+        self._statbar.showMessage("Continuous measurement in progress")
+        self._statbar.setStyleSheet("background-color: yellow;")
         
-        # Turn the continuous measurement button into a stop button
-        self.btn_continuous_mea.configure(state='active',text='STOP',
-                                                  command=self._flg_isrunning.clear,bg='red')
-        
-        int_time_ms = self._controller.set_integration_time_us(int(self.integration_time_ms*1000))/1000
+        int_time_ms = self._controller.set_integration_time_us(int(self.integration_time_ms*1000))//1000
         self.update_label_device_parameters(self.contMea_accumulation)
         
         # Initialise the analyser and plotter
-        dict_metadata_extra = self._generate_metadata_dict()
-        measurement = MeaRaman(timestamp=get_timestamp_us_int(),
-            int_time_ms=int_time_ms,laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm,
-            extra_metadata=dict_metadata_extra)
-        
-        # Initialise the worker thread
-        thread_plot = threading.Thread()
+        extra_metadata = self._generate_metadata_dict()
         
         # Initializes the measurement
         self._ramanHub.wait_MeasurementUpdate()
-        self.perform_continuous_measurement(widget_override=True) # Turn on continuous acquisition for real-time plotting
-        trigger = q_trigger.get()
-        list_timestamp_trigger = [get_timestamp_us_int()]
-        self._flg_isrunning.set()
-        while self._flg_isrunning.is_set(): # Run till stopped
-            # Wait for the trigger to start the next measurement or to stop
-            trigger = q_trigger.get()
-            if trigger == 0:
-                self._flg_isrunning.clear()
-                break
-            
-            # Retrieve the measurements
-            list_timestamp_trigger.append(get_timestamp_us_int())
-            list_timestamp_mea_int,list_spectrum,list_integration_time_ms=\
-                self._ramanHub.get_measurement(
-                    timestamp_start=list_timestamp_trigger[-2],
-                    timestamp_end=list_timestamp_trigger[-1])
-            list_timestamp_trigger.pop(0) # Remove the first element (not needed anymore)
-            
-            # >>> Skips the measurement if the trigger is 1. <<<
-            # This REMOVES the measurement between the trigger timestamp
-            # and the previous timestamp
-            if trigger == 1:
-                continue
-            
-            dict_extra_metadata = self._generate_metadata_dict()
-            list_measurement = []
-            list_thread = []
-            for ts_int,spectrum_raw,int_time_ms in zip(list_timestamp_mea_int,list_spectrum,list_integration_time_ms):
-                # print(ts)
-                # ts = convert_timestamp_us_int_to_str(ts)
-                
-                measurement = MeaRaman(timestamp=ts_int,int_time_ms=int_time_ms,
-                    laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm,
-                    extra_metadata=dict_extra_metadata)
-                measurement.set_raw_list(df_mea=spectrum_raw)
-                
-                list_measurement.append(measurement)
-                thread = threading.Thread(target=self.Analyse,kwargs={
-                    'measurement':measurement,
-                    'raw_list':[spectrum_raw]
-                })
-                thread.start()
-                list_thread.append(thread)
-            
-            for thread in list_thread:
-                thread:threading.Thread
-                thread.join()
-            
-            # Return the measurement result
-            for i in range(len(list_measurement)):
-                q_return.put((list_timestamp_mea_int[i],list_measurement[i]))
-            
-            # Try to plot the data
-            plot_add_kwargs = {'flg_plot_ramanshift':self._bool_PlotRamanShift.get()}
-            
-            if not thread_plot.is_alive():
-                if self._bool_PlotRawOnly.get():
-                    thread_plot = threading.Thread(target=self.Plot_rawlist_RM,kwargs={
-                        'measurement':measurement,'plot_add_kwargs':plot_add_kwargs})
-                    # thread_plot = threading.Thread(target=self.Plot_rawlist,kwargs={
-                    #     'raw_spectrum':spectrum_raw,'plot_add_kwargs':plot_add_kwargs})
-                    thread_plot.start()
-                else:
-                    thread_plot = threading.Thread(target=self.AnalyseAndPlot_rawlist,kwargs={
-                        'measurement':measurement,
-                        'raw_list':[spectrum_raw],
-                        'idx':0,
-                        'plot_add_kwargs':plot_add_kwargs
-                        })
         
-        # Enable the widgets again once done
-        self.reset_n_enable_widgets()
-            
-        self.pause_auto_measurement()
-        self.status_update() # Reset the statusbar
-    
-    def _check_RamanHub_automeasurement(self) -> bool:
-        """
-        Checks if the RamanHub is in auto-measurement mode.
-
-        Returns:
-            bool: True if the RamanHub is in auto-measurement mode
-        """
-        return self._ramanHub.get_measurement
+        # Initialise the thread and worker
+        self._thread_mea = QThread()
+        self._worker_mea = RamanMeasurement_Worker(ramanHub=self._ramanHub)
+        self._worker_mea.moveToThread(self._thread_mea)
+        self._thread_mea.started.connect(lambda: self._worker_mea.acquire_continuous_measurement_trigger(
+            q_trigger=q_trigger,
+            q_return=q_return,
+            laserpower_mW=self._laserpower_mW,
+            laserwavelength_nm=self._laserwavelength_nm,
+            extra_metadata=extra_metadata,
+        ))
+        self._worker_mea.mea_acquired_get.connect(
+            lambda mea: self._update_plot(mea, title='Continuous Raman Measurement')
+        )
+        self._worker_mea.finished.connect(lambda: self.reset_enable_widgets())
+        self._worker_mea.finished.connect(lambda: self._statbar.showMessage("Raman controller ready"))
+        self._worker_mea.finished.connect(self._thread_mea.quit)
+        self._worker_mea.finished.connect(self._worker_mea.deleteLater)
+        self._thread_mea.finished.connect(self._thread_mea.deleteLater)
+        
+        self._thread_mea.start()
     
     @Slot()
     def pause_auto_measurement(self):
@@ -941,106 +912,8 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
         Resumes the auto-measurement in the RamanHub
         """
         self._ramanHub.resume_auto_measurement()
-    
-    @thread_assign
-    def perform_single_measurement_manual(self,widget_override=False,queue_response:queue.Queue=None,
-                                   accum:Literal['single','continuous']='single',):
-        """
-        Performs multiple measurements based on the self.measurement_accumulation, averages, and
-        updates the displayed figure all the time. Different than the perform_single_measurement,
-        it pauses the auto measurement in the RamanMeasurementHub and waits for the user to trigger the measurement.
-
-        Args:
-            wait_for_plot (bool, optional): If true, wait for the plot to finish
-            widget_override (bool, optional): Overrides the widget enable/disable toggle
-            queue_response (queue.Queue, optional): If true, puts the result into the response queue
-            accum (str, optional): The type of measurement accumulation to perform. Defaults to 'single'.
-            
-        Returns:
-            threading.Thread: The thread for the measurement
-        """
-        if self._ramanHub.isrunning_auto_measurement(): self.pause_auto_measurement()
         
-        if not widget_override:
-            # Disable the widgets to prevent command overlaps
-            self.disable_widgets()
-        
-        # Notify the user that the measurement is starting
-        self.status_update("Single measurement in progress",bg_colour='yellow')
-        
-        # Sets the integration time and accumulation
-        int_time_ms = self._controller.set_integration_time_us(int(self.integration_time_ms*1000))/1000
-        self.update_label_device_parameters(self.singMea_accumulation)
-        
-        # Initialise the list and the worker thread
-        raw_list = []
-        thread = threading.Thread()
-        
-        # Initialise the measurement
-        dict_metadata_extra = self._generate_metadata_dict()
-        self._sngl_measurement = MeaRaman(timestamp=get_timestamp_us_int(),
-            int_time_ms=int_time_ms, laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm,
-            extra_metadata=dict_metadata_extra)
-        
-        # Performs the measurements
-        self._flg_isrunning.set()
-        accum = self.singMea_accumulation if accum == 'single' else self.contMea_accumulation
-        for i in range(accum):
-            # Performs a measurement and add it into the storage
-            # timestamp_request = get_timestamp_us_int()
-            # result = self._ramanHub.get_measurement(timestamp_request,WaitForMeasurement=False,getNewOnly=True)
-            # spectrum_raw = result[1][-1]
-            result = self._ramanHub.get_single_measurement()
-            spectrum_raw = result[1]
-            raw_list = self._sngl_measurement.set_raw_list(df_mea=spectrum_raw)
-            
-            plot_add_kwargs = {'flg_plot_ramanshift':self._bool_PlotRamanShift.get()}
-            
-            if not thread.is_alive():
-                if self._bool_PlotRawOnly.get():
-                    thread = threading.Thread(target=self.Plot_rawlist_RM,kwargs={
-                        'measurement':self._sngl_measurement,'plot_add_kwargs':plot_add_kwargs})
-                    # thread = threading.Thread(target=self.Plot_rawlist,kwargs={
-                    #     'raw_spectrum':spectrum_raw,'plot_add_kwargs':plot_add_kwargs})
-                    thread.start()
-                else:
-                    thread = threading.Thread(target=self.AnalyseAndPlot_rawlist,kwargs={
-                        'measurement':self._sngl_measurement,
-                        'raw_list':raw_list,
-                        'idx':i,
-                        'plot_add_kwargs':plot_add_kwargs
-                        })
-                    thread.start()
-            
-            # Update the statusbar
-            self.status_update("Single measurement in progress ({} of {})"
-                            .format(i+1,accum),bg_colour='yellow')
-        self._flg_isrunning.clear()
-        
-        # Update the measurement values stored in the mult_measurement obj
-        ## This ensures that the values are updated even if the user didn't wait for the
-        ## thread to finish
-        self.Analyse(measurement=self._sngl_measurement,raw_list=raw_list)
-        # Set up the input for the final plot
-        thread_closer = threading.Thread(target=self.AnalyseAndPlot_rawlist,kwargs={
-            'measurement':self._sngl_measurement,
-            'raw_list':raw_list,
-            'idx':i,
-            'plot_add_kwargs':plot_add_kwargs
-            })
-        thread_closer.start()
-        
-        if queue_response:
-            queue_response.put((thread_closer,self._sngl_measurement))
-        
-        if not widget_override:
-            # Enable the widgets again once done
-            self.reset_n_enable_widgets()
-        
-        self.pause_auto_measurement()
-        self.status_update() # Reset the statusbar
-        
-    def perform_single_measurement(self):
+    def perform_single_measurement(self, queue_measurement:queue.Queue|None=None):
         """
         Perform multiple measurements based on the self.measurement_accumulation, averages, and 
         updates the displayed figure all the time.
@@ -1070,38 +943,44 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
         # Performs the measurements
         accumulation = self.singMea_accumulation
         
-        self._thread = QThread()
-        self._worker = RamanMeasurement_Worker(ramanHub=self._ramanHub)
-        self._worker.moveToThread(self._thread)
+        self._thread_mea = QThread()
+        self._worker_mea = RamanMeasurement_Worker(ramanHub=self._ramanHub)
+        self._worker_mea.moveToThread(self._thread_mea)
         
-        self._thread.started.connect(lambda: self._worker.acquire_single_measurement(
+        self._thread_mea.started.connect(lambda: self._worker_mea.acquire_single_measurement(
             measurement=self._sngl_measurement,
             accumulation=accumulation,
             int_time_ms=int_time_ms,
             laserpower_mW=self._laserpower_mW,
             laserwavelength_nm=self._laserwavelength_nm,
+            queue_mea=queue_measurement,
             extra_metadata=dict_metadata_extra,
         ))
-        self._worker.finished.connect(lambda: self._statbar.showMessage("Raman controller ready"))
-        self._worker.finished.connect(lambda: self.temp_plot_quicktest())
-        self._worker.finished.connect(self.pause_auto_measurement)
         
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.finished.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread.deleteLater)
+        self._worker_mea.finished.connect(lambda: self._statbar.showMessage("Raman controller ready"))
+        self._worker_mea.finished.connect(lambda: self._update_plot(self._sngl_measurement, 
+                                                                title='Single Raman Measurement'))
+        self._worker_mea.finished.connect(self.pause_auto_measurement)
         
-        self._thread.start()
+        self._worker_mea.finished.connect(self._thread_mea.quit)
+        self._worker_mea.finished.connect(self._worker_mea.deleteLater)
+        self._thread_mea.finished.connect(self._thread_mea.deleteLater)
+        
+        self._thread_mea.start()
         
     @Slot()
-    def temp_plot_quicktest(self):
+    def _update_plot(self, measurement:MeaRaman, title='Single Raman Measurement',):
+        if hasattr(self,'_isplotting') and self._isplotting: return
+        self._isplotting = True
         self._plotter.plot_RamanMeasurement_new(
-            measurement=self._sngl_measurement,
-            title='Single Raman Measurement',
-            flg_plot_ramanshift=False,
-            plot_raw=True,
+            measurement=measurement,
+            title=title,
+            flg_plot_ramanshift=self._bool_PlotRamanShift.isChecked(),
+            plot_raw=self._bool_PlotRawOnly.isChecked(),
             limits=self._get_plot_limits(),
         )
         self._fig_widget.draw()
+        self._isplotting = False
 
     def initialise_spectrometer_n_analyser(self):
         """
@@ -1119,7 +998,7 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
         self.update_label_device_parameters()
         
         # Activates all spectrometer controls once done with the initialisation
-        self.reset_n_enable_widgets()
+        self.reset_enable_widgets()
     
     def disable_widgets(self):
         """
@@ -1132,7 +1011,7 @@ class Frm_RamanSpectrometerController(qw.QGroupBox):
         for widget in get_all_widgets_from_layout(self._slyt_data):
             widget.setEnabled(False)
 
-    def reset_n_enable_widgets(self):
+    def reset_enable_widgets(self):
         """
         Enable all widgets in a Tkinter frame and sub-frames
         """

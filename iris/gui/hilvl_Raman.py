@@ -876,7 +876,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 
                 # Performs the multi-acquisition measurement
                 thread_measurement:threading.Thread=\
-                    self.raman_controller.perform_single_measurement_manual(widget_override=True,accum='single')
+                    self.raman_controller.perform_single_measurement(widget_override=True,accum='single')
                 # Wait for the measurement to be done and obtain the values form the queue
                 thread_measurement.join()
                 

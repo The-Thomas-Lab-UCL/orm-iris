@@ -109,7 +109,8 @@ def convert_wavelength_to_ramanshift(wavelength:float|np.ndarray,excitation_wave
     Returns:
         float|np.ndarray: Raman shift in cm^-1
     """
-    if wavelength == 0: wavelength = 0.0001
+    if isinstance(wavelength, float) and wavelength == 0: wavelength = 0.0001
+    else: wavelength = np.where(wavelength == 0, 0.0001, wavelength)
     raman_shift = 1e7*(1/excitation_wavelength - 1/wavelength)
     return raman_shift
 
