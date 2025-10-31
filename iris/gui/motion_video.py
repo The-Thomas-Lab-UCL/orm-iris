@@ -38,6 +38,22 @@ from iris.gui import AppPlotEnum, AppVideoEnum
 from iris.controllers import ControllerConfigEnum
 from iris.controllers import CameraController, Controller_XY, Controller_Z
 
+from iris.resources.motion_video.brightfieldcontrol_ui import Ui_wdg_brightfield_controller
+from iris.resources.motion_video.stagecontrol_ui import Ui_stagecontrol
+
+class BrightfieldController(qw.QWidget,Ui_wdg_brightfield_controller):
+    def __init__(self,parent=None):
+        super().__init__(parent)
+        self.setupUi(self)
+        top_layout = qw.QVBoxLayout(self)
+        top_layout.addWidget(self.verticalLayoutWidget)
+
+class StageControl(qw.QWidget, Ui_stagecontrol):
+    def __init__(self,parent=None):
+        super().__init__(parent)
+        self.setupUi(self)
+        self.setLayout(self.verticalLayout)
+
 class CustomButton(qw.QPushButton):
     # Define custom signals for left and right clicks
     rightClicked = Signal()
@@ -193,22 +209,14 @@ class Frm_MotionController(qw.QGroupBox):
         
     # >>> Top layout <<<
         main_layout = qw.QVBoxLayout(self)  # The main layout for the entire frame
-        wdg_video = qw.QWidget(self)  # Top layout compartment for the video
-        tab_motion_ctrl = qw.QTabWidget(self)  # Top layout compartment for the stage controllers
+        wdg_video = BrightfieldController(self)  # Top layout compartment for the video
+        self._wdg_stage = StageControl(self)
         self._statbar = qw.QStatusBar(self)  # Status bar at the bottom
         self._statbar.showMessage("Video and stage initialisation")
         
         main_layout.addWidget(wdg_video)
-        main_layout.addWidget(tab_motion_ctrl)
+        main_layout.addWidget(self._wdg_stage)
         main_layout.addWidget(self._statbar)
-        
-        # Notebook setup
-        self._wdg_mctrl = qw.QWidget(self)  # Bottom frame compartment for the stage controllers
-        self._wdg_GoToCoord = qw.QWidget(self)  # Bottom frame compartment for the go to coordinate
-        
-        tab_motion_ctrl.addTab(self._wdg_mctrl,'Directional control')
-        tab_motion_ctrl.addTab(self._wdg_GoToCoord,'Go to coordinate')
-        tab_motion_ctrl.setCurrentIndex(0)
         
     # >>> Video widgets and parameter setup <<<
         self._camera_ctrl:CameraController = self._stageHub.get_camera_controller()
@@ -226,13 +234,12 @@ class Frm_MotionController(qw.QGroupBox):
         self.ctrl_xy = xy_controller    # The xy-stage controller (proxy)
         self.ctrl_z = z_controller      # The z-stage controller (proxy)
         
-        self._controller_id_camera = self._stageHub.get_camera_controller().get_identifier()
-        self._controller_id_xy = self.ctrl_xy.get_identifier()
-        self._controller_id_z = self.ctrl_z.get_identifier()
-        
-        self._controller_id_camera = self._stageHub.get_camera_controller().get_identifier()
-        self._controller_id_xy = self.ctrl_xy.get_identifier()
-        self._controller_id_z = self.ctrl_z.get_identifier()
+        try: self._controller_id_camera = self._stageHub.get_camera_controller().get_identifier()
+        except: self._controller_id_camera = 'failed to get camera ID'; qw.QErrorMessage(self).showMessage('Failed to get camera ID')
+        try: self._controller_id_xy = self.ctrl_xy.get_identifier()
+        except: self._controller_id_xy = 'failed to get xy ID'; qw.QErrorMessage(self).showMessage('Failed to get xy stage ID')
+        try: self._controller_id_z = self.ctrl_z.get_identifier()
+        except: self._controller_id_z = 'failed to get z ID'; qw.QErrorMessage(self).showMessage('Failed to get z stage ID')
         
         self._current_coor:np.ndarray = np.zeros(3)  # The current coordinates of the stage, only to be used internally!
         self._flg_ontarget_gotocoor = threading.Event() # A flag to check if the stage is on target for the go to coordinates
@@ -241,35 +248,18 @@ class Frm_MotionController(qw.QGroupBox):
         self._flg_connectionReady_xyz = threading.Event()  # A flag to check if the reconnection is in progress
         self._flg_connectionReady_xyz.set()
         
-        # Add sub-widgets
-        swdg_xyz_stage_setup = qw.QWidget(self._wdg_mctrl)  # Hosts the motor parameter setup
-        swdg_xyz_home = qw.QWidget(self._wdg_mctrl)         # Hosts the calibration/home buttons
-        swdg_xyz_move = qw.QWidget(self._wdg_mctrl)         # Hosts the xy stage and z stage controller subframes
-        swdg_joginfo_setup = qw.QWidget(self._wdg_mctrl)    # Hosts the jogging configuration
-        
-        # Layout configuration
-        layout_xyz = qw.QVBoxLayout()
-        self._wdg_mctrl.setLayout(layout_xyz)
-        layout_xyz.addWidget(swdg_xyz_stage_setup)
-        layout_xyz.addWidget(swdg_xyz_home)
-        layout_xyz.addWidget(swdg_xyz_move)
-        layout_xyz.addWidget(swdg_joginfo_setup)
-        
     # >>> Continuous motion controller widgets <<<
-        self._init_xyz_control_widgets(swdg_xyz_home, swdg_xyz_move)
+        self._init_xyz_control_widgets(self._wdg_stage)
         
     # >>> Jogging configuration widgets <<<
-        self._init_xyz_jog_widgets(swdg_joginfo_setup)
+        self._init_xyz_jog_widgets(self._wdg_stage)
 
     # >>> Go to coordinate widgets <<<
-        # Sub-frame setup
-        slyt_goto = qw.QGridLayout(self._wdg_GoToCoord) # Hosts the go to coordinate setup
-        
         # Add the entry boxes
-        self._init_gotocoor_widgets(slyt_goto)
-        
+        self._init_gotocoor_widgets(self._wdg_stage)
+
     # >>> Motor parameter setup widgets <<<
-        self._init_stageparam_widgets(swdg_xyz_stage_setup)
+        self._init_stageparam_widgets(self._wdg_stage)
         
     # >>> Status update <<<
         self.signal_statbar_message.connect(self.status_update)
@@ -278,139 +268,83 @@ class Frm_MotionController(qw.QGroupBox):
         
         if main: self.initialise_auto_updater()
 
-    def _init_stageparam_widgets(self, slyt_xyz_stage_setup:qw.QWidget):
+    def _init_stageparam_widgets(self, widget:StageControl):
         """
         Initialises the widgets for the motor parameter setup
 
         Args:
-            slyt_xyz_stage_setup (qw.QWidget): The widget to add the motor parameter controls to
+            widget (StageControl): The widget to add the motor parameter setups to
         """
-        # Main layout configuration
-        main_layout = qw.QVBoxLayout()
-        slyt_xyz_stage_setup.setLayout(main_layout)
+        # Coordinate reporting
+        # > Coordinate reporting
+        self._lbl_coor = widget.lbl_coor_um
         
         # Add the entry boxes, label, and button for the speed parameter setups
-        self.lbl_speed_xy = qw.QLabel('XY speed: %')
-        self.lbl_speed_z = qw.QLabel('Z speed: %')
-        self.ent_speed_xy = qw.QLineEdit()
-        self.ent_speed_z = qw.QLineEdit()
-        self.btn_SetSpeed = qw.QPushButton('Set speed')
+        self.lbl_speed_xy = widget.lbl_speedxy
+        self.lbl_speed_z = widget.lbl_speedz
+        self.ent_speed_xy = widget.ent_speedxy
+        self.ent_speed_z = widget.ent_speedz
         
         # Bind the functions
         self.ent_speed_xy.returnPressed.connect(lambda: self._set_vel_acc_params())
         self.ent_speed_z.returnPressed.connect(lambda: self._set_vel_acc_params())
-        self.btn_SetSpeed.released.connect(lambda: self._set_vel_acc_params())
         
         # Disable the widgets until the controller is initialised
         self.ent_speed_xy.setEnabled(False)
         self.ent_speed_z.setEnabled(False)
-        self.btn_SetSpeed.setEnabled(False)
-        
-        # Layout configuration
-        layout_grid = qw.QGridLayout()
-        main_layout.addLayout(layout_grid)
-        layout_grid.addWidget(self.lbl_speed_xy, 0, 0)
-        layout_grid.addWidget(self.ent_speed_xy, 0, 1)
-        layout_grid.addWidget(self.lbl_speed_z, 1, 0)
-        layout_grid.addWidget(self.ent_speed_z, 1, 1)
-        layout_grid.addWidget(self.btn_SetSpeed, 2, 0, 1, 2)
 
         # Add the entry boxes, label, and button for the jogging parameter setup
-        self.lbl_jog_xy = qw.QLabel('XY step size: [µm]')
-        self.lbl_jog_z = qw.QLabel('Z step size: [µm]')
-        self.ent_jog_xy = qw.QLineEdit()
-        self.ent_jog_z = qw.QLineEdit()
-        self.btn_SetJog = qw.QPushButton('Set jog')
-        
+        self.lbl_jog_xy = widget.lbl_stepsizexy
+        self.lbl_jog_z = widget.lbl_stepsizez
+        self.ent_jog_xy = widget.ent_stepxy_um
+        self.ent_jog_z = widget.ent_stepz_um
+
         # Bind the functions
         self.ent_jog_xy.returnPressed.connect(lambda: self._set_jog_params())
         self.ent_jog_z.returnPressed.connect(lambda: self._set_jog_params())
-        self.btn_SetJog.released.connect(lambda: self._set_jog_params())
         
         # Disable the widgets until the controller is initialised
         self.ent_jog_xy.setEnabled(False)
         self.ent_jog_z.setEnabled(False)
-        self.btn_SetJog.setEnabled(False)
-        
-        # Add to the layout
-        layout_grid = qw.QGridLayout()
-        main_layout.addLayout(layout_grid)
-        layout_grid.addWidget(self.lbl_jog_xy, 3, 0)
-        layout_grid.addWidget(self.ent_jog_xy, 3, 1)
-        layout_grid.addWidget(self.lbl_jog_z, 4, 0)
-        layout_grid.addWidget(self.ent_jog_z, 4, 1)
-        layout_grid.addWidget(self.btn_SetJog, 5, 0, 1, 2)
 
-    def _init_xyz_jog_widgets(self, slyt_joginfo_setup:qw.QWidget):
+    def _init_xyz_jog_widgets(self, widget: StageControl):
         """
         Initialises the widgets for the jogging configuration
 
         Args:
-            slyt_joginfo_setup (qw.QWidget): The widget to add the jog controls to
+            widget (StageControl): The widget to add the jogging configuration to
         """
-        self._chkbox_jog_enabled = qw.QCheckBox('Jogging mode')
+        self._chkbox_jog_enabled = widget.chk_stepmode
         self._chkbox_jog_enabled.setChecked(False)  # A flag to check if the jogging is enabled
-        lbl_info_jog = qw.QLabel('OR right click on the direction buttons to jog')
-        lbl_info_jog.setStyleSheet('background-color: yellow')
-        
-        # Layout configuration
-        main_layout_jog = qw.QVBoxLayout()
-        slyt_joginfo_setup.setLayout(main_layout_jog)
-        
-        main_layout_jog.addWidget(self._chkbox_jog_enabled)
-        main_layout_jog.addWidget(lbl_info_jog)
 
-    def _init_gotocoor_widgets(self, slyt_goto:qw.QGridLayout):
+    def _init_gotocoor_widgets(self, widget:StageControl):
         """
         Initialises the widgets for the go to coordinate setup
 
         Args:
-            slyt_goto (qw.QGridLayout): The layout to add the widgets to
+            widget (StageControl): The widget to add the go to coordinate controls to
         """
-        self.ent_coor_x = qw.QLineEdit()
-        self.ent_coor_y = qw.QLineEdit()
-        self.ent_coor_z = qw.QLineEdit()
-        
+        self.ent_coor_x = widget.ent_goto_x_um
+        self.ent_coor_y = widget.ent_goto_y_um
+        self.ent_coor_z = widget.ent_goto_z_um
+
         # Bind: Enter to go to the coordinates
         self.ent_coor_x.returnPressed.connect(lambda: self._move_go_to())
         self.ent_coor_y.returnPressed.connect(lambda: self._move_go_to())
         self.ent_coor_z.returnPressed.connect(lambda: self._move_go_to())
-
-        # Add the labels
-        lbl_coor_x = qw.QLabel('X-coordinate: [μm]')
-        lbl_coor_y = qw.QLabel('Y-coordinate: [μm]')
-        lbl_coor_z = qw.QLabel('Z-coordinate: [μm]')
         
         # Add the go to button
-        btn_goto = qw.QPushButton('Go to')
+        btn_goto = widget.btn_goto
         btn_goto.released.connect(lambda: self._move_go_to())
         btn_goto.setEnabled(False)
-        
-        # Layout configuration
-        slyt_goto.addWidget(lbl_coor_x,0,0)
-        slyt_goto.addWidget(self.ent_coor_x,0,1)
-        slyt_goto.addWidget(lbl_coor_y,1,0)
-        slyt_goto.addWidget(self.ent_coor_y,1,1)
-        slyt_goto.addWidget(lbl_coor_z,2,0)
-        slyt_goto.addWidget(self.ent_coor_z,2,1)
-        slyt_goto.addWidget(btn_goto,3,0,1,2)
 
-    def _init_xyz_control_widgets(self, swdg_xyz_home:qw.QWidget, swdg_xyz_move:qw.QWidget):
+    def _init_xyz_control_widgets(self, widget:StageControl):
         """
         Initialises the widgets for the xyz stage control.
 
         Args:
-            swdg_xyz_home (qw.QWidget): Widget for the home/calibration controls.
-            swdg_xyz_move (qw.QWidget): Widget for the movement controls.
+            widget (StageControl): The widget to add the stage control buttons to
         """
-        main_layout_move = qw.QHBoxLayout()
-        swdg_xyz_move.setLayout(main_layout_move)
-        
-        sslyt_xy_move = qw.QGridLayout()    # Hosts the xy stage controller
-        sslyt_z_move = qw.QVBoxLayout()     # Hosts the z stage controller
-        main_layout_move.addLayout(sslyt_xy_move)
-        main_layout_move.addLayout(sslyt_z_move)
-        
         # Add the buttons (disabled until controller initialisation)
         ## Add the buttons for the xy stage
         self.btn_xy_up = CustomButton('up')
@@ -440,7 +374,8 @@ class Frm_MotionController(qw.QGroupBox):
         self.btn_xy_right.set_right_click_function(lambda: self.move_jog('xfwd'))
         self.btn_xy_left.set_right_click_function(lambda: self.move_jog('xrev'))
         
-        # Layout configuration        
+        # Layout configuration
+        sslyt_xy_move = widget.lyt_xy
         sslyt_xy_move.addWidget(self.btn_xy_up,0,1)
         sslyt_xy_move.addWidget(self.btn_xy_left,1,0)
         sslyt_xy_move.addWidget(self.btn_xy_right,1,2)
@@ -468,14 +403,15 @@ class Frm_MotionController(qw.QGroupBox):
         self.btn_z_down.set_right_click_function(lambda: self.move_jog('zrev'))
         
         # Layout configuration
+        sslyt_z_move = widget.lyt_z
         sslyt_z_move.addWidget(self.btn_z_up)
         sslyt_z_move.addWidget(self.btn_z_down)
         sslyt_z_move.addStretch(1)
         sslyt_z_move.addWidget(self._btn_z_breathing)
         
         ## Home/Calibration buttons
-        self.btn_xy_home = qw.QPushButton('XY-Home/Calibration')
-        self.btn_z_home = qw.QPushButton('Z-Home/Calibration')
+        self.btn_xy_home = widget.btn_home_xy
+        self.btn_z_home = widget.btn_home_z
         
         self.btn_xy_home.setEnabled(False)
         self.btn_z_home.setEnabled(False)
@@ -483,69 +419,40 @@ class Frm_MotionController(qw.QGroupBox):
         self.btn_xy_home.released.connect(lambda: self.motion_button_manager('xyhome'))
         self.btn_z_home.released.connect(lambda: self.motion_button_manager('zhome'))
         
-        self.btn_xy_reinit = qw.QPushButton('Reset XY connection')
-        self.btn_z_reinit = qw.QPushButton('Reset Z connection')
-        
-        self.btn_xy_reinit.setEnabled(False)
-        self.btn_z_reinit.setEnabled(False)
-        
-        self.btn_xy_reinit.released.connect(lambda: self.reinitialise_connection('xy'))
-        self.btn_z_reinit.released.connect(lambda: self.signal_statbar_message.emit('Z re-initialisation is not yet implemented', 'yellow'))
-        
-        # Layout configuration
-        main_layout_home = qw.QHBoxLayout()
-        swdg_xyz_home.setLayout(main_layout_home)
-        sslyt_xy_home_init = qw.QVBoxLayout()
-        sslyt_z_home_init = qw.QVBoxLayout()
-        main_layout_home.addLayout(sslyt_xy_home_init)
-        main_layout_home.addLayout(sslyt_z_home_init)
-        
-        sslyt_xy_home_init.addWidget(self.btn_xy_home)
-        sslyt_xy_home_init.addWidget(self.btn_xy_reinit)
-        
-        sslyt_z_home_init.addWidget(self.btn_z_home)
-        sslyt_z_home_init.addWidget(self.btn_z_reinit)
-        
-    def _init_video_widgets(self, stageHub: DataStreamer_StageCam, lyt_video: qw.QWidget):
+    def _init_video_widgets(self, stageHub: DataStreamer_StageCam, wdg_video: BrightfieldController):
         """
         Initialises the video widgets and layouts
 
         Args:
             stageHub (DataStreamer_StageCam): The stage hub for video streaming
-            lyt_video (qw.QWidget): The layout widget for the video feed
+            wdg_video (BrightfieldController): The widget for the video feed
         """
-        main_layout = qw.QVBoxLayout()
-        lyt_video.setLayout(main_layout)
-        
-        slyt_video = qw.QVBoxLayout()  # The layout for the video compartment
-        slyt_video_ctrl = qw.QVBoxLayout()  # Hosts the video controller subframe
-        slyt_video_coor = qw.QVBoxLayout()  # Hosts the video coordinate reporting subframe
-        main_layout.addLayout(slyt_video)
-        main_layout.addLayout(slyt_video_ctrl)
-        main_layout.addLayout(slyt_video_coor)
-        
+        print('here')
         # > Video
-        self._lbl_video = ResizableQLabel(min_height=self._video_height,parent=lyt_video)    # A label to show the video feed
-        
-        slyt_video.addWidget(self._lbl_video)
+        lyt = qw.QVBoxLayout()
+        self._lbl_video = ResizableQLabel(min_height=self._video_height,parent=wdg_video)    # A label to show the video feed
+
+        wdg_video.wdg_video.setLayout(lyt)
+        lyt.addWidget(self._lbl_video)
         
         # > Video controllers
-        self._btn_videotoggle = qw.QPushButton('Turn camera ON')
-        self._btn_reinit_conn = qw.QPushButton('Reset camera connection')
+        self._btn_videotoggle = wdg_video.btn_camera_onoff
+        self._btn_reinit_conn = wdg_video.pushButton_2
         self._btn_videotoggle.released.connect(lambda: self.video_initialise())
-        self._btn_reinit_conn.released.connect(lambda: self.reinitialise_connection('camera'))
+        # self._btn_reinit_conn.released.connect(lambda: self.reinitialise_connection('camera'))
+        self._btn_reinit_conn.setEnabled(False)
         self._btn_videotoggle.setStyleSheet('background-color: yellow')
         self._btn_reinit_conn.setStyleSheet('background-color: yellow')
         
-        self._chkbox_crosshair = qw.QCheckBox('Show crosshair')
-        self._chkbox_scalebar = qw.QCheckBox('Show scalebar')
+        self._chkbox_crosshair = wdg_video.chk_crosshair
+        self._chkbox_scalebar = wdg_video.chk_scalebar
         self._chkbox_crosshair.setChecked(False)
         self._chkbox_scalebar.setChecked(True)
         
-        btn_set_imgproc_gain = qw.QPushButton('Set flatfield gain')
-        btn_set_flatfield = qw.QPushButton('Set flatfield')
-        btn_save_flatfield = qw.QPushButton('Save flatfield')
-        btn_load_flatfield = qw.QPushButton('Load flatfield')
+        btn_set_imgproc_gain = wdg_video.btn_setffgain
+        btn_set_flatfield = wdg_video.btn_setff
+        btn_save_flatfield = wdg_video.btn_saveff
+        btn_load_flatfield = wdg_video.btn_loadff
         btn_set_imgproc_gain.released.connect(lambda: self._set_imageProc_gain())
         btn_set_flatfield.released.connect(lambda: self._set_flatfield_correction_camera())
         btn_save_flatfield.released.connect(lambda: self._save_flatfield_correction())
@@ -553,33 +460,9 @@ class Frm_MotionController(qw.QGroupBox):
         
         # Video corrections
         self._dict_vidcorrection = {}
-        self._combo_vidcorrection = qw.QComboBox()
+        self._combo_vidcorrection = wdg_video.combo_image_correction
         self._combo_vidcorrection.addItems(list(stageHub.Enum_CamCorrectionType.__members__))
         self._combo_vidcorrection.setCurrentIndex(0)
-        
-        ## Layout setups
-        sslyt_video_ctrl1 = qw.QHBoxLayout()
-        sslyt_video_ctrl2 = qw.QHBoxLayout()
-        sslyt_video_ctrl3 = qw.QGridLayout()
-        slyt_video_ctrl.addLayout(sslyt_video_ctrl1)
-        slyt_video_ctrl.addLayout(sslyt_video_ctrl2)
-        slyt_video_ctrl.addWidget(self._combo_vidcorrection)
-        slyt_video_ctrl.addLayout(sslyt_video_ctrl3)
-        
-        sslyt_video_ctrl1.addWidget(self._chkbox_crosshair)
-        sslyt_video_ctrl1.addWidget(self._chkbox_scalebar)
-        
-        sslyt_video_ctrl2.addWidget(self._btn_videotoggle)
-        sslyt_video_ctrl2.addWidget(self._btn_reinit_conn)
-        
-        sslyt_video_ctrl3.addWidget(btn_set_imgproc_gain,0,0)
-        sslyt_video_ctrl3.addWidget(btn_set_flatfield,0,1)
-        sslyt_video_ctrl3.addWidget(btn_save_flatfield,1,0)
-        sslyt_video_ctrl3.addWidget(btn_load_flatfield,1,1)
-        
-        # > Coordinate reporting
-        self._lbl_coor = qw.QLabel('Stage coordinates (x,y,z): ')
-        slyt_video_coor.addWidget(self._lbl_coor)
         
     def _set_imageProc_gain(self):
         """
@@ -661,28 +544,28 @@ class Frm_MotionController(qw.QGroupBox):
         except Exception as e:
             qw.QMessageBox.critical(self, 'Error', 'Failed to set exposure time:\n' + str(e))
 
-    @thread_assign
-    def reinitialise_connection(self,unit:Literal['xy','z','camera']) -> threading.Thread:
-        """
-        Reinitialises the connection to the stage or camera
+    # @thread_assign
+    # def reinitialise_connection(self,unit:Literal['xy','z','camera']) -> threading.Thread:
+    #     """
+    #     Reinitialises the connection to the stage or camera
         
-        Args:
-            unit (Literal['xy','z','camera']): The unit to reinitialise
+    #     Args:
+    #         unit (Literal['xy','z','camera']): The unit to reinitialise
             
-        Returns:
-            threading.Thread: The thread started
-        """
-        if unit == 'xy':
-            self.ctrl_xy.reinitialise_connection()
-            self.signal_statbar_message.emit('XY stage re-initialised', None)
-        elif unit == 'z':
-            self.ctrl_z.reinitialise_connection()
-            self.signal_statbar_message.emit('Z stage re-initialised', None)
-        elif unit == 'camera':
-            self._camera_ctrl.reinitialise_connection()
-            self.signal_statbar_message.emit('Camera re-initialised', None)
-        else:
-            raise ValueError('Invalid unit for reinitialisation')
+    #     Returns:
+    #         threading.Thread: The thread started
+    #     """
+    #     if unit == 'xy':
+    #         self.ctrl_xy.reinitialise_connection()
+    #         self.signal_statbar_message.emit('XY stage re-initialised', None)
+    #     elif unit == 'z':
+    #         self.ctrl_z.reinitialise_connection()
+    #         self.signal_statbar_message.emit('Z stage re-initialised', None)
+    #     elif unit == 'camera':
+    #         self._camera_ctrl.reinitialise_connection()
+    #         self.signal_statbar_message.emit('Camera re-initialised', None)
+    #     else:
+    #         raise ValueError('Invalid unit for reinitialisation')
         
     def disable_overlays(self):
         """
@@ -808,10 +691,10 @@ class Frm_MotionController(qw.QGroupBox):
             print('Jogging parameters XY are not the same. Jog x: {:.1f}µm Jog y: {:.1f}µm'.format(jog_x_mm,jog_y_mm))
         jog_xy_um = jog_x_um
         jog_z_um = float(jog_z_mm * 10**3)
-        
-        self.lbl_jog_xy.setText('XY step size: {:.1f}µm'.format(jog_xy_um))
-        self.lbl_jog_z.setText('Z step size: {:.1f}µm'.format(jog_z_um))
-        
+
+        self.lbl_jog_xy.setText(f'{jog_xy_um:.1f}')
+        self.lbl_jog_z.setText(f'{jog_z_um:.1f}')
+
     def _set_jog_params(self):
         """
         Sets the motors jogging parameters according to the widget entries in [µm]
@@ -840,9 +723,9 @@ class Frm_MotionController(qw.QGroupBox):
         z_speed = float(z_speed)
         
         if isinstance(xy_speed,float) and isinstance(z_speed,float):
-            self.lbl_speed_xy.setText('XY speed: {:.2f}%'.format(xy_speed))
-            self.lbl_speed_z.setText('Z speed: {:.2f}%'.format(z_speed))
-        
+            self.lbl_speed_xy.setText(f'{xy_speed:.2f}')
+            self.lbl_speed_z.setText(f'{z_speed:.2f}')
+
     def get_controller_identifiers(self) -> tuple:
         """
         Returns the controller identifiers for the camera, xy-stage, and z-stage
@@ -1150,16 +1033,14 @@ class Frm_MotionController(qw.QGroupBox):
         """
         Disables all stage controls
         """
-        all_widgets = get_all_widgets(self._wdg_mctrl)
-        all_widgets.extend(get_all_widgets(self._wdg_GoToCoord))
+        all_widgets = get_all_widgets(self._wdg_stage)
         [widget.setEnabled(False) for widget in all_widgets if isinstance(widget,(qw.QPushButton,qw.QLineEdit))]
         
     def enable_controls(self):
         """
         Enables all stage controls
         """
-        all_widgets = get_all_widgets(self._wdg_mctrl)
-        all_widgets.extend(get_all_widgets(self._wdg_GoToCoord))
+        all_widgets = get_all_widgets(self._wdg_stage)
         [widget.setEnabled(True) for widget in all_widgets if isinstance(widget,(qw.QPushButton,qw.QLineEdit))]
         
         # Updates the statusbar
@@ -1291,7 +1172,7 @@ class Frm_MotionController(qw.QGroupBox):
                 coor_x_um = float(coor_x) * 1e3 # type: ignore
                 coor_y_um = float(coor_y) * 1e3 # type: ignore
                 coor_z_um = float(coor_z) * 1e3 # type: ignore
-                self._lbl_coor.setText('x,y,z: {:.1f}, {:.1f}, {:.1f} µm'
+                self._lbl_coor.setText('{:.1f}, {:.1f}, {:.1f}'
                                         .format(coor_x_um,coor_y_um,coor_z_um))
                 time.sleep(1/AppPlotEnum.DISPLAY_COORDINATE_REFRESH_RATE.value)
             except Exception as e:
