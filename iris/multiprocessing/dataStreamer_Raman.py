@@ -56,7 +56,7 @@ if __name__ == '__main__':
 from iris.utils.general import *
 from iris.calibration.calibration_generator import CalibrationParams, SpectrometerCalibrator, Frm_SpectrometerCalibrationGenerator
 from iris.data.measurement_Raman import MeaRaman, MeaRaman_Plotter
-from iris.multiprocessing.basemanager import MyManager,get_my_manager
+from iris.multiprocessing.basemanager import MyManager,get_my_manager, SyncManager
 
 from iris.controllers import Controller_Spectrometer
 
@@ -464,7 +464,7 @@ class DataStreamer_Raman(mp.Process):
         self._calibrator.terminate()
         super().join()
 
-def initialise_manager_raman(manager:MyManager):
+def initialise_manager_raman(manager:MyManager|SyncManager):
     """
     Registers the classes and the dictionary with the manager.
     """
@@ -474,8 +474,8 @@ def initialise_manager_raman(manager:MyManager):
     manager.register('list_raman_measurement_proxy',callable=list,proxytype=mpm.ListProxy)
     manager.register('list_raman_integrationtime_proxy',callable=list,proxytype=mpm.ListProxy)
     manager.register('list_raman_flg_retrieved_proxy',callable=list,proxytype=mpm.ListProxy)
-    
-def initialise_proxy_raman(manager:MyManager):
+
+def initialise_proxy_raman(manager:MyManager|SyncManager):
     """
     Initialises the proxies for the controllers and the dictionary.
     

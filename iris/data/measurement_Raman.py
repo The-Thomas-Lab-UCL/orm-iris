@@ -242,7 +242,7 @@ class MeaRaman():
         self._dict_metadata['accumulation'] = len(self._spectrum_rawlist)
         
         if autoupdate and not self._flg_uptodate:
-            self._spectrum_analysed = self._average(self._spectrum_rawlist)
+            self._spectrum_analysed = self.average(self._spectrum_rawlist)
             self._flg_uptodate = True
         return self._flg_uptodate
     
@@ -346,7 +346,7 @@ class MeaRaman():
         Returns:
             pd.df: averaged spectrum
         """
-        spectrum_avg = self._average(spectrum_rawlist)
+        spectrum_avg = self.average(spectrum_rawlist)
         return spectrum_avg
     
     def calculate_analysed(self) -> pd.DataFrame:
@@ -356,7 +356,7 @@ class MeaRaman():
         Returns:
             pd.DataFrame: analysed spectra
         """
-        spectrum_analysed = self._average(self._spectrum_rawlist)
+        spectrum_analysed = self.average(self._spectrum_rawlist)
         self._flg_uptodate = True
         self._spectrum_analysed = spectrum_analysed
         return spectrum_analysed
@@ -448,26 +448,11 @@ class MeaRaman():
         if mea_type == 'analysed': df = self._spectrum_analysed
         elif mea_type == 'raw': df = self._spectrum_rawlist[-1]
         elif mea_type == 'any': df = self._get_any_measurement()
-        
+        df:pd.DataFrame
         return df[self.label_intensity].to_numpy()
-    
-    def _wavelength_similarity_check(self,wavelength_list):
-        """
-        Check if a list of wavelength is similar, within a tolerance.
-        
-        Args:
-            wavelength_list (list): of wavelengths to be compared
-        
-        Returns:
-            bool: True if similar, False if there's a difference larger than self.tolerance
-        """
-        def check(wl1, wl2):
-            return all(abs(w1 - w2) <= self._tolerance for w1, w2 in zip(wl1, wl2))
-        
-        similar = all(check(wl, wavelength_list[0]) for wl in wavelength_list[1:])
-        return similar
-    
-    def _average(self,spectra_list:list[pd.DataFrame],queue_response:queue.Queue=None) -> pd.DataFrame:
+
+    @staticmethod
+    def average(spectra_list:list[pd.DataFrame]) -> pd.DataFrame:
         """
         Averages a given spectra list. Refer to the wavelenght_name and intensity_name
         for the required column names in the input dataframes.
@@ -476,37 +461,36 @@ class MeaRaman():
 
         Args:
             spectra_list (list): List of spectra dataframes in the same form as the one for plot
-            queue_response (queue.Queue): A queue to put the response in if required
 
         Returns:
             Dataframe: Average spectra in the same form as the input
         """
-        if len(spectra_list) == 1:
-            if queue_response:
-                queue_response.put(spectra_list[0])
-            return spectra_list[0]
+        lbl_wvl = DataAnalysisConfigEnum.WAVELENGTH_LABEL.value
+        lbl_int = DataAnalysisConfigEnum.INTENSITY_LABEL.value
+        intensity_list = [spectra[lbl_int].values for spectra in spectra_list]
+        wavelength_list = [spectra[lbl_wvl].values for spectra in spectra_list]
+        tolerance = DataAnalysisConfigEnum.SIMILARITY_THRESHOLD.value
         
-        intensity_list = [spectra[self.label_intensity].values for spectra in spectra_list]
-        wavelength_list = [spectra[self.label_wavelength].values for spectra in spectra_list]
+        def wavelength_similarity_check(wavelength_list):
+            def check(wl1, wl2):
+                return all(abs(w1 - w2) <= tolerance for w1, w2 in zip(wl1, wl2))
+            similar = all(check(wl, wavelength_list[0]) for wl in wavelength_list[1:])
+            return similar
         
         # Check if the wavelengths are similar and warns the user if they're different
-        if not self._wavelength_similarity_check(wavelength_list):
+        if not wavelength_similarity_check(wavelength_list):
             print("!!!!! SPECTRA WITH DIFFERENT WAVELENGTHS BEING AVERAGED !!!!!")
             
         # Calculate the average spectrum, extract the wavelengths, and put on the current timestamp
         all_intensities = np.vstack([intensity_list[i] for i in range(len(intensity_list))])
         avg_intensity = np.mean(all_intensities, axis=0)
-        wavelength = spectra_list[0][self.label_wavelength]
+        wavelength = spectra_list[0][lbl_wvl]
         
         # Write the average spectrum dataframe
         avg_spectra = pd.DataFrame({
-        DataAnalysisConfigEnum.WAVELENGTH_LABEL.value: wavelength,
-        DataAnalysisConfigEnum.INTENSITY_LABEL.value: avg_intensity
+            lbl_wvl: wavelength,
+            lbl_int: avg_intensity
         })
-        
-        if queue_response:
-            queue_response.put(avg_spectra)
-        
         return avg_spectra
     
     def copy(self) -> Self: # type: ignore
