@@ -963,7 +963,7 @@ class Wdg_MotionController(qw.QGroupBox):
         # Resets the statusbar, let the user know that it's done moving
         self.signal_statbar_message.emit('Stage movement complete', None)
 
-    def get_coordinates_closest_mm(self) -> tuple[float|None,float|None,float|None]|None:
+    def get_coordinates_closest_mm(self) -> tuple[float|None,float|None,float|None]:
         """
         Returns the current coordinate of both channels x, y, and z of the stages.
 
@@ -973,7 +973,7 @@ class Wdg_MotionController(qw.QGroupBox):
         timestamp_req = get_timestamp_us_int()
         result = self._stageHub.get_coordinates_closest(timestamp_req)
         
-        if result is None: return None
+        if result is None: return (None,None,None)
         coor_x,coor_y,coor_z = result
         
         self._current_coor = np.array([coor_x,coor_y,coor_z])

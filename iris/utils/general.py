@@ -63,6 +63,21 @@ def run_with_timeout(func, args=(), kwargs={}, timeout=5):
     
     return result
 
+def generate_test_app(lyt:qw.QVBoxLayout|qw.QHBoxLayout) -> tuple[qw.QApplication,qw.QWidget]:
+    """
+    Generates a test QApplication and QVBoxLayout for testing purposes
+
+    Returns:
+        tuple[qw.QApplication, qw.QWidget]: The QApplication and QWidget instances
+    """
+    app = qw.QApplication([])
+    main_window = qw.QMainWindow()
+    main_window.show()
+    wdg = qw.QWidget()
+    main_window.setCentralWidget(wdg)
+    wdg.setLayout(lyt)
+    return app, wdg
+
 def messagebox_request_input(title: str, message: str, default: str = '') -> str:
     """
     A function that creates a messagebox that requests for an input from the user

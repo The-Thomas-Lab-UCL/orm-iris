@@ -16,25 +16,25 @@ if __name__ == '__main__':
     SCRIPT_DIR = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(SCRIPT_DIR))
 
-from iris.gui.submodules.meaCoor_generator.rectangle_endToEnd import Rect_EndToEnd as Map1
-from iris.gui.submodules.meaCoor_generator.rectangle_aroundCentre import Rect_AroundCentre as Map2
-from iris.gui.submodules.meaCoor_generator.rectangle_video import Rect_Video as Map3
-from iris.gui.submodules.meaCoor_generator.rectangle_image import Rect_Image as Map4
-from iris.gui.submodules.meaCoor_generator.points_image import Points_Image as Map5
-from iris.gui.submodules.meaCoor_generator.singlePoint_zScan import singlePoint_zScan as Map6
-from iris.gui.submodules.meaCoor_generator.line_zScan import ZScanMethod_linear as ZScan1
+from iris.gui.submodules.meaCoor_generator.rectangle_endToEnd import Wdg_Rect_StartEnd as Map1
+# from iris.gui.submodules.meaCoor_generator.rectangle_aroundCentre import Rect_AroundCentre as Map2
+# from iris.gui.submodules.meaCoor_generator.rectangle_video import Rect_Video as Map3
+# from iris.gui.submodules.meaCoor_generator.rectangle_image import Rect_Image as Map4
+# from iris.gui.submodules.meaCoor_generator.points_image import Points_Image as Map5
+# from iris.gui.submodules.meaCoor_generator.singlePoint_zScan import singlePoint_zScan as Map6
+# from iris.gui.submodules.meaCoor_generator.line_zScan import ZScanMethod_linear as ZScan1
 
 from iris.gui.submodules.meaCoor_modifier.every_z import EveryZ as MapMod1
-from iris.gui.submodules.meaCoor_modifier.zInterpolate import ZInterpolate as MapMod2
-from iris.gui.submodules.meaCoor_modifier.topology_visualiser import TopologyVisualizer as MapMod3
-from iris.gui.submodules.meaCoor_modifier.translateXYZ import TranslateXYZ as MapMod4
-from iris.gui.submodules.meaCoor_modifier.gridify import Gridify as MapMod5
+# from iris.gui.submodules.meaCoor_modifier.zInterpolate import ZInterpolate as MapMod2
+# from iris.gui.submodules.meaCoor_modifier.topology_visualiser import TopologyVisualizer as MapMod3
+# from iris.gui.submodules.meaCoor_modifier.translateXYZ import TranslateXYZ as MapMod4
+# from iris.gui.submodules.meaCoor_modifier.gridify import Gridify as MapMod5
 
 from iris.utils.general import *
 from iris.gui import AppRamanEnum, AppPlotEnum
 
 from iris.gui.motion_video import Wdg_MotionController
-from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
+# from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 
 from iris.data.measurement_image import ImgMea_Cal_Hub, MeaImg_Hub
