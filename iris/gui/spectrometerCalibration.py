@@ -26,11 +26,11 @@ from iris.utils.general import *
 from iris.data.measurement_RamanMap import MeaRMap_Hub, MeaRMap_Unit
 from iris.data.measurement_Raman import MeaRaman, MeaRaman_Plotter
 
-from iris.gui.dataHub_MeaRMap import Frm_DataHub_Mapping, Frm_DataHub_Mapping_Plus
+from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping, Frm_DataHub_Mapping_Plus
 from iris.gui.submodules.peakfinder_plotter_MeaRaman import Frm_RamanMeasurement_Plotter
 
 class sFrm_wavelength_calibration(tk.Frame):
-    def __init__(self, parent:tk.Frame, dataHub:Frm_DataHub_Mapping):
+    def __init__(self, parent:tk.Frame, dataHub:Wdg_DataHub_Mapping):
         super().__init__(parent)
         self._showInfo = False
 
@@ -56,7 +56,7 @@ class sFrm_wavelength_calibration(tk.Frame):
     # >> DataHub_Plus setup <<
         # Set up the dataHubPlus to be used for the calibration data source
         # and reference selections and link the dataHub from which the data are taken
-        self._dataHub = Frm_DataHub_Mapping(frm_RMselection,width_rel=0.7,height_rel=0.4)
+        self._dataHub = Wdg_DataHub_Mapping(frm_RMselection,width_rel=0.7,height_rel=0.4)
         self._dataHub.set_MappingHub(dataHub.get_MappingHub())
         self._dataHub_Plus = Frm_DataHub_Mapping_Plus(frm_RMselection, self._dataHub,
             width_rel=0.7, height_rel=0.4)    # dataHubPlus for the representation measurement selection

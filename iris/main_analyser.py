@@ -18,13 +18,13 @@ from iris.utils.general import *
 from iris.gui.submodules.heatmap_plotter_MeaRMap import Frm_MappingMeasurement_Plotter
 from iris.gui.submodules.peakfinder_plotter_MeaRaman import Frm_RamanMeasurement_Plotter
 from iris.gui.spectrometerCalibration import sFrm_wavelength_calibration
-from iris.gui.dataHub_MeaRMap import Frm_DataHub_Mapping, Frm_DataHub_Mapping_Plus, MeaRMap_Hub
+from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping, Frm_DataHub_Mapping_Plus, MeaRMap_Hub
 from iris.gui.timestamp_coorshift import sFrm_xyCoorTimestampShift
 
 from iris import *
 
 class main_analyser(tk.Frame):
-    def __init__(self, master, processor:mpp.Pool, dataHub:Frm_DataHub_Mapping|None=None):
+    def __init__(self, master, processor:mpp.Pool, dataHub:Wdg_DataHub_Mapping|None=None):
         """
         Initialises the IRIS analyser.
         
@@ -86,7 +86,7 @@ class main_analyser(tk.Frame):
         
     # >>> Data hub plus setup <<<
         self._dataHub_MainController = dataHub
-        self._dataHub_local = Frm_DataHub_Mapping(sfrm_data,width_rel=0.8)
+        self._dataHub_local = Wdg_DataHub_Mapping(sfrm_data,width_rel=0.8)
         if not dataHub is None:
             self._dataHub_local.set_MappingHub(dataHub.get_MappingHub())
             self._flg_isconn_ccontroller = True
@@ -254,7 +254,7 @@ class EventHandler():
     A handler for events such as clicking in the plotter or selecting a unit in the datahub plus that
     needs to be communicated between the classes
     """
-    def __init__(self,dataHub:Frm_DataHub_Mapping,dataHubPlus:Frm_DataHub_Mapping_Plus, heatmapPlotterInteractive:Heatmap_InteractivePlotter,
+    def __init__(self,dataHub:Wdg_DataHub_Mapping,dataHubPlus:Frm_DataHub_Mapping_Plus, heatmapPlotterInteractive:Heatmap_InteractivePlotter,
                  spectraPlotter:Frm_RamanMeasurement_Plotter):
         """
         Initialises the event handler.

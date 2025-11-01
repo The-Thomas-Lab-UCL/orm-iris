@@ -12,6 +12,7 @@ requires-python = ">=3.13"
 dependencies = [
     "configupdater>=3.2",
     "dill>=0.4.0",
+    "fuzzywuzzy>=0.18.0",
     "keyboard>=0.13.5",
     "matplotlib>=3.10.5",
     "numpy>=2.3.2",

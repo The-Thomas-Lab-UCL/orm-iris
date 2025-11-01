@@ -754,7 +754,7 @@ class Frm_MappingMeasurement_Plotter(tk.Frame):
 
 def test_plotter():
     from iris.data.measurement_RamanMap import generate_dummy_mappingHub, test_datasaveload_system
-    from iris.gui.dataHub_MeaRMap import Frm_DataHub_Mapping
+    from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
     
     mappinghub = MeaRMap_Hub()
     mappinghub.test_generate_dummy(1)
@@ -771,7 +771,7 @@ def test_plotter():
     plotter.refresh_plotter()
     plotter.pack(side=tk.RIGHT,fill=tk.BOTH,expand=True)
 
-    dataHub = Frm_DataHub_Mapping(
+    dataHub = Wdg_DataHub_Mapping(
         root,
         mappingHub=mappinghub
     )

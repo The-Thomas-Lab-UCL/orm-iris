@@ -28,7 +28,7 @@ from iris.utils.general import *
 
 from iris.gui.motion_video import Frm_MotionController
 from iris.gui.raman import Frm_RamanSpectrometerController
-from iris.gui.dataHub_MeaRMap import Frm_DataHub_Mapping
+from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
 from iris.gui.hilvl_coorGen import Frm_Treeview_MappingCoordinates, Frm_CoorGenerator
 
@@ -86,7 +86,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
                  stageHub:DataStreamer_StageCam,
                  raman_controller:Frm_RamanSpectrometerController,
                  ramanHub:DataStreamer_Raman,
-                 dataHub_map:Frm_DataHub_Mapping,
+                 dataHub_map:Wdg_DataHub_Mapping,
                  dataHub_img:Frm_DataHub_Image,
                  dataHub_imgcal:Frm_DataHub_ImgCal,
                  coorHub:List_MeaCoor_Hub,

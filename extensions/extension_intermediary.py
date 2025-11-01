@@ -29,7 +29,7 @@ from iris.gui.hilvl_Raman import Frm_HighLvlController_Raman
 from iris.gui.hilvl_Brightfield import Frm_HighLvlController_Brightfield
 
 # Data containers/managers
-from iris.gui.dataHub_MeaRMap import Frm_DataHub_Mapping
+from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
 
 class Ext_DataIntermediary():
@@ -50,7 +50,7 @@ class Ext_DataIntermediary():
         frm_highlvl_raman: Frm_HighLvlController_Raman,
         frm_highlvl_brightfield: Frm_HighLvlController_Brightfield,
         # Data containers/managers
-        frm_datahub_mapping: Frm_DataHub_Mapping,
+        frm_datahub_mapping: Wdg_DataHub_Mapping,
         frm_datahub_image: Frm_DataHub_Image,
         frm_datahub_imgcal: Frm_DataHub_ImgCal,
         ) -> None:
@@ -130,7 +130,7 @@ class Ext_DataIntermediary():
         """
         return self.frm_highlvl_brightfield
     
-    def get_datahub_mapping_gui(self) -> Frm_DataHub_Mapping:
+    def get_datahub_mapping_gui(self) -> Wdg_DataHub_Mapping:
         """
         Get the data hub mapping GUI.
         """

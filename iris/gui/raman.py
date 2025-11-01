@@ -27,7 +27,7 @@ if __name__ == '__main__':
 
 
 from iris.utils.general import *
-from iris.gui.dataHub_MeaRMap import Frm_DataHub_Mapping
+from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.data.measurement_Raman import MeaRaman, MeaRaman_Plotter
 from iris.multiprocessing.dataStreamer_Raman import DataStreamer_Raman, initialise_manager_raman, initialise_proxy_raman
 from iris.multiprocessing.basemanager import get_my_manager
@@ -329,7 +329,7 @@ class Frm_RamanSpectrometerController(qw.QWidget):
         processor:mpp.Pool,
         controller:Controller_Spectrometer,
         ramanHub:DataStreamer_Raman,
-        dataHub:Frm_DataHub_Mapping|None,
+        dataHub:Wdg_DataHub_Mapping|None,
         main:bool=False
         ) -> None:
         """
@@ -471,7 +471,7 @@ class Frm_RamanSpectrometerController(qw.QWidget):
     # >>> Data management widgets setup <<<
         # Datasave widget
         self._btn_saveto_datahub = widget.btn_savetomanager
-        if isinstance(self._dataHub,Frm_DataHub_Mapping):
+        if isinstance(self._dataHub,Wdg_DataHub_Mapping):
             self._btn_saveto_datahub.clicked.connect(
                 lambda data=self._sngl_measurement: self._dataHub.append_RamanMeasurement_multi(data)) # type: ignore ; it is guaranteed to be Frm_DataHub_Mapping here
         else: self._btn_saveto_datahub.setEnabled(False)

@@ -28,13 +28,13 @@ from iris.utils.general import *
 from iris.data.measurement_RamanMap import MeaRMap_Hub, MeaRMap_Unit
 from iris.data.measurement_Raman import MeaRaman, MeaRaman_Plotter
 
-from iris.gui.dataHub_MeaRMap import Frm_DataHub_Mapping
+from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.gui.submodules.heatmap_plotter_MeaRMap import Frm_MappingMeasurement_Plotter
 
 from iris.gui import AppPlotEnum
 
 class sFrm_xyCoorTimestampShift(tk.Frame):
-    def __init__(self, parent: tk.Frame, dataHub:Frm_DataHub_Mapping, callback:Callable|None=None):
+    def __init__(self, parent: tk.Frame, dataHub:Wdg_DataHub_Mapping, callback:Callable|None=None):
         super().__init__(parent)
         self._dataHub = dataHub
         self._callback = callback

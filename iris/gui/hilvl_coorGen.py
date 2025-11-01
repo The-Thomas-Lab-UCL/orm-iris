@@ -35,7 +35,7 @@ from iris.gui import AppRamanEnum, AppPlotEnum
 
 from iris.gui.motion_video import Frm_MotionController
 from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
-from iris.gui.dataHub_MeaRMap import Frm_DataHub_Mapping
+from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 
 from iris.data.measurement_image import ImgMea_Cal_Hub, MeaImg_Hub
 from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
@@ -449,7 +449,7 @@ class Frm_CoorGenerator(tk.Frame):
                  parent:tk.Tk|tk.Frame|tk.LabelFrame|ttk.Notebook,
                  coorHub:List_MeaCoor_Hub,
                  motion_controller:Frm_MotionController,
-                 dataHub_map:Frm_DataHub_Mapping,
+                 dataHub_map:Wdg_DataHub_Mapping,
                  dataHub_img:Frm_DataHub_Image,
                  dataHub_imgcal:Frm_DataHub_ImgCal):
         """
@@ -698,7 +698,7 @@ class Frm_CoorGenerator(tk.Frame):
 def generate_dummy_sfrmCoorGenerator(
     parent:tk.Tk|tk.Frame,
     motion_controller:Frm_MotionController|None=None,
-    datahub_map:Frm_DataHub_Mapping|None=None,
+    datahub_map:Wdg_DataHub_Mapping|None=None,
     datahub_img:MeaImg_Hub|None=None,
     datahub_imgcal:ImgMea_Cal_Hub|None=None
     ) -> Frm_CoorGenerator:

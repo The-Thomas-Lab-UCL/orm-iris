@@ -35,7 +35,7 @@ from iris.utils.general import *
 
 from iris.gui.motion_video import Frm_MotionController
 
-from iris.gui.dataHub_MeaRMap import Frm_DataHub_Mapping
+from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
 from iris.gui.hilvl_coorGen import Frm_CoorGenerator
 
@@ -56,7 +56,7 @@ class Frm_HighLvlController_Brightfield(tk.Frame):
         self,
         parent:tk.Tk|tk.Frame|tk.LabelFrame|ttk.Notebook,
         processor:mpp.Pool,
-        dataHub_map:Frm_DataHub_Mapping,
+        dataHub_map:Wdg_DataHub_Mapping,
         dataHub_img:Frm_DataHub_Image,
         dataHub_imgcal:Frm_DataHub_ImgCal,
         motion_controller:Frm_MotionController,
@@ -75,7 +75,7 @@ class Frm_HighLvlController_Brightfield(tk.Frame):
             main (bool): Flag to indicate if this is the main script
         """
         assert isinstance(processor, mpp.Pool), 'Processor must be a multiprocessing.pool.Pool object'
-        assert isinstance(dataHub_map, Frm_DataHub_Mapping), 'DataHub must be a Frm_DataHub object'
+        assert isinstance(dataHub_map, Wdg_DataHub_Mapping), 'DataHub must be a Frm_DataHub object'
         assert isinstance(dataHub_img, Frm_DataHub_Image), 'DataHub must be a Frm_DataHub object'
         assert isinstance(dataHub_imgcal, Frm_DataHub_ImgCal), 'DataHub must be a Frm_DataHub object'
         assert isinstance(motion_controller, Frm_MotionController), 'Motion controller must be a Frm_MotionController object'

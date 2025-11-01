@@ -15,7 +15,7 @@ from tkinter import messagebox
 from iris.gui.motion_video import Frm_MotionController
 from iris.gui.raman import Frm_RamanSpectrometerController
 from iris.gui.hilvl_Raman import Frm_HighLvlController_Raman
-from iris.gui.dataHub_MeaRMap import Frm_DataHub_Mapping
+from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
 from iris.gui.hilvl_Brightfield import Frm_HighLvlController_Brightfield
 from iris.gui.hilvl_coorGen import Frm_CoorGenerator, List_MeaCoor_Hub
@@ -101,7 +101,7 @@ class controller_app(tk.Tk):
         self._coorHub = List_MeaCoor_Hub()
         
         # Data hub setups
-        self._dataHub_map = Frm_DataHub_Mapping(sfrm_dataHub,autosave=True)
+        self._dataHub_map = Wdg_DataHub_Mapping(sfrm_dataHub,autosave=True)
         self._dataHub_img = Frm_DataHub_Image(sfrm_dataHub)
         self._dataHub_imgcal = Frm_DataHub_ImgCal(frm_imgcal)
         

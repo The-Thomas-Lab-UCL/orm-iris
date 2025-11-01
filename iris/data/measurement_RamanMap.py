@@ -925,7 +925,7 @@ class MeaRMap_Hub():
         """
         return self._dict_mappingMeasurementUnits['measurement_unit']
 
-    def get_summary_units(self) -> tuple[list,list,list]:
+    def get_summary_units(self) -> tuple[list[str],list[str],list[dict],list[int]]:
         """
         Returns a  summarises all the stored units and their metadata.
         
@@ -1407,10 +1407,19 @@ class MeaRMap_Handler():
         
         extension = extension[1:]   # Remove the dot (e.g., .txt -> txt)
         
-        return self._save_MappingUnit_ext(mappingUnit,filepath,flg_saveraw,extension)
+        return self.save_MappingUnit_ext(mappingUnit,filepath,flg_saveraw,extension)
+        
+    def get_dict_extensions(self) -> dict:
+        """
+        Returns the dictionary of supported file extensions and their descriptions.
+        
+        Returns:
+            dict: dictionary of supported file extensions and their descriptions
+        """
+        return self._dict_extensions.copy()
         
     @thread_assign
-    def _save_MappingUnit_ext(self,mappingUnit:MeaRMap_Unit,filepath:str,flg_saveraw:bool,extension:str)\
+    def save_MappingUnit_ext(self,mappingUnit:MeaRMap_Unit,filepath:str,flg_saveraw:bool,extension:str)\
         -> threading.Thread:
         """
         Saves a given MappingMeasurement_Unit object into a tab delimited .csv file.
@@ -1550,7 +1559,8 @@ class MeaRMap_Handler():
         return (saveDirPath,savename,extension)
         
     def save_MappingMeasurementHub_choose(self,mappingHub:MeaRMap_Hub,
-            saveDirPath:str|None=None,savename:str|None=None,extension:str|None=None):
+        saveDirPath:str|None=None,savename:str|None=None,extension:str|None=None)\
+        -> threading.Thread:
         """
         Choose to either save to database or pickle file.
         
@@ -1570,7 +1580,7 @@ class MeaRMap_Handler():
         # Check the extension and save accordingly
         if extension == '.db':
             thread = self.save_MappingHub_database(mappingHub,saveDirPath,savename)
-        elif extension == '.pkl':
+        else:
             thread = self.save_MappingHub_pickle(mappingHub,saveDirPath,savename)
         savename = savename + extension
         return thread
