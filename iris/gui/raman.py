@@ -311,7 +311,7 @@ class RamanMeasurement_Worker(QObject):
         self._ramanHub.pause_auto_measurement()
         self.finished.emit(True)
 
-class Frm_RamanSpectrometerController(qw.QWidget):
+class Wdg_SpectrometerController(qw.QWidget):
     """
     A class defining the app subwindow for the Raman spectrometer.
     """
@@ -1020,7 +1020,7 @@ if __name__ == '__main__':
     # root = tk.Tk()
     
     # dataHub = Frm_DataHub_Mapping(master=root)
-    raman_frame = Frm_RamanSpectrometerController(
+    raman_frame = Wdg_SpectrometerController(
         parent=central_widget,
         processor=processor,
         controller=RamanController_proxy,

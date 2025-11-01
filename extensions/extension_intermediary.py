@@ -23,8 +23,8 @@ from iris.controllers.class_z_stage_controller import Class_ZController
 from iris.controllers.class_spectrometer_controller import Class_SpectrometerController
 
 # GUI controllers
-from iris.gui.motion_video import Frm_MotionController
-from iris.gui.raman import Frm_RamanSpectrometerController
+from iris.gui.motion_video import Wdg_MotionController
+from iris.gui.raman import Wdg_SpectrometerController
 from iris.gui.hilvl_Raman import Frm_HighLvlController_Raman
 from iris.gui.hilvl_Brightfield import Frm_HighLvlController_Brightfield
 
@@ -45,8 +45,8 @@ class Ext_DataIntermediary():
         xy_controller: Class_XYController,
         z_controller: Class_ZController,
         # GUI controllers
-        frm_motion_controller: Frm_MotionController,
-        frm_raman_controller: Frm_RamanSpectrometerController,
+        frm_motion_controller: Wdg_MotionController,
+        frm_raman_controller: Wdg_SpectrometerController,
         frm_highlvl_raman: Frm_HighLvlController_Raman,
         frm_highlvl_brightfield: Frm_HighLvlController_Brightfield,
         # Data containers/managers
@@ -106,13 +106,13 @@ class Ext_DataIntermediary():
         """
         return self.z_controller
     
-    def get_video_motion_controller_gui(self) -> Frm_MotionController:
+    def get_video_motion_controller_gui(self) -> Wdg_MotionController:
         """
         Get the motion controller GUI.
         """
         return self.frm_motion_controller
     
-    def get_raman_controller_gui(self) -> Frm_RamanSpectrometerController:
+    def get_raman_controller_gui(self) -> Wdg_SpectrometerController:
         """
         Get the Raman controller GUI.
         """

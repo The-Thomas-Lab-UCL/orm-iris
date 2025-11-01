@@ -33,7 +33,7 @@ from PIL.Image import Image
 from iris.utils.general import *
 
 
-from iris.gui.motion_video import Frm_MotionController
+from iris.gui.motion_video import Wdg_MotionController
 
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
@@ -59,7 +59,7 @@ class Frm_HighLvlController_Brightfield(tk.Frame):
         dataHub_map:Wdg_DataHub_Mapping,
         dataHub_img:Frm_DataHub_Image,
         dataHub_imgcal:Frm_DataHub_ImgCal,
-        motion_controller:Frm_MotionController,
+        motion_controller:Wdg_MotionController,
         stageHub:DataStreamer_StageCam,
         coorHub:List_MeaCoor_Hub,
         main:bool=False):
@@ -78,7 +78,7 @@ class Frm_HighLvlController_Brightfield(tk.Frame):
         assert isinstance(dataHub_map, Wdg_DataHub_Mapping), 'DataHub must be a Frm_DataHub object'
         assert isinstance(dataHub_img, Frm_DataHub_Image), 'DataHub must be a Frm_DataHub object'
         assert isinstance(dataHub_imgcal, Frm_DataHub_ImgCal), 'DataHub must be a Frm_DataHub object'
-        assert isinstance(motion_controller, Frm_MotionController), 'Motion controller must be a Frm_MotionController object'
+        assert isinstance(motion_controller, Wdg_MotionController), 'Motion controller must be a Frm_MotionController object'
         assert isinstance(stageHub, DataStreamer_StageCam), 'StageHub must be a stage_measurement_hub object'
         
         super().__init__(parent)

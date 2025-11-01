@@ -19,7 +19,7 @@ from typing import Callable, Literal
 
 from uuid import uuid4
 
-from iris.gui.motion_video import Frm_MotionController
+from iris.gui.motion_video import Wdg_MotionController
 from iris.utils.general import *
 
 from iris.data.calibration_objective import ImgMea_Cal
@@ -32,7 +32,7 @@ from iris.gui import AppPlotEnum
 class Rect_Video(tk.Frame):
     def __init__(self,
                  container_frame,
-                 motion_controller:Frm_MotionController,
+                 motion_controller:Wdg_MotionController,
                  status_bar:tk.Label,
                  getter_imgcal:Callable[[],ImgMea_Cal],
                  *args, **kwargs):
@@ -456,7 +456,7 @@ def test():
     
     status_bar = tk.Label(root,text='Ready',bd=1,relief=tk.SUNKEN,anchor=tk.W)
     status_bar.pack(side=tk.BOTTOM,fill=tk.X)
-    motion_controller = Frm_MotionController(
+    motion_controller = Wdg_MotionController(
         parent=toplvl,
         xy_controller=xyctrl,
         z_controller=zctrl,

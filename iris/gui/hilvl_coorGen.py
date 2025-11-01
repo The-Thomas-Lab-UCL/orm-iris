@@ -33,7 +33,7 @@ from iris.gui.submodules.meaCoor_modifier.gridify import Gridify as MapMod5
 from iris.utils.general import *
 from iris.gui import AppRamanEnum, AppPlotEnum
 
-from iris.gui.motion_video import Frm_MotionController
+from iris.gui.motion_video import Wdg_MotionController
 from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 
@@ -355,7 +355,7 @@ class sFrm_CoorModifier(tk.Frame):
     def __init__(
         self,
         master:tk.Tk|tk.Frame,
-        motion_controller:Frm_MotionController,
+        motion_controller:Wdg_MotionController,
         coor_Hub:List_MeaCoor_Hub):
         """
         Displays the GUI for the coordinate modifier methods.
@@ -448,7 +448,7 @@ class Frm_CoorGenerator(tk.Frame):
     def __init__(self,
                  parent:tk.Tk|tk.Frame|tk.LabelFrame|ttk.Notebook,
                  coorHub:List_MeaCoor_Hub,
-                 motion_controller:Frm_MotionController,
+                 motion_controller:Wdg_MotionController,
                  dataHub_map:Wdg_DataHub_Mapping,
                  dataHub_img:Frm_DataHub_Image,
                  dataHub_imgcal:Frm_DataHub_ImgCal):
@@ -697,7 +697,7 @@ class Frm_CoorGenerator(tk.Frame):
         
 def generate_dummy_sfrmCoorGenerator(
     parent:tk.Tk|tk.Frame,
-    motion_controller:Frm_MotionController|None=None,
+    motion_controller:Wdg_MotionController|None=None,
     datahub_map:Wdg_DataHub_Mapping|None=None,
     datahub_img:MeaImg_Hub|None=None,
     datahub_imgcal:ImgMea_Cal_Hub|None=None

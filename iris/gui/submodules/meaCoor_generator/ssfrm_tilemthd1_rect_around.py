@@ -12,7 +12,7 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.gui.motion_video import Frm_MotionController
+from iris.gui.motion_video import Wdg_MotionController
 from iris.gui.hilvl_coorGen import Frm_Treeview_MappingCoordinates
 
 from iris.data.calibration_objective import ImgMea_Cal
@@ -31,7 +31,7 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
     def __init__(
         self,
         master:tk.Tk|tk.Frame,
-        motion_controller:Frm_MotionController,
+        motion_controller:Wdg_MotionController,
         coorHub:List_MeaCoor_Hub,
         getter_cal:Callable[[],ImgMea_Cal],
         *args, **kwargs) -> None:
@@ -249,7 +249,7 @@ def test_rect2():
     
     status_bar = tk.Label(root,text='Ready',bd=1,relief=tk.SUNKEN,anchor=tk.W)
     status_bar.pack(side=tk.BOTTOM,fill=tk.X)
-    motion_controller = Frm_MotionController(root,True)
+    motion_controller = Wdg_MotionController(root,True)
     
     mapping_method = tiling_method_rectxy_scan_constz_around_a_point(root,motion_controller,status_bar)
     mapping_method.pack()

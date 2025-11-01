@@ -12,8 +12,8 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
 
-from iris.gui.motion_video import Frm_MotionController
-from iris.gui.raman import Frm_RamanSpectrometerController
+from iris.gui.motion_video import Wdg_MotionController
+from iris.gui.raman import Wdg_SpectrometerController
 from iris.gui.hilvl_Raman import Frm_HighLvlController_Raman
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
@@ -118,7 +118,7 @@ class controller_app(tk.Tk):
         self.config(menu=self._menubar)
         
         # Initialise the app subframes
-        self._motion = Frm_MotionController(
+        self._motion = Wdg_MotionController(
             parent=frm_motion_video,
             xy_controller=xy_controller,
             z_controller=z_controller,
@@ -126,7 +126,7 @@ class controller_app(tk.Tk):
             getter_imgcal=self._dataHub_imgcal.get_selected_calibration,
             flg_issimulation=ControllerConfigEnum.SIMULATION_MODE.value)
         
-        self._raman = Frm_RamanSpectrometerController(
+        self._raman = Wdg_SpectrometerController(
             parent=frm_raman,
             processor=self._processor,
             controller=raman_controller,

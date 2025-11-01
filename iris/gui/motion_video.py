@@ -168,7 +168,7 @@ class _Worker_move_breathing_z(QObject):
         self._breathing_timer.stop()
         self.signal_breathing_finished.emit()
 
-class Frm_MotionController(qw.QGroupBox):
+class Wdg_MotionController(qw.QGroupBox):
     """
     A class to control the app subwindow for the motion:
     - video output
@@ -1208,7 +1208,7 @@ class Frm_MotionController(qw.QGroupBox):
         self.ctrl_z.terminate()
         self._camera_ctrl.camera_termination()
 
-def generate_dummy_motion_controller(parent:qw.QWidget) -> Frm_MotionController:
+def generate_dummy_motion_controller(parent:qw.QWidget) -> Wdg_MotionController:
     """
     Generates a dummy motion controller for testing purposes.
     
@@ -1223,7 +1223,7 @@ def generate_dummy_motion_controller(parent:qw.QWidget) -> Frm_MotionController:
     stagehub, xyproxy, zproxy, camproxy, stage_namespace = generate_dummy_stageHub()
     stagehub.start()
 
-    frm_motion = Frm_MotionController(
+    frm_motion = Wdg_MotionController(
         parent=parent,
         xy_controller=xyproxy,
         z_controller=zproxy,

@@ -21,7 +21,7 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.gui.motion_video import Frm_MotionController
+from iris.gui.motion_video import Wdg_MotionController
 from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 
 from iris.utils.general import *
@@ -135,7 +135,7 @@ class Gridify(tk.Frame):
         self,
         parent,
         mappingCoorHub: List_MeaCoor_Hub,
-        motion_controller:Frm_MotionController,
+        motion_controller:Wdg_MotionController,
         *args, **kwargs) -> None:
         """Initializes the mapping method
         
@@ -413,7 +413,7 @@ class Gridify(tk.Frame):
 class TopLevel_GridSetup(tk.Toplevel):
     def __init__(self, parent, corner_coords: list[np.ndarray],
                  num_rows: int, num_cols: int, mapping_coor: MeaCoor_mm,
-                 ctrl_motion_video: Frm_MotionController, queue_result: Queue, *args, **kwargs):
+                 ctrl_motion_video: Wdg_MotionController, queue_result: Queue, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
         self.title("Gridify Setup")
         
@@ -605,7 +605,7 @@ class TopLevel_GridSetup(tk.Toplevel):
     
 class TopLevel_FineTuneGridify(tk.Toplevel):
     def __init__(self, parent, list_mapping_coor:list[MeaCoor_mm],
-                 list_loc:list[tuple[int, int]], ctrl_motion_video:Frm_MotionController,
+                 list_loc:list[tuple[int, int]], ctrl_motion_video:Wdg_MotionController,
                  queue_result:Queue,*args, **kwargs):
         """
         Initializes the fine-tune gridify window.

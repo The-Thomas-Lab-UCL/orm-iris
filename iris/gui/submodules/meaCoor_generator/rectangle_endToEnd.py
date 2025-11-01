@@ -12,7 +12,7 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.gui.motion_video import Frm_MotionController
+from iris.gui.motion_video import Wdg_MotionController
 from iris.utils.general import *
 
 class Rect_EndToEnd(tk.Frame):
@@ -21,7 +21,7 @@ class Rect_EndToEnd(tk.Frame):
     Args:
         tk (tkinter): tkinter library
     """
-    def __init__(self,container_frame,motion_controller:Frm_MotionController,status_bar:tk.Label=None,
+    def __init__(self,container_frame,motion_controller:Wdg_MotionController,status_bar:tk.Label=None,
                  *args, **kwargs) -> None:
         """Initializes the mapping method
         
@@ -397,7 +397,7 @@ def test_rect1():
     
     status_bar = tk.Label(root,text='Ready',bd=1,relief=tk.SUNKEN,anchor=tk.W)
     status_bar.pack(side=tk.BOTTOM,fill=tk.X)
-    motion_controller = Frm_MotionController(root,True)
+    motion_controller = Wdg_MotionController(root,True)
     
     mapping_method = Rect_EndToEnd(root,motion_controller,status_bar)
     mapping_method.pack()

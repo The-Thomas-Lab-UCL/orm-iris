@@ -22,7 +22,7 @@ if __name__ == '__main__':
 
 from iris.utils.general import *
 
-from iris.gui.motion_video import Frm_MotionController
+from iris.gui.motion_video import Wdg_MotionController
 from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
 from iris.gui.hilvl_coorGen import Frm_Treeview_MappingCoordinates
 
@@ -47,7 +47,7 @@ class Frm_HiLvlTiling(tk.Frame):
     def __init__(
         self,
         master,
-        motion_controller:Frm_MotionController,
+        motion_controller:Wdg_MotionController,
         stageHub:DataStreamer_StageCam,
         dataHub_img:Frm_DataHub_Image,
         dataHub_imgcal:Frm_DataHub_ImgCal,
@@ -66,7 +66,7 @@ class Frm_HiLvlTiling(tk.Frame):
         Returns:
             None
         """
-        assert isinstance(motion_controller, Frm_MotionController), 'motion_controller must be a Frm_MotionController object'
+        assert isinstance(motion_controller, Wdg_MotionController), 'motion_controller must be a Frm_MotionController object'
         assert isinstance(stageHub, DataStreamer_StageCam), 'stageHub must be a stage_measurement_hub object'
         assert isinstance(dataHub_img, Frm_DataHub_Image), 'dataHub_img must be a Frm_DataHub_Image object'
         assert isinstance(dataHub_imgcal, Frm_DataHub_ImgCal), 'dataHub_imgcal must be a Frm_DataHub_ImgCal object'

@@ -8,7 +8,7 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.gui.motion_video import Frm_MotionController
+from iris.gui.motion_video import Wdg_MotionController
 from iris.utils.general import *
 
 class Rect_AroundCentre(tk.Frame):
@@ -17,7 +17,7 @@ class Rect_AroundCentre(tk.Frame):
     Args:
         tk (tkinter): tkinter library
     """
-    def __init__(self,container_frame,motion_controller:Frm_MotionController,status_bar:tk.Label=None,
+    def __init__(self,container_frame,motion_controller:Wdg_MotionController,status_bar:tk.Label=None,
                  *args, **kwargs) -> None:
         # Place itself in the given master frame (container)
         super().__init__(container_frame)
@@ -432,7 +432,7 @@ def test_rect2():
     
     status_bar = tk.Label(root,text='Ready',bd=1,relief=tk.SUNKEN,anchor=tk.W)
     status_bar.pack(side=tk.BOTTOM,fill=tk.X)
-    motion_controller = Frm_MotionController(root,True)
+    motion_controller = Wdg_MotionController(root,True)
     
     mapping_method = Rect_AroundCentre(root,motion_controller,status_bar)
     mapping_method.pack()

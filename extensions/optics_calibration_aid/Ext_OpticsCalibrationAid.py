@@ -28,7 +28,7 @@ from extensions.extension_template import Extension_TopLevel
 from extensions.extension_intermediary import Ext_DataIntermediary as Intermediary
 
 from iris.controllers.class_spectrometer_controller import Class_SpectrometerController as Spectrometer
-from iris.gui.raman import Frm_RamanSpectrometerController as Frm_Raman
+from iris.gui.raman import Wdg_SpectrometerController as Frm_Raman
 from iris.data.measurement_Raman import MeaRaman
 from iris import DataAnalysisConfigEnum as DAEnum
 

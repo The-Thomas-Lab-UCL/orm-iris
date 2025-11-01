@@ -15,7 +15,7 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.gui.motion_video import Frm_MotionController
+from iris.gui.motion_video import Wdg_MotionController
 from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 
 from iris.utils.general import *
@@ -25,7 +25,7 @@ class EveryZ(tk.Frame):
         self,
         parent,
         mappingCoorHub: List_MeaCoor_Hub,
-        motion_controller:Frm_MotionController,
+        motion_controller:Wdg_MotionController,
         *args, **kwargs) -> None:
         """Initializes the mapping method
         

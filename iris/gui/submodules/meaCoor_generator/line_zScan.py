@@ -12,7 +12,7 @@ import tkinter as tk
 import numpy as np
 from typing import Callable
     
-from iris.gui.motion_video import Frm_MotionController
+from iris.gui.motion_video import Wdg_MotionController
 from iris.utils.general import *
 
 class ZScanMethod_linear(tk.Frame):
