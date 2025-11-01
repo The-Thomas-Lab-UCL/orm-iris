@@ -28,6 +28,7 @@ from iris.data.measurement_RamanMap import MeaRMap_Hub, MeaRMap_Unit, MeaRMap_Ha
 from iris.data import SaveParamsEnum
 
 from iris.resources.dataHub_Raman_ui import Ui_DataHub_mapping
+from iris.resources.dataHubPlus_Raman_ui import Ui_DataHubPlus_mapping
 
 class Save_worker(QObject):
     
@@ -580,11 +581,23 @@ class Wdg_DataHub_Mapping(qw.QWidget):
             else: break
         return
         
-class Frm_DataHub_Mapping_Plus(tk.Frame):
+class Wdg_DataHubPlus_Mapping_Ui(qw.QWidget, Ui_DataHubPlus_mapping):
+    def __init__(self, parent: Any) -> None:
+        super().__init__(parent)
+        self.setupUi(self)
+        lyt = qw.QVBoxLayout()
+        self.setLayout(lyt)
+        
+class Frm_DataHub_Mapping_Plus(qw.QWidget):
     """
     Like the Frm_DataHub, but also shows the data of a single MappingMeasurement_Unit.
     """
-    def __init__(self, master,dataHub:Wdg_DataHub_Mapping,width_rel:float=1,height_rel:float=1):
+    sig_mea_selection_changed = Signal()   # Emitted when the RamanMeasurement selection is changed
+    
+    _sig_modify_tree = Signal()         # Emitted when the treeview needs to be modified (internal)
+    _sig_tree_rebuild_done = Signal()   # Emitted when the treeview has been rebuilt (internal)
+    
+    def __init__(self, master,dataHub:Wdg_DataHub_Mapping):
         """
         Initialises the data hub frame. This frame stores all the data from the measurement session.
         
@@ -596,22 +609,20 @@ class Frm_DataHub_Mapping_Plus(tk.Frame):
         """
         super().__init__(master)
         assert isinstance(dataHub, Wdg_DataHub_Mapping), "dataHub must be a Frm_DataHub object"
-        assert isinstance(width_rel, (int, float)), "width_rel must be an integer or float"
-        assert isinstance(height_rel, (int, float)), "height_rel must be an integer or float"
-        if width_rel <= 0: width_rel=1
-        if height_rel <= 0: height_rel=1
-        self._width_rel = width_rel
-        
-        # Main frames setup
-        frm_tree_unit = tk.LabelFrame(self, text="Selected mapping unit preview")
-        frm_tree_unit.grid(row=1, column=0, sticky="nsew")
         
         # DataHub setup
         self._dataHub = dataHub
         self._tree_MappingHub = self._dataHub.get_tree()
         
+        # Main widget
+        self._widget = Wdg_DataHubPlus_Mapping_Ui(self)
+        lyt = qw.QVBoxLayout()
+        self.setLayout(lyt)
+        lyt.addWidget(self._widget)
+        wdg = self._widget
+        
         # Storage parameters setup
-        self._mappingUnit:MeaRMap_Unit = None
+        self._mappingUnit:MeaRMap_Unit|None = None
         self._lock_dict_RMid_treeid = threading.Lock()
         self._dict_RMid_treeid = {}     # Dict to map: RamanMeasurement ID -> treeview item ID
         self._lock_dict_RMid_RM = threading.Lock()
@@ -619,78 +630,18 @@ class Frm_DataHub_Mapping_Plus(tk.Frame):
         
         # Unit tree setup
         columns = ("Timestamp", "Coor-x", "Coor-y", "Coor-z", "Metadata")
-        self._unit_id:str = None
-        self._tree_MappingUnit = ttk.Treeview(frm_tree_unit, columns=columns, show="headings",
-                                              height=int(20*height_rel))
-        self._init_tree_unit()
+        self._unit_id:str|None = None
+        self._tree_unit = wdg.tree_data
+        self._tree_unit.setColumnCount(len(columns))
+        self._tree_unit.setHeaderLabels(columns)
         
         # Status bar setup
-        self._lbl_statusbar = tk.Label(frm_tree_unit, text="Ready")
-        self._lbl_bg = self._lbl_statusbar.cget("background")
-        
-        # Grid setup
-        self._tree_MappingUnit.grid(row=0, column=0, sticky="nsew")
-        self._lbl_statusbar.grid(row=1, column=0, sticky="nsew")
+        self._lbl_statusbar = wdg.lbl_info
         
         # Interactive widget setup
-        self._tree_MappingHub.bind("<ButtonRelease-1>", lambda event: self._notify_observer_unit_selection())
-        self._tree_MappingUnit.bind("<ButtonRelease-1>", lambda event: self._notify_observer_RM_selection())
-        self._list_observer_unit_selection = [self._set_unit_dataHub]
-        self._list_observer_RamanMea_selection = []
-        
-        # Grid configuration
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(0, weight=1)
-        
-        frm_tree_unit.grid_columnconfigure(0, weight=1)
-        frm_tree_unit.grid_rowconfigure(0, weight=1)
-        
-        # Flags for status updates
-        self._flg_updated_dictRM = threading.Event()
-        self._flg_updated_dictTree = threading.Event()
-        
-    def _notify_observer_RM_selection(self):
-        """
-        Run all the callbacks in the list when a RamanMeasurement is selected
-        """
-        for callback in self._list_observer_RamanMea_selection: callback()
-        
-    def _notify_observer_unit_selection(self):
-        """
-        Run all the callbacks in the list when a unit is selected
-        """
-        for callback in self._list_observer_unit_selection: callback()
-        
-    def add_observer_RM_selection(self, callback):
-        """
-        Sets a callback function to run when the user selects a RamanMeasurement in the unit treeview
-        """
-        assert callable(callback), "callback must be a callable function"
-        self._list_observer_RamanMea_selection.append(callback)
-        
-    def add_observer_unit_selection(self, callback):
-        """
-        Sets a callback function to run when the user selects a MappingMeasurement_Unit in the hub treeview
-        """
-        assert callable(callback), "callback must be a callable function"
-        self._list_observer_unit_selection.append(callback)
-        
-    def set_mappingHub(self, mappingHub:MeaRMap_Hub):
-        """
-        Sets the MappingMeasurement_Hub for the dataHub
-        """
-        assert isinstance(mappingHub, MeaRMap_Hub), "mappingHub must be a MappingMeasurement_Hub object"
-        self._dataHub.set_MappingHub(mappingHub)
-        self.update_tree_unit()
-        
-    def get_selected_MappingUnit(self) -> MeaRMap_Unit:
-        """
-        Returns the selected MappingMeasurement_Unit in the hub treeview
-        
-        Returns:
-            MappingMeasurement_Unit: The selected MappingMeasurement_Unit
-        """
-        return self._mappingUnit
+        self._sig_modify_tree.connect(self.update_tree_unit)
+        self._tree_unit.clicked.connect(lambda: self.sig_mea_selection_changed.emit())
+        self._dataHub.sig_tree_selection.connect(self._set_unit_dataHub)
         
     def set_selected_RamanMeasurement(self, measurement_id:str):
         """
@@ -700,90 +651,38 @@ class Frm_DataHub_Mapping_Plus(tk.Frame):
             measurement_id (str): The id of the RamanMeasurement to select
         """
         assert isinstance(measurement_id, str), "measurement_id must be a string"
-        mapping_unit_items = self._tree_MappingUnit.get_children()
+        list_selections = self._tree_unit.selectedItems()
+        list_ts = [item.text(0) for item in list_selections]
+        if not isinstance(self._mappingUnit, MeaRMap_Unit): return
+        self._mappingUnit.get_RamanMeasurement(list_ts[0])
         
-        # New search using the dictionary
-        with self._lock_dict_RMid_treeid:
-            if measurement_id in self._dict_RMid_treeid:
-                item_id = self._dict_RMid_treeid[measurement_id]
-                current_selections = self._tree_MappingUnit.selection()
-                [self._tree_MappingUnit.selection_remove(item) for item in current_selections]
-                self._tree_MappingUnit.selection_add(item_id)
-                self._tree_MappingUnit.see(item_id)
-                return
-        
-    def get_selected_RamanMeasurement_summary(self) -> list[dict]:
+    def get_selected_RamanMeasurement_summary(self) -> dict:
         """
         Returns the summary of the selected RamanMeasurement in the unit treeview
         from the MappingMeasurement_Unit.
         
         Returns:
-            list[dict]: The summary of the selected RamanMeasurement
+            dict: The summary of the selected RamanMeasurement
         """
-        selections = self._tree_MappingUnit.selection()
-        list_dict_mea = []
-        with self._lock_dict_RMid_RM:
-            for item in selections:
-                RM_id = self._tree_MappingUnit.item(item, "values")[0]
-                list_dict_mea.append(self._mappingUnit.get_dict_RamanMeasurement_summary(RM_id,exclude_id=True))
-            return list_dict_mea
+        selections = self._tree_unit.selectedItems()
         
-    def get_selected_RamanMeasurement(self) -> list[MeaRaman]:
+        if not isinstance(self._mappingUnit, MeaRMap_Unit): return {}
+        mea_id = selections[0].text(0)
+        return self._mappingUnit.get_dict_RamanMeasurement_summary(mea_id,exclude_id=True)
+        
+    def get_selected_RamanMeasurement(self) -> MeaRaman|None:
         """
         Returns the selected RamanMeasurement in the unit treeview
         
         Returns:
-            list[RamanMeasurement]: The selected RamanMeasurement
+            RamanMeasurement: The selected RamanMeasurement
         """
-        selections = self._tree_MappingUnit.selection()
-        
-        with self._lock_dict_RMid_RM:
-            list_measurements = []
-            for item in selections:
-                RM_id = self._tree_MappingUnit.item(item, "values")[0]
-                RM = self._dict_RMid_RM[RM_id]
-                list_measurements.append(RM)
-            return list_measurements
-        
-    def _init_tree_unit(self):
-        """
-        Initialises the unit treeview with the columns and headings
-        """
-        self._tree_MappingUnit.heading("Timestamp", text="Timestamp", anchor=tk.W)
-        self._tree_MappingUnit.heading("Coor-x", text="Coor-x", anchor=tk.W)
-        self._tree_MappingUnit.heading("Coor-y", text="Coor-y", anchor=tk.W)
-        self._tree_MappingUnit.heading("Coor-z", text="Coor-z", anchor=tk.W)
-        self._tree_MappingUnit.heading("Metadata", text="Metadata", anchor=tk.W)
-        
-        self._tree_MappingUnit.column("Timestamp", width=int(100*self._width_rel))
-        self._tree_MappingUnit.column("Coor-x", width=int(100*self._width_rel))
-        self._tree_MappingUnit.column("Coor-y", width=int(100*self._width_rel))
-        self._tree_MappingUnit.column("Coor-z", width=int(100*self._width_rel))
-        self._tree_MappingUnit.column("Metadata", width=int(300*self._width_rel))
-        
-    def _build_dict_RMid_RM(self):
-        """
-        Builds a dictionary that maps the RamanMeasurement ID to the RamanMeasurement object
-        """
-        self._flg_updated_dictRM.clear()
-        with self._lock_dict_RMid_RM:
-            for item_id in self._tree_MappingUnit.get_children():
-                RM_id = self._tree_MappingUnit.item(item_id, "values")[0]
-                RM = self._mappingUnit.get_RamanMeasurement(RM_id)
-                self._dict_RMid_RM[RM_id] = RM
-        self._flg_updated_dictRM.set()
-        
-    def _build_dict_RMid_treeid(self):
-        """
-        Builds a dictionary that maps the RamanMeasurement ID to the treeview item ID
-        """
-        self._flg_updated_dictTree.clear()
-        with self._lock_dict_RMid_treeid:
-            for item_id in self._tree_MappingUnit.get_children():
-                RM_id = self._tree_MappingUnit.item(item_id, "values")[0]
-                self._dict_RMid_treeid[RM_id] = item_id
-        self._flg_updated_dictTree.set()
+        selections = self._tree_unit.selectedItems()
+        if not isinstance(self._mappingUnit, MeaRMap_Unit): return None
+        mea_id = selections[0].text(0)
+        return self._mappingUnit.get_RamanMeasurement(mea_id)
             
+    @Slot()
     def _set_unit_dataHub(self):
         """
         Sets the unit based on the dataHub selection.
@@ -793,17 +692,18 @@ class Frm_DataHub_Mapping_Plus(tk.Frame):
         
         if len(list_unit) == 0: return
         self._mappingUnit = list_unit[0]
-        threading.Thread(target=self._build_dict_RMid_treeid).start()
-        threading.Thread(target=self._build_dict_RMid_RM).start()
-        self.update_tree_unit()
         
+        self._sig_modify_tree.emit()
+        
+    @Slot()
     def update_tree_unit(self):
         """
         Refreshes the unit treeview with the data in the MappingMeasurement_Unit
         """
-        self._lbl_statusbar.config(text="Updating the Data Hub Plus. Interactive features not ready.",bg="yellow")
+        self._lbl_statusbar.setText("Updating the Data Hub Plus. Interactive features not ready.")
+        self._lbl_statusbar.setStyleSheet("background-color: yellow")
         
-        self._tree_MappingUnit.delete(*self._tree_MappingUnit.get_children())
+        self._tree_unit.clear()
         if self._mappingUnit is None: return
         
         dict_metadata = self._mappingUnit.get_dict_measurement_metadata()
@@ -816,18 +716,12 @@ class Frm_DataHub_Mapping_Plus(tk.Frame):
         list_coorz = dict_measurement[coorz_key]
         list_metadata = [str(dict_metadata)] * len(list_timestamp)
         
-        for timestamp, coorx, coory, coorz, metadata in zip(list_timestamp, list_coorx, list_coory, list_coorz, list_metadata):
-            self._tree_MappingUnit.insert("", "end", values=(timestamp, coorx, coory, coorz, metadata))
+        for ts, x, y, z, meta in zip(list_timestamp, list_coorx, list_coory, list_coorz, list_metadata):
+            qw.QTreeWidgetItem(self._tree_unit,
+                [str(ts), str(x), str(y), str(z), meta])
             
-        threading.Thread(target=self.reset_statusbar).start()
-    
-    def reset_statusbar(self):
-        """
-        Resets the status bar after updating the treeview
-        """
-        self._flg_updated_dictRM.wait()
-        self._flg_updated_dictTree.wait()
-        self._lbl_statusbar.config(text="Ready", bg=self._lbl_bg)
+        self._lbl_statusbar.setText("Data Hub Plus updated. Ready.")
+        self._lbl_statusbar.setStyleSheet("")
     
 def generate_dummy_frmMappingHub(parent) -> Wdg_DataHub_Mapping:
     """
@@ -844,12 +738,27 @@ def generate_dummy_frmMappingHub(parent) -> Wdg_DataHub_Mapping:
     return frm
     
 def test_dataHub_Plus():
-    root = tk.Tk()
-    datahub = Wdg_DataHub_Mapping(root)
-    frm = Frm_DataHub_Mapping_Plus(root,datahub)
-    frm.pack()
+    import sys
+    app = qw.QApplication([])
+    window = qw.QMainWindow()
+    central_widget = qw.QWidget()
+    window.setCentralWidget(central_widget)
+    layout = qw.QVBoxLayout()
+    central_widget.setLayout(layout)
     
-    root.mainloop()
+    mappinghub = MeaRMap_Hub()
+    datahub = Wdg_DataHub_Mapping(central_widget,mappingHub=mappinghub,autosave=False)
+    layout.addWidget(datahub)
+    
+    datahubplus = Frm_DataHub_Mapping_Plus(central_widget,datahub)
+    layout.addWidget(datahubplus)
+    
+    datahubplus.sig_mea_selection_changed.connect(lambda: print(datahubplus.get_selected_RamanMeasurement_summary()))
+    
+    window.show()
+    mappinghub.test_generate_dummy()
+    
+    sys.exit(app.exec())
 
 def test_dataHub():
     import sys
@@ -872,5 +781,5 @@ def test_dataHub():
     sys.exit(app.exec())
     
 if __name__ == '__main__':
-    test_dataHub()
-    # test_dataHub_Plus()
+    # test_dataHub()
+    test_dataHub_Plus()

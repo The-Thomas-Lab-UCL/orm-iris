@@ -8,6 +8,7 @@ import os
 import gc
 import numpy as np
 import pandas as pd
+import bisect
 from copy import deepcopy
 
 import threading
@@ -541,7 +542,7 @@ class MeaRMap_Unit():
         assert self._flg_measurement_exist, 'get_avg_df: The measurement data does not exist.'
         assert measurement_id in self._dict_measurement[self._mea_id_key], 'get_avg_df: The timestamp does not exist in the stored data.'
         
-        idx = self._dict_measurement[self._mea_id_key].index(measurement_id)
+        idx = bisect.bisect_left(self._dict_measurement[self._mea_id_key], measurement_id)
         df = self._dict_measurement[self._label_avemea][idx]
         
         return df
