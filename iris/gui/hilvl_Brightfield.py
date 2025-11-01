@@ -200,12 +200,12 @@ class Frm_HighLvlController_Brightfield(tk.Frame):
         
 def test():
     pass
-    # stageHub = None
-    # processor = mp.Pool()
-    # root = tk.Tk()
-    # data_save_manager_dummy = ControllerDataIntermediary_dummy(stageHub)
-    # toplevel = Frm_ImageCalibration(root,processor,data_manager=data_save_manager_dummy)
-    # root.mainloop()
+    stageHub = None
+    processor = mp.Pool()
+    root = tk.Tk()
+    data_save_manager_dummy = ControllerDataIntermediary_dummy(stageHub)
+    toplevel = Frm_HighLvlController_Brightfield(root,processor,data_manager=data_save_manager_dummy)
+    root.mainloop()
 
 if __name__ == '__main__':
     test()

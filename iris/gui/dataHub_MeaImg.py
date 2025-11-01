@@ -473,6 +473,19 @@ def test_DataHubImage():
     frm.pack(expand=True, fill='both')
     
     root.mainloop()
+
+def test_DataHub_ImgCal():
+    """
+    Test the Frm_DataHub_ImgCal class.
+    """
+    root = tk.Tk()
+    root.title('Data Hub Image Calibration Test')
     
+    frm = Frm_DataHub_ImgCal(root)
+    frm.pack(expand=True, fill='both')
+    
+    root.mainloop()
+
 if __name__ == '__main__':
-    test_DataHubImage()
+    # test_DataHubImage()
+    test_DataHub_ImgCal()

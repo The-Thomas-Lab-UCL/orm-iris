@@ -29,11 +29,11 @@ from iris.utils.general import *
 from iris.gui.motion_video import Wdg_MotionController
 from iris.gui.raman import Wdg_SpectrometerController
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
-from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
+# from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
 from iris.gui.hilvl_coorGen import Frm_Treeview_MappingCoordinates, Frm_CoorGenerator
 
 from iris.gui.submodules.heatmap_plotter_MeaRMap import Frm_MappingMeasurement_Plotter
-from iris.gui.submodules.image_tiling import Frm_HiLvlTiling
+# from iris.gui.submodules.image_tiling import Frm_HiLvlTiling
 
 from iris.data.measurement_RamanMap import MeaRMap_Unit, MeaRMap_Hub, MeaRMap_Handler
 from iris.data.measurement_Raman import MeaRaman,MeaRaman_Handler
@@ -42,7 +42,7 @@ from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam
 from iris.multiprocessing.dataStreamer_Raman import DataStreamer_Raman
 
-from iris.gui.image_calibration.plotter_heatmap_overlay import Frm_HeatmapOverlay
+# from iris.gui.image_calibration.plotter_heatmap_overlay import Frm_HeatmapOverlay
 
 from iris.gui import AppRamanEnum, AppPlotEnum
 
@@ -87,8 +87,8 @@ class Frm_HighLvlController_Raman(tk.Frame):
                  raman_controller:Wdg_SpectrometerController,
                  ramanHub:DataStreamer_Raman,
                  dataHub_map:Wdg_DataHub_Mapping,
-                 dataHub_img:Frm_DataHub_Image,
-                 dataHub_imgcal:Frm_DataHub_ImgCal,
+                #  dataHub_img:Frm_DataHub_Image,
+                #  dataHub_imgcal:Frm_DataHub_ImgCal,
                  coorHub:List_MeaCoor_Hub,
                  frm_coorGen:Frm_CoorGenerator,
                  processor:mpp.Pool):
@@ -116,8 +116,8 @@ class Frm_HighLvlController_Raman(tk.Frame):
         self._stageHub = stageHub
         self._ramanHub = ramanHub
         self._dataHub_map = dataHub_map
-        self._dataHub_img = dataHub_img
-        self._dataHub_imgcal = dataHub_imgcal
+        # self._dataHub_img = dataHub_img
+        # self._dataHub_imgcal = dataHub_imgcal
         self._coorHub = coorHub
         self._frm_coorGen = frm_coorGen
         
@@ -241,17 +241,17 @@ class Frm_HighLvlController_Raman(tk.Frame):
         
     # >>> Overlay heatmap plotter setup <<<
         # Heatmap plotter widgets setup
-        self._frm_heatmapOverlay = Frm_HeatmapOverlay(
-            master=frm_mappingoverlay,
-            processor=self.processor,
-            mappingHub=self._dataHub_map.get_MappingHub(),
-            imghub_getter=self._dataHub_img.get_ImageMeasurement_Hub,
-            dataHub_imgcal=self._dataHub_imgcal,
-            figsize_pxl=AppPlotEnum.IMGCAL_IMG_SIZE.value
-        )
+        # self._frm_heatmapOverlay = Frm_HeatmapOverlay(
+        #     master=frm_mappingoverlay,
+        #     processor=self.processor,
+        #     mappingHub=self._dataHub_map.get_MappingHub(),
+        #     imghub_getter=self._dataHub_img.get_ImageMeasurement_Hub,
+        #     dataHub_imgcal=self._dataHub_imgcal,
+        #     figsize_pxl=AppPlotEnum.IMGCAL_IMG_SIZE.value
+        # )
         
-        # Pack the widgets
-        self._frm_heatmapOverlay.grid(row=0, column=0)
+        # # Pack the widgets
+        # self._frm_heatmapOverlay.grid(row=0, column=0)
         
     # >>> Controller widgets setup <<<
         self.status_update()
@@ -432,7 +432,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
         return total_distance
     
     def _initialise_mapping_parameters(self, mappingHub:MeaRMap_Hub, mapping_coordinates_mm:MeaCoor_mm,
-                                       mappingUnit_name:str|None=None) -> tuple[list,float,str]:
+                                       mappingUnit_name:str|None=None) -> tuple[list,float,str]|bool:
         """
         Performs the initial checks prior to the mapping measurement:
             1. Running status check
