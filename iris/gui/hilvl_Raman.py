@@ -30,7 +30,7 @@ from iris.gui.motion_video import Wdg_MotionController
 from iris.gui.raman import Wdg_SpectrometerController
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 # from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
-from iris.gui.hilvl_coorGen import Frm_Treeview_MappingCoordinates, Frm_CoorGenerator
+from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates, Frm_CoorGenerator
 
 from iris.gui.submodules.heatmap_plotter_MeaRMap import Frm_MappingMeasurement_Plotter
 # from iris.gui.submodules.image_tiling import Frm_HiLvlTiling
@@ -173,8 +173,8 @@ class Frm_HighLvlController_Raman(tk.Frame):
         self.mdl_plot.grid(row=0,column=0)
         
         # Setup: Mapping controls
-        self._frm_coorHub_treeview = Frm_Treeview_MappingCoordinates(
-            master=frm_mapping,mappingCoorHub=self._coorHub)
+        self._frm_coorHub_treeview = Wdg_Treeview_MappingCoordinates(
+            parent=frm_mapping,mappingCoorHub=self._coorHub)
         
         self._notebook_mapping = ttk.Notebook(frm_mapping)
         self._sfrm_mapping = tk.Frame(self._notebook_mapping)   # Houses the multi mapping controls

@@ -2,7 +2,7 @@
 An instance that manages a basic mapping method in tkinter
 """
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication
+from PySide6.QtCore import Signal, Slot
 
 from math import ceil
 

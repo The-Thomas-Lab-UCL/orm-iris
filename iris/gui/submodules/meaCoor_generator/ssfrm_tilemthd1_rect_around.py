@@ -13,7 +13,7 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
 
 from iris.gui.motion_video import Wdg_MotionController
-from iris.gui.hilvl_coorGen import Frm_Treeview_MappingCoordinates
+from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates
 
 from iris.data.calibration_objective import ImgMea_Cal
 from iris.data.measurement_coordinates import List_MeaCoor_Hub, MeaCoor_mm
@@ -45,7 +45,7 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
         self._coorHub = coorHub
         
     # >>> Top level frames <<<
-        self._frm_tv_mapCoor = Frm_Treeview_MappingCoordinates(master=self,mappingCoorHub=coorHub)
+        self._frm_tv_mapCoor = Wdg_Treeview_MappingCoordinates(parent=self,mappingCoorHub=coorHub)
         frm_control = tk.Frame(self)
         
         row=0; col=0

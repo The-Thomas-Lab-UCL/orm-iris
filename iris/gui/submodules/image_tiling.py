@@ -24,7 +24,7 @@ from iris.utils.general import *
 
 from iris.gui.motion_video import Wdg_MotionController
 from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
-from iris.gui.hilvl_coorGen import Frm_Treeview_MappingCoordinates
+from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates
 
 from iris.gui.submodules.meaCoor_generator.ssfrm_tilemthd1_rect_around import tiling_method_rectxy_scan_constz_around_a_point as TileMethod
 

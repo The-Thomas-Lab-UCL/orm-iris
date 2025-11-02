@@ -163,6 +163,22 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         if mappingUnit_name in list_names: idx =  list_names.index(mappingUnit_name)
         return idx
     
+    def get_mappingCoor(self, mappingUnit_name:str) -> MeaCoor_mm|None:
+        """
+        Gets a mapping coordinates object from the list by its mapping unit name.
+        
+        Args:
+            mappingUnit_name (str): The name of the mapping unit to get.
+            
+        Returns:
+            MappingCoordinates: The mapping coordinates object, or None if not found.
+        """
+        if not isinstance(mappingUnit_name, str): raise TypeError(f"Expected str, got {type(mappingUnit_name)}")
+        for mapcoor in self:
+            if mapcoor.mappingUnit_name == mappingUnit_name:
+                return mapcoor
+        return None
+
     def remove_mappingCoor(self, mappingUnit_name:str):
         """
         Removes a mapping unit from the list of mapping coordinates.
@@ -264,3 +280,17 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         
         list_mapCoor = [self[self.search_mappingCoor(name)] for name in list_unitNames if self.search_mappingCoor(name) is not None]
         return list_mapCoor
+    
+    def generate_dummy_data(self, num_units:int=5, num_coords:int=10):
+        """
+        Generates dummy data for testing purposes.
+        
+        Args:
+            num_units (int): The number of mapping units to generate. Defaults to 5.
+            num_coords (int): The number of coordinates per mapping unit. Defaults to 10.
+        """
+        for i in range(num_units):
+            mappingUnit_name = f"Unit_{i+1}"
+            mapping_coordinates = [(float(x), float(y), float(z)) for x, y, z in zip(range(num_coords), range(num_coords), range(num_coords))]
+            mapCoor = MeaCoor_mm(mappingUnit_name=mappingUnit_name, mapping_coordinates=mapping_coordinates)
+            self.append(mapCoor)
