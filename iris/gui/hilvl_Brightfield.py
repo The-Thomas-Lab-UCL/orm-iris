@@ -37,7 +37,7 @@ from iris.gui.motion_video import Wdg_MotionController
 
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
-from iris.gui.hilvl_coorGen import Frm_CoorGenerator
+from iris.gui.hilvl_coorGen import Wdg_Hilvl_CoorGenerator
 
 from iris.gui.image_calibration.plotter_heatmap_overlay import Frm_HeatmapOverlay
 from iris.gui.image_calibration.capture_and_calibration import sFrm_CaptureAndCalibration

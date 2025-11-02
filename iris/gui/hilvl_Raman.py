@@ -30,7 +30,7 @@ from iris.gui.motion_video import Wdg_MotionController
 from iris.gui.raman import Wdg_SpectrometerController
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 # from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
-from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates, Frm_CoorGenerator
+from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates, Wdg_Hilvl_CoorGenerator
 
 from iris.gui.submodules.heatmap_plotter_MeaRMap import Frm_MappingMeasurement_Plotter
 # from iris.gui.submodules.image_tiling import Frm_HiLvlTiling
@@ -90,7 +90,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 #  dataHub_img:Frm_DataHub_Image,
                 #  dataHub_imgcal:Frm_DataHub_ImgCal,
                  coorHub:List_MeaCoor_Hub,
-                 frm_coorGen:Frm_CoorGenerator,
+                 frm_coorGen:Wdg_Hilvl_CoorGenerator,
                  processor:mpp.Pool):
         """
         Initialises the higher level controller, which needs access to most (if not all)

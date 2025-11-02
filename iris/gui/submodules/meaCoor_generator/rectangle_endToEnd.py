@@ -102,7 +102,7 @@ class Wdg_Rect_StartEnd(qw.QWidget):
         self._btn_storexy_end.clicked.connect(self._grab_endxy)
         self._btn_storez.clicked.connect(self._grab_z)
 
-    def get_mapping_coordinates_mm(self):
+    def get_mapping_coordinates_mm(self) -> list[tuple[float,float,float]]:
         """ 
         Returns the mapping coordinates
         
@@ -111,6 +111,9 @@ class Wdg_Rect_StartEnd(qw.QWidget):
         """
         # Make sure to keep the generated coordinates up to date
         self._generate_mapping_coordinates()
+        assert isinstance(self._mapping_coordinates,list)
+        assert all([isinstance(coor,tuple) and len(coor)==3 for coor in self._mapping_coordinates])
+        assert all([all([isinstance(val,float) for val in coor]) for coor in self._mapping_coordinates])
         return self._mapping_coordinates
     
     @Slot()
@@ -137,7 +140,7 @@ class Wdg_Rect_StartEnd(qw.QWidget):
 
         # Create the grid
         X, Y = np.meshgrid(x_points, y_points)
-        self._mapping_coordinates = [(x, y, z) for x, y in zip(X.flatten(), Y.flatten())]
+        self._mapping_coordinates = [(float(x), float(y), float(z)) for x, y in zip(X.flatten(), Y.flatten())]
     
     def _reset_mapping_coordinates(self):
         self._m1_pointsx = None             # Stores the mapping resolution in the x-direction

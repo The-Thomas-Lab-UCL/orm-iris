@@ -29,7 +29,7 @@ class Wdg_ZScanMethod_linear(qw.QWidget):
     """
     A class that manages the linear z-scan method for the mapping methods.
     """
-    def __init__(self,parent,getter_stagecoor:Callable[[],tuple[float,float,float]],
+    def __init__(self,parent,getter_stagecoor:Callable[[],tuple[float|None,float|None,float|None]],
                  *args, **kwargs) -> None:
         """
         Initialises the class with the necessary parameters.

@@ -18,7 +18,7 @@ from iris.gui.hilvl_Raman import Frm_HighLvlController_Raman
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
 from iris.gui.hilvl_Brightfield import Frm_HighLvlController_Brightfield
-from iris.gui.hilvl_coorGen import Frm_CoorGenerator, List_MeaCoor_Hub
+from iris.gui.hilvl_coorGen import Wdg_Hilvl_CoorGenerator, List_MeaCoor_Hub
 
 from iris.gui.shortcut_handler import ShortcutHandler
 
@@ -133,7 +133,7 @@ class controller_app(tk.Tk):
             ramanHub=raman_hub,
             dataHub=self._dataHub_map)
         
-        self._hilvl_coorGen = Frm_CoorGenerator(
+        self._hilvl_coorGen = Wdg_Hilvl_CoorGenerator(
             parent=notebook,
             coorHub=self._coorHub,
             motion_controller=self._motion,

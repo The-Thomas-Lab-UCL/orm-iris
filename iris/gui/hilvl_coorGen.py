@@ -21,7 +21,7 @@ from iris.gui.submodules.meaCoor_generator.rectangle_endToEnd import Wdg_Rect_St
 # from iris.gui.submodules.meaCoor_generator.singlePoint_zScan import singlePoint_zScan as Map6
 from iris.gui.submodules.meaCoor_generator.line_zScan import Wdg_ZScanMethod_linear as ZScan1
 
-from iris.gui.submodules.meaCoor_modifier.every_z import EveryZ as MapMod1
+# from iris.gui.submodules.meaCoor_modifier.every_z import EveryZ as MapMod1
 # from iris.gui.submodules.meaCoor_modifier.zInterpolate import ZInterpolate as MapMod2
 # from iris.gui.submodules.meaCoor_modifier.topology_visualiser import TopologyVisualizer as MapMod3
 # from iris.gui.submodules.meaCoor_modifier.translateXYZ import TranslateXYZ as MapMod4
@@ -38,6 +38,13 @@ from iris.data.measurement_image import ImgMea_Cal_Hub, MeaImg_Hub
 from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 
 from iris.resources.dataHub_coor_ui import Ui_dataHub_coor
+from iris.resources.hilvl_coorGen_ui import Ui_hilvl_coorGen
+
+class Hilvl_CoorGen_UiDesign(qw.QWidget, Ui_hilvl_coorGen):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setupUi(self)
+        qw.QVBoxLayout(self)
 
 class Coor_saveload_worker(QObject):
     
@@ -182,7 +189,7 @@ class Coor_saveload_worker(QObject):
                 mappingCoor.save_pickle(filename)
         return
 
-class Wdg_DataHub_Coor(qw.QWidget, Ui_dataHub_coor):
+class DataHub_Coor_UiDesign(qw.QWidget, Ui_dataHub_coor):
     def __init__(self, parent):
         super().__init__(parent)
         self.setupUi(self)
@@ -213,7 +220,7 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         self._mappingCoorHub = mappingCoorHub
         
         # > Top level frame setup <
-        self._widget = Wdg_DataHub_Coor(self)
+        self._widget = DataHub_Coor_UiDesign(self)
         self._layout_main = qw.QHBoxLayout(self)
         self._layout_main.addWidget(self._widget)
         wdg = self._widget
@@ -531,17 +538,18 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
 #             if isinstance(widget,(tk.Frame,tk.LabelFrame)) and widget != self._current_map_method:
 #                 widget.grid_forget()
     
-class Frm_CoorGenerator(tk.Frame):
+class Wdg_Hilvl_CoorGenerator(qw.QWidget):
     """
     A class to generate coordinates for the mapping measurement and image tiling.
     """
     def __init__(self,
-                 parent:tk.Tk|tk.Frame|tk.LabelFrame|ttk.Notebook,
+                 parent,
                  coorHub:List_MeaCoor_Hub,
                  motion_controller:Wdg_MotionController,
                  dataHub_map:Wdg_DataHub_Mapping,
-                 dataHub_img:Frm_DataHub_Image,
-                 dataHub_imgcal:Frm_DataHub_ImgCal):
+                #  dataHub_img:Frm_DataHub_Image,
+                #  dataHub_imgcal:Frm_DataHub_ImgCal
+                 ):
         """
         Initialises the coordinate generator frame.
         
@@ -559,140 +567,78 @@ class Frm_CoorGenerator(tk.Frame):
         self._coorHub = coorHub
         self._motion_controller = motion_controller
         self._dataHub_map = dataHub_map
-        self._dataHub_img = dataHub_img
-        self._dataHub_imgcal = dataHub_imgcal
-        self._updater_statusbar = None
+        # self._dataHub_img = dataHub_img
+        # self._dataHub_imgcal = dataHub_imgcal
         
-        pass    # to suppress the warning of unused variables. to be removed later, changed to self._updater_statusbar
-        self.statbar = tk.Label(self, text='Status bar', bd=1, relief=tk.SUNKEN, anchor=tk.W)
+    # >>> Main widget/layout setup <<<
+        self._widget = Hilvl_CoorGen_UiDesign(self)
+        self._layout_main = qw.QHBoxLayout(self)
+        self._layout_main.addWidget(self._widget)
+        wdg = self._widget
         
     # >>> Top level frame setup <<<
-        notebook = ttk.Notebook(self)
-        self._frm_shortcuts = tk.LabelFrame(self, text='Shortcuts')
-        self._frm_tv_mapcoor = Wdg_Treeview_MappingCoordinates(self,self._coorHub)
-        frm_zscan = tk.LabelFrame(self, text='Z-scan coordinate generator (3D scan)')
-        self._frm_control = tk.LabelFrame(self, text='Control panel')
-        
-        row=0; col=0
-        notebook.grid(row=row,column=0,sticky='nsew',columnspan=2);row+=1
-        self._frm_shortcuts.grid(row=row,column=0,sticky='nsew',columnspan=2);row+=1
-        self._frm_tv_mapcoor.grid(row=row,column=0,sticky='nsew',rowspan=2)
-        frm_zscan.grid(row=row,column=1,sticky='nsew');col+=1;row+=1
-        self._frm_control.grid(row=row,column=1,sticky='ew')
-        
-        [self.grid_rowconfigure(i, weight=1) for i in range(row+1)]
-        [self.grid_columnconfigure(i, weight=1) for i in range(col+1)]
+        self._wdg_tv_mapcoor = Wdg_Treeview_MappingCoordinates(
+            wdg.wdg_coorHub_holder,self._coorHub)
+        wdg.lyt_coorHub_holder.addWidget(self._wdg_tv_mapcoor)
         
         # >> Notebook setup <<
-        self._sfrm_mapping_coorGen = tk.LabelFrame(notebook, text='Mapping coordinates generator')
-        self._sfrm_mapping_coorMod = sFrm_CoorModifier(
-            master=notebook,
-            motion_controller=self._motion_controller,
-            coor_Hub=self._coorHub,
-        )
-        notebook.add(self._sfrm_mapping_coorGen, text='Mapping coordinates generator')
-        notebook.add(self._sfrm_mapping_coorMod, text='Mapping coordinates modifier')
+        # self._sfrm_mapping_coorMod = sFrm_CoorModifier(
+        #     master=notebook,
+        #     motion_controller=self._motion_controller,
+        #     coor_Hub=self._coorHub,
+        # )
         
     # >>> Mapping coordinate method widgets<<<
         # > Dictionaries and parameters to set up the mapping methods <
+        wdg.wdg_coorGen_holder.setLayout(qw.QVBoxLayout())
         self._dict_mappingmethods_kwargs = {
-            'container_frame':self._sfrm_mapping_coorGen,
+            'parent':wdg.wdg_coorGen_holder,
             'motion_controller':self._motion_controller,
-            'status_bar':self.statbar,
-            'dataHub_img':self._dataHub_img,
-            'getter_imgcal':self._dataHub_imgcal.get_selected_calibration,
+            # 'dataHub_img':self._dataHub_img,
+            # 'getter_imgcal':self._dataHub_imgcal.get_selected_calibration,
         }
         self._dict_mappingmethods = {
             '1. Start/End': Map1,
-            '2. Around center': Map2,
-            '3. Video': Map3,
-            '4. Image': Map4,
-            '5. Image points': Map5,
-            '6. Single point Z-scan': Map6,
+            # '2. Around center': Map2,
+            # '3. Video': Map3,
+            # '4. Image': Map4,
+            # '5. Image points': Map5,
+            # '6. Single point Z-scan': Map6,
             }   # Mapping methods, to be programmed manually
         self._current_map_method = Map1(**self._dict_mappingmethods_kwargs)
+        wdg.lyt_coorGen_holder.addWidget(self._current_map_method)
         
         # > Widget setup <
         # Mapping method selection
-        self._combo_mappingmethods = ttk.Combobox(self._sfrm_mapping_coorGen,
-            values=list(self._dict_mappingmethods.keys()),width=50,
-            state='readonly')
-        self._combo_mappingmethods.current(0)
-        self._combo_mappingmethods.bind("<<ComboboxSelected>>",func=lambda event: 
-            self.show_frm_mapping_method())
+        self._combo_mappingmethods = wdg.combo_coorGen
+        self._combo_mappingmethods.addItems(list(self._dict_mappingmethods.keys()))
+        self._combo_mappingmethods.currentTextChanged.connect(
+            lambda text: self.show_chosen_coorGen(text))
         
         # Z-scan method selection
         self._zscan_method = ZScan1(
-            parent=frm_zscan,
-            getter_stagecoor=self._motion_controller.get_coordinates_closest_mm,
-            status_bar=self.statbar)
-        
-        self._zscan_method.grid(row=0,column=1,sticky='ew')
-        
-        # Pack the widgets and frames
-        row=0
-        self._combo_mappingmethods.grid(row=row,column=0,sticky='ew',columnspan=2);row+=1
-        self._dict_mappingmethods_grid_params = {
-            'row':row,
-            'column':0,
-            'padx':10,
-            'pady':10,
-            'columnspan':2
-        }
-        self._current_map_method.grid(**self._dict_mappingmethods_grid_params)
+            parent = wdg.wdg_3Dmod_holder,
+            getter_stagecoor = self._motion_controller.get_coordinates_closest_mm)
+        wdg.lyt_3Dmod_holder.addWidget(self._zscan_method)
         
         # > Control widgets <
-        self._btn_generate_mappingCoor = tk.Button(self._frm_control,text='Generate 2D mapping coordinates',
-                                              command=lambda: self._generate_mapping_coordinate())
-        self._btn_generate_mappingCoor_zscan = tk.Button(self._frm_control,text='Generate 3D mapping coordinates\n(z-coordinates sweep)',
-                                                    command=lambda: self._generate_mapping_coordinate_zscan())
+        self._btn_genCoor_2D = wdg.btn_gen_2Dcoor
+        self._btn_genCoor_3D = wdg.btn_gen_3Dcoor
         
-        row=0; col=0
-        self._btn_generate_mappingCoor.grid(row=row,column=0,sticky='ew',pady=(5,0));row+=1
-        self._btn_generate_mappingCoor_zscan.grid(row=row,column=0,sticky='ew',pady=(5,0))
-        
-        [self._frm_control.grid_columnconfigure(i, weight=1) for i in range(col+1)]
-        [self._frm_control.grid_rowconfigure(i, weight=0) for i in range(row+1)]
-        
-    # >>> Shortcuts setup <<<
-        self._list_shorcuts:list[Callable[[MeaCoor_mm,None]]] = []    # List of shortcuts for other objects to use. It will be a list of functions that take a MappingCoordinates_mm object as an argument.
-        self._col_max_shortcuts = 3   # Maximum number of shortcuts to display in a row
-        self._shortcut_counter = 0
+        self._btn_genCoor_2D.clicked.connect(self._generate_mapping_coordinate_2D)
+        self._btn_genCoor_3D.clicked.connect(self._generate_mapping_coordinate_3D)
         
     def initialise(self):
         """
         Initialises the treeview and loads the mapping coordinates from the hub.
         """
-        self._frm_tv_mapcoor.load_last_MappingCoordinates()
+        self._wdg_tv_mapcoor.sig_load_lastsession_MappingCoordinates.emit()
         
     def terminate(self):
         """
         Terminates the treeview and removes the observer from the hub.
         """
-        self._frm_tv_mapcoor.save_MappingCoordinates(autosave=True)
-        
-    def add_shortcut(self, btn_label:str, command:Callable[[MeaCoor_mm],None]):
-        """
-        Adds a shortcut to the list of shortcuts.
-        
-        Args:
-            btn_label (str): The label for the button to be created.
-            shortcut (Callable[[MappingCoordinates_mm,None]]): The shortcut function to add. Takes a MappingCoordinates_mm object as an argument and returns None.
-        """
-        if not callable(command): raise TypeError(f"Expected Callable, got {type(command)}")
-        self._list_shorcuts.append(command)
-        
-        # > Create the button for the shortcut <
-        row = self._shortcut_counter // self._col_max_shortcuts
-        col = self._shortcut_counter % self._col_max_shortcuts
-        
-        btn_shortcut = tk.Button(self._frm_shortcuts, text=btn_label, command=lambda: command(self.generate_current_mapping_coordinates()))
-        btn_shortcut.grid(row=row, column=col, sticky='ew')
-        
-        self._frm_shortcuts.grid_rowconfigure(row, weight=1)
-        self._frm_shortcuts.grid_columnconfigure(col, weight=1)
-        self._shortcut_counter += 1
-        return btn_shortcut
+        self._wdg_tv_mapcoor.save_MappingCoordinates(autosave=True)
         
     def generate_current_mapping_coordinates(self) -> MeaCoor_mm:
         """
@@ -702,52 +648,57 @@ class Frm_CoorGenerator(tk.Frame):
             MappingCoordinates_mm: The generated mapping coordinates.
         """
         mapping_coordinates = self._current_map_method.get_mapping_coordinates_mm()
+        
         if mapping_coordinates is None: raise ValueError("No mapping coordinates generated")
         
         unit_name = None
         while unit_name is None:
             unit_name = messagebox_request_input('Unit name','Enter the "unit name" for the measurement:')
         
-        return MeaCoor_mm(mappingUnit_name=unit_name, mapping_coordinates=mapping_coordinates)
-        
-    def show_frm_mapping_method(self):
+        return MeaCoor_mm(mappingUnit_name=unit_name, mapping_coordinates=mapping_coordinates) # pyright: ignore[reportArgumentType] ; At this point, mapping_coordinates is guaranteed to be a list of tuples of floats.
+
+    @Slot(str)
+    def show_chosen_coorGen(self, method_name:str):
         """
         Shows the options for the selected mapping method
         
         Args:
             frm_master(Tkinter frame): The frame that will house the widget
         """
-        widgets = get_all_widgets(self._sfrm_mapping_coorGen)
-        
-        method = self._combo_mappingmethods.get()
-        self._current_map_method:Map1 = self._dict_mappingmethods[method](**self._dict_mappingmethods_kwargs)
-        self._current_map_method.grid(**self._dict_mappingmethods_grid_params)
+        widgets = get_all_widgets_from_layout(self._widget.lyt_coorGen_holder)
         
         for widget in widgets:
-            if isinstance(widget,(tk.Frame,tk.LabelFrame)) and widget != self._current_map_method:
-                widget.grid_forget()
+            widget.deleteLater()
+        qw.QApplication.processEvents()
+        
+        self._current_map_method:Map1 = self._dict_mappingmethods[method_name](**self._dict_mappingmethods_kwargs)
+        self._widget.lyt_coorGen_holder.addWidget(self._current_map_method)
                 
-    def _generate_mapping_coordinate(self):
+    @Slot()
+    def _generate_mapping_coordinate_2D(self):
         """
         Adds the mapping coordinate to the list
         """
         mapping_coordinates = self._current_map_method.get_mapping_coordinates_mm()
+        # Convert to list of tuples of floats
         if mapping_coordinates is None: return
         
         mapping_hub = self._dataHub_map.get_MappingHub()
         list_mappingUnit_names = list(mapping_hub.get_dict_nameToID().keys())
         while True:
-            mappingUnit_name = messagebox_request_input('Mapping ID','Enter the ID for the mapping measurement:')
+            mappingUnit_name = qw.QInputDialog.getText(self, 'Mapping ID','Enter the ID for the mapping measurement:')[0]
             if mappingUnit_name == '' or not isinstance(mappingUnit_name,str)\
                 or mappingUnit_name in list_mappingUnit_names or self._coorHub.search_mappingCoor(mappingUnit_name) is not None:
-                retry = messagebox.askretrycancel('Error',"Invalid 'mappingUnit name'. The name cannot be empty or already exist. Please try again.")
-                if not retry: return
+                retry = qw.QMessageBox.question(self, 'Error',"Invalid 'mappingUnit name'. The name cannot be empty or already exist. Please try again.",
+                    qw.QMessageBox.Retry | qw.QMessageBox.Cancel)
+                if retry == qw.QMessageBox.Cancel: return
             else: break
         
         mappingCoor = MeaCoor_mm(mappingUnit_name,mapping_coordinates)
         self._coorHub.append(mappingCoor)
         
-    def _generate_mapping_coordinate_zscan(self):
+    @Slot()
+    def _generate_mapping_coordinate_3D(self):
         """
         Adds the z-scan mapping coordinate to the list
         """
@@ -770,11 +721,12 @@ class Frm_CoorGenerator(tk.Frame):
         mapping_hub = self._dataHub_map.get_MappingHub()
         list_mappingUnit_names = list(mapping_hub.get_dict_nameToID().keys())
         while True:
-            mappingUnit_name = messagebox_request_input('Mapping ID','Enter the ID for the mapping measurement:')
+            mappingUnit_name = qw.QInputDialog.getText(self, 'Mapping ID','Enter the ID for the mapping measurement:')[0]
             list_new_mappingUnit_names = [mappingUnit_name+f'_{zcoor}' for zcoor in list_zcoor]
             if any([not check_mappingUnit_name(name) for name in list_new_mappingUnit_names]) or mappingUnit_name == '':
-                retry = messagebox.askretrycancel('Error',"Invalid 'mappingUnit name'. The name cannot be empty or already exist. Please try again.")
-                if not retry: return
+                retry = qw.QMessageBox.question(self, 'Error',"Invalid 'mappingUnit name'. The name cannot be empty or already exist. Please try again.",
+                    qw.QMessageBox.Retry | qw.QMessageBox.Cancel)
+                if retry == qw.QMessageBox.Cancel: return
             else: break
         
         list_mappingCoor = [
@@ -796,49 +748,60 @@ def test_wdgTreeview_MappingCoordinates():
     mappingCoorHub.generate_dummy_data(num_units=5, num_coords=10)
     app.exec()
         
-# def generate_dummy_sfrmCoorGenerator(
-#     parent:tk.Tk|tk.Frame,
-#     motion_controller:Wdg_MotionController|None=None,
-#     datahub_map:Wdg_DataHub_Mapping|None=None,
-#     datahub_img:MeaImg_Hub|None=None,
-#     datahub_imgcal:ImgMea_Cal_Hub|None=None
-#     ) -> Frm_CoorGenerator:
-#     """
-#     Generates a dummy coordinate generator frame for testing purposes.
+def generate_dummy_wdg_hilvlCoorGenerator(
+    parent:qw.QWidget,
+    motion_controller:Wdg_MotionController|None=None,
+    datahub_map:Wdg_DataHub_Mapping|None=None,
+    # datahub_img:MeaImg_Hub|None=None,
+    # datahub_imgcal:ImgMea_Cal_Hub|None=None
+    ) -> Wdg_Hilvl_CoorGenerator:
+    """
+    Generates a dummy coordinate generator frame for testing purposes.
     
-#     Args:
-#         parent (tk.Tk | tk.Frame): The parent frame or window.
-#         motion_controller (Frm_MotionController | None): The motion controller to use. If None, a dummy motion controller will be generated.
-#         datahub_map (Frm_DataHub_Mapping | None): The mapping data hub to use. If None, a dummy mapping data hub will be generated.
-#         datahub_img (ImageMeasurement_Hub | None): The image measurement hub to use. If None, a dummy image measurement hub will be generated.
-#         datahub_imgcal (ImageMeasurement_Calibration_Hub | None): The image calibration hub to use. If None, a dummy image calibration hub will be generated.
+    Args:
+        parent (tk.Tk | tk.Frame): The parent frame or window.
+        motion_controller (Frm_MotionController | None): The motion controller to use. If None, a dummy motion controller will be generated.
+        datahub_map (Frm_DataHub_Mapping | None): The mapping data hub to use. If None, a dummy mapping data hub will be generated.
+        datahub_img (ImageMeasurement_Hub | None): The image measurement hub to use. If None, a dummy image measurement hub will be generated.
+        datahub_imgcal (ImageMeasurement_Calibration_Hub | None): The image calibration hub to use. If None, a dummy image calibration hub will be generated.
         
-#     Returns:
-#         sframe_CoorGenerator: The dummy coordinate generator frame.
-#     """
-#     from iris.gui.motion_video import generate_dummy_motion_controller
-#     from iris.data.calibration_objective import generate_dummy_calibrationHub
-#     from iris.gui.dataHub_MeaImg import generate_dummy_frmImageHub, generate_dummy_frmImgCalHub
-#     from iris.gui.dataHub_MeaRMap import generate_dummy_frmMappingHub
+    Returns:
+        sframe_CoorGenerator: The dummy coordinate generator frame.
+    """
+    from iris.gui.motion_video import generate_dummy_motion_controller
+    from iris.data.calibration_objective import generate_dummy_calibrationHub
+    from iris.gui.dataHub_MeaImg import generate_dummy_frmImageHub, generate_dummy_frmImgCalHub
+    from iris.gui.dataHub_MeaRMap import generate_dummy_frmMappingHub
     
-#     coorHub = List_MeaCoor_Hub()
-#     motion_controller = generate_dummy_motion_controller(parent) if motion_controller is None else motion_controller
-#     dataHub_map = generate_dummy_frmMappingHub(parent) if datahub_map is None else datahub_map
-#     dataHub_img = generate_dummy_frmImageHub(parent) if datahub_img is None else datahub_img
-#     dataHub_imgcal = generate_dummy_frmImgCalHub(parent) if datahub_imgcal is None else datahub_imgcal
+    coorHub = List_MeaCoor_Hub()
+    motion_controller = generate_dummy_motion_controller(parent) if motion_controller is None else motion_controller
+    dataHub_map = generate_dummy_frmMappingHub(parent) if datahub_map is None else datahub_map
+    # dataHub_img = generate_dummy_frmImageHub(parent) if datahub_img is None else datahub_img
+    # dataHub_imgcal = generate_dummy_frmImgCalHub(parent) if datahub_imgcal is None else datahub_imgcal
     
-#     return Frm_CoorGenerator(
-#         parent=parent,
-#         coorHub=coorHub,
-#         motion_controller=motion_controller,
-#         dataHub_map=dataHub_map,
-#         dataHub_img=dataHub_img,
-#         dataHub_imgcal=dataHub_imgcal,
-#     )
+    return Wdg_Hilvl_CoorGenerator(
+        parent=parent,
+        coorHub=coorHub,
+        motion_controller=motion_controller,
+        dataHub_map=dataHub_map,
+        # dataHub_img=dataHub_img,
+        # dataHub_imgcal=dataHub_imgcal,
+    )
+    
+def test_wdg_Hilvl_CoorGenerator():
+    app = qw.QApplication([])
+    window = qw.QMainWindow()
+    window.setWindowTitle('Dummy High-level Coordinate Generator')
+    
+    dummy_sfrmCoorGen = generate_dummy_wdg_hilvlCoorGenerator(window)
+    window.setCentralWidget(dummy_sfrmCoorGen)
+    window.show()
+    app.exec()
     
 if __name__ == '__main__':
-    test_wdgTreeview_MappingCoordinates()
-    
+    # test_wdgTreeview_MappingCoordinates()
+    test_wdg_Hilvl_CoorGenerator()
+
     # root = tk.Tk()
     # root.title('Dummy Coordinate Generator')
     
