@@ -32,7 +32,7 @@ from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 # from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
 from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates, Wdg_Hilvl_CoorGenerator
 
-from iris.gui.submodules.heatmap_plotter_MeaRMap import Frm_MappingMeasurement_Plotter
+from iris.gui.submodules.heatmap_plotter_MeaRMap import Wdg_MappingMeasurement_Plotter
 # from iris.gui.submodules.image_tiling import Frm_HiLvlTiling
 
 from iris.data.measurement_RamanMap import MeaRMap_Unit, MeaRMap_Hub, MeaRMap_Handler
@@ -168,7 +168,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
         
     # >>> Frame setup: Notebook (heatmap and mapping controls) <<<
         # Setup: Heatmap plotter
-        self.mdl_plot = Frm_MappingMeasurement_Plotter(frm_heatmap,self._dataHub_map.get_MappingHub(),
+        self.mdl_plot = Wdg_MappingMeasurement_Plotter(frm_heatmap,self._dataHub_map.get_MappingHub(),
                                                        figsize_pxl=AppPlotEnum.PLT_MAP_SIZE_PIXEL.value)
         self.mdl_plot.grid(row=0,column=0)
         

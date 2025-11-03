@@ -299,12 +299,12 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
         # Perform fuzzy matching on the unit names
         list_matches = process.extract(
-            search_query, dict_unit_IdNames.values(), scorer=fuzz.token_set_ratio, limit=None)
-        list_matches = sorted(list_matches, key=lambda x: x[0], reverse=True)
+            search_query, dict_unit_IdNames.values(), scorer=fuzz.partial_token_set_ratio, limit=None)
+        list_matches = sorted(list_matches, key=lambda x: x[1], reverse=True)
         
         list_matches_id = [
             unit_id
-            for name, _, _ in list_matches
+            for name, _ in list_matches
             for unit_id, unit_name in dict_unit_IdNames.items()
             if unit_name == name
         ]

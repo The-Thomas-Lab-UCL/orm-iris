@@ -31,7 +31,7 @@ from iris.data.calibration_objective import ImgMea_Cal
 from iris.data.measurement_RamanMap import MeaRMap_Hub,MeaRMap_Unit,MeaRMap_Plotter
 
 # Import processors
-from iris.gui.submodules.heatmap_plotter_MeaRMap import Frm_MappingMeasurement_Plotter
+from iris.gui.submodules.heatmap_plotter_MeaRMap import Wdg_MappingMeasurement_Plotter
 
 # Import extensions
 from iris.gui.image_calibration.capture_and_calibration import sFrm_CalibrationAdjustment
@@ -79,7 +79,7 @@ class MappingPlotter_ImageOverlay(MeaRMap_Plotter):
         # Callback function
         if callback is not None: callback()
         
-class Frm_HeatmapOverlay(Frm_MappingMeasurement_Plotter):
+class Frm_HeatmapOverlay(Wdg_MappingMeasurement_Plotter):
     """
     A modified version of the plot_mapping_measurements class to allow image overlay
     on the heatmap
@@ -122,7 +122,7 @@ class Frm_HeatmapOverlay(Frm_MappingMeasurement_Plotter):
         frm_control.grid(row=2,column=0,columnspan=2,sticky='nsew')
         
         super().__init__(
-            master=frm_corePlotter,
+            parent=frm_corePlotter,
             mappingHub=self._mappingHub,
             figsize_pxl=figsize_pxl
             )
@@ -396,4 +396,4 @@ class Frm_HeatmapOverlay(Frm_MappingMeasurement_Plotter):
         
         self._set_plot_xylim()
         
-        self.refresh_plotter()
+        self.replot_heatmap()

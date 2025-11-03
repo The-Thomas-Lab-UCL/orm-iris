@@ -15,7 +15,7 @@ import queue
 
 from iris.utils.general import *
 
-from iris.gui.submodules.heatmap_plotter_MeaRMap import Frm_MappingMeasurement_Plotter
+from iris.gui.submodules.heatmap_plotter_MeaRMap import Wdg_MappingMeasurement_Plotter
 from iris.gui.submodules.peakfinder_plotter_MeaRaman import Frm_RamanMeasurement_Plotter
 from iris.gui.spectrometerCalibration import sFrm_wavelength_calibration
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping, Frm_DataHub_Mapping_Plus, MeaRMap_Hub
@@ -193,7 +193,7 @@ class Heatmap_InteractivePlotter(tk.Frame):
         
         # Plotter setup
         self._q_clickcoor = queue.Queue()
-        self._heatmapPlotter = Frm_MappingMeasurement_Plotter(
+        self._heatmapPlotter = Wdg_MappingMeasurement_Plotter(
             self,
             mappingHub=mappingHub,
             callback_click=self._q_clickcoor.put,
@@ -213,7 +213,7 @@ class Heatmap_InteractivePlotter(tk.Frame):
     def update_plot(self):
         self._heatmapPlotter.replot_heatmap()
     
-    def get_Frm_MappingMeasurement_Plotter(self) -> Frm_MappingMeasurement_Plotter:
+    def get_Frm_MappingMeasurement_Plotter(self) -> Wdg_MappingMeasurement_Plotter:
         """
         Returns the interactive heatmap plotter
         """
@@ -368,7 +368,7 @@ class EventHandler():
             self._flg_update_hub.clear()
             
             try:
-                self._heatmapPlotter.refresh_plotter()
+                self._heatmapPlotter.replot_heatmap()
                 self.initialise_callbacks()
             except Exception as e: (f'_auto_update_Hub: {e}')
         

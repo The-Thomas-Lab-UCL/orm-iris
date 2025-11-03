@@ -1960,10 +1960,9 @@ class MeaRMap_Plotter:
     """
     Class to plot the mapping measurement data from the MappingMeasurement_Unit object
     """
-    def __init__(self, figsize_pxl = (800,600)):
-        self._figsize_pxl = figsize_pxl
-        self._dpi = plt.rcParams['figure.dpi']
-        self._figsize_in = (self._figsize_pxl[0]/self._dpi,self._figsize_pxl[1]/self._dpi)
+    def __init__(self):
+        self._fig, self._ax = plt.subplots()
+        self._cbar:Colorbar|None = None
         
         self.dict_plotter_options = {
             PlotterOptions.interp.value: self.plot_heatmap_interp,
@@ -1978,6 +1977,15 @@ class MeaRMap_Plotter:
             },
             PlotterOptions.empty.value: {}
         }
+        
+    def get_figure_axes(self) -> tuple[Figure,Axes]:
+        """
+        Returns the figure and axes of the plotter
+
+        Returns:
+            tuple[Figure,Axes]: figure and axes of the plotter
+        """
+        return (self._fig,self._ax)
         
     def get_plotter_options(self) -> tuple[dict,dict]:
         """
@@ -1994,9 +2002,13 @@ class MeaRMap_Plotter:
         """
         return (self.dict_plotter_options,self.dict_plotter_kwargs)
 
-    def plot_typehinting(self, mapping_unit:MeaRMap_Unit|None=None, wavelength:float|None=None,
-                     clim:tuple[float,float]|None=None,title = '2D Mapping', fig:Figure|None=None, ax:Axes|None=None,
-                     clrbar:Colorbar|None=None) -> tuple[Figure,Axes,Colorbar]:
+    def plot_typehinting(
+        self,
+        mapping_unit:MeaRMap_Unit|None=None,
+        wavelength:float|None=None,
+        clim:tuple[float|None,float|None]|None=None,
+        title = '2D Mapping'
+        ) -> None:
         """
         DOES NOTHING but to show the type hinting for the plotter functions
         
@@ -2012,18 +2024,16 @@ class MeaRMap_Plotter:
             wavelength (float): wavelength to plot the heatmap
             clim (tuple[float,float], optional): color limit for the heatmap. Defaults to None.
             title (str, optional): title of the resulting graph. Defaults to '2D Mapping'.
-            fig (matplotlib.figure.Figure, optional): figure to plot the heatmap. Defaults to None.
-            ax (matplotlib.axes._subplots.AxesSubplot, optional): axis to plot the heatmap. Defaults to None.
-            clrbar (matplotlib.colorbar.Colorbar, optional): colorbar to plot the heatmap. Defaults to None.
-            
-        Returns:
-            tuple: (figure, axis, clrbar) of the plot
         """
         raise NotImplementedError('plot_typehinting: This function is only for typehinting.')
     
-    def plot_heatmap_nothing(self, mapping_unit:MeaRMap_Unit|None=None, wavelength:float|None=None,
-                     clim:tuple[float,float]|None=None,title = '2D Mapping', fig:Figure|None=None, ax:Axes|None=None,
-                     clrbar:Colorbar|None=None) -> tuple[Figure,Axes,Colorbar]:
+    def plot_heatmap_nothing(
+        self,
+        mapping_unit:MeaRMap_Unit|None=None,
+        wavelength:float|None=None,
+        clim:tuple[float,float]|None=None,
+        title = '2D Mapping',
+        ) -> None:
         """
         Plots nothing but returns the figure, axis, and colorbar
 
@@ -2032,62 +2042,36 @@ class MeaRMap_Plotter:
             wavelength (float): wavelength to plot the heatmap
             clim (tuple[float,float], optional): color limit for the heatmap. Defaults to None.
             title (str, optional): title of the resulting graph. Defaults to '2D Mapping'.
-            fig (matplotlib.figure.Figure, optional): figure to plot the heatmap. Defaults to None.
-            ax (matplotlib.axes._subplots.AxesSubplot, optional): axis to plot the heatmap. Defaults to None.
-            clrbar (matplotlib.colorbar.Colorbar, optional): colorbar to plot the heatmap. Defaults to None.
-            
-        Returns:
-            tuple: (figure, axis, clrbar) of the plot
         """
-        if isinstance(mapping_unit,MeaRMap_Unit) and wavelength is not None:    
-            # Retrieve the measurement data
-            df_plot:pd.DataFrame = mapping_unit.get_heatmap_table(wavelength)
-            label_x,label_y,_,_,label_intensity = mapping_unit.get_labels()
-            
-            # Convert the x-coordinate and y-coordinate into string to prevent any issues
-            values = df_plot.values
-            x_loc = df_plot.columns.get_loc(label_x)
-            y_loc = df_plot.columns.get_loc(label_y)
-            intensity_loc = df_plot.columns.get_loc(label_intensity)
-            
-            x_val = [val for val in values[:,x_loc]]
-            y_val = [val for val in values[:,y_loc]]
-            
-            x_min = min(x_val)
-            x_max = max(x_val)
-            y_min = min(y_val)
-            y_max = max(y_val)
+        try: x_val, y_val, _ = self._retrieve_heatmap_data(mapping_unit, wavelength)
+        except ValueError:
+            x_val = [0,1]
+            y_val = [0,1]
         
-        if any([not isinstance(mapping_unit,MeaRMap_Unit), wavelength is None]):
-            return (fig,ax,None)
+        x_min = min(x_val)
+        x_max = max(x_val)
+        y_min = min(y_val)
+        y_max = max(y_val)
         
-        if all([isinstance(fig,Figure), isinstance(ax,Axes)]):
-            try:
-                if isinstance(clrbar,Colorbar):
-                    clrbar.remove()
-                ax.clear()
-            except:
-                fig,ax = plt.subplots(figsize=self._figsize_in)
-        else:
-            fig,ax = plt.subplots(figsize=self._figsize_in)
+        if isinstance(self._cbar,Colorbar):
+            self._cbar.remove()
+        self._ax.clear()
         
-        if any([not isinstance(mapping_unit,MeaRMap_Unit), wavelength is None]):
-            return (fig,ax,None)
+        self._ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
+        self._ax.set_title(title)
+        self._ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
+        self._ax.set_ylabel(AppPlotEnum.PLT_LBL_Y_AXIS.value)
         
-        ax:Axes
-        ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
-        ax.set_title(title)
-        ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
-        ax.set_ylabel(AppPlotEnum.PLT_LBL_Y_AXIS.value)
-        
-        ax.set_xlim(x_min,x_max)
-        ax.set_ylim(y_min,y_max)
-        
-        return (fig,ax,None)
+        self._ax.set_xlim(x_min,x_max)
+        self._ax.set_ylim(y_min,y_max)
     
-    def plot_heatmap_interp(self, mapping_unit:MeaRMap_Unit|None=None, wavelength:float|None=None,
-                     clim:tuple[float,float]|None=None,title = '2D Mapping', fig:Figure|None=None, ax:Axes|None=None,
-                     clrbar:Colorbar|None=None) -> tuple[Figure,Axes,Colorbar]:
+    def plot_heatmap_interp(
+        self,
+        mapping_unit:MeaRMap_Unit|None=None,
+        wavelength:float|None=None,
+        clim:tuple[float,float]|None=None,
+        title = '2D Mapping',
+        ) -> None:
         """
         Plots a heatmap plot from a mapping unit, given its coordinates, and labels indicating the data column info.
         
@@ -2101,15 +2085,41 @@ class MeaRMap_Plotter:
             wavelength (float): wavelength to plot the heatmap
             clim (tuple[float,float], optional): color limit for the heatmap. Defaults to None.
             title (str, optional): title of the resulting graph. Defaults to '2D Mapping'.
-            fig (matplotlib.figure.Figure, optional): figure to plot the heatmap. Defaults to None.
-            ax (matplotlib.axes._subplots.AxesSubplot, optional): axis to plot the heatmap. Defaults to None.
-            clrbar (matplotlib.colorbar.Colorbar, optional): colorbar to plot the heatmap. Defaults to None.
-            
-        Returns:
-            tuple: (figure, axis, clrbar) of the plot
         """
         # Do the calculation first for a lower figure off time
         # (i.e., when the ax is cleared and not yet reassigned)
+        try: x_val, y_val, intensity = self._retrieve_heatmap_data(mapping_unit, wavelength)
+        except ValueError as e: print(f'Error in plot_heatmap_interp: {e}'); return
+        
+        if isinstance(self._cbar,Colorbar):
+            self._cbar.remove()
+        self._ax.clear()
+        
+        # Check if the the data can be plot using tripcolor
+        if any([len(intensity) < 3, len(set(x_val)) < 2, len(set(y_val)) < 2]):
+            return
+        
+        self._ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
+        
+        # Plot the tripcolor using your existing data
+        # Note we're passing x, y directly, and not using `triangles`
+        self._ax.tripcolor(
+            x_val, y_val, intensity, cmap=AppPlotEnum.PLT_COLOUR_MAP.value,
+            shading=AppPlotEnum.PLT_SHADING.value, edgecolors=AppPlotEnum.PLT_EDGE_COLOUR.value)
+        
+        # Add colourbar and labels
+        self._cbar = self._fig.colorbar(self._ax.collections[0], ax=self._ax)
+        self._ax.set_title(title)
+        self._ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
+        self._ax.set_ylabel(AppPlotEnum.PLT_LBL_Y_AXIS.value)
+        
+        # Set the colourbar limits
+        if isinstance(clim,tuple) and len(clim) == 2:
+            if isinstance(clim[0],float) and isinstance(clim[1],float):
+                list(clim).sort()
+            self._cbar.mappable.set_clim(vmin=clim[0],vmax=clim[1])
+
+    def _retrieve_heatmap_data(self, mapping_unit, wavelength):
         if isinstance(mapping_unit,MeaRMap_Unit) and wavelength is not None:    
             # Retrieve the measurement data
             df_plot:pd.DataFrame = mapping_unit.get_heatmap_table(wavelength)
@@ -2124,52 +2134,17 @@ class MeaRMap_Plotter:
             x_val = [val for val in values[:,x_loc]]
             y_val = [val for val in values[:,y_loc]]
             intensity = values[:,intensity_loc]
-        
-        if all([isinstance(fig,Figure), isinstance(ax,Axes)]):
-            try:
-                if isinstance(clrbar,Colorbar):
-                    clrbar.remove()
-                ax.clear()
-            except:
-                fig,ax = plt.subplots(figsize=self._figsize_in)
-        else:
-            fig,ax = plt.subplots(figsize=self._figsize_in)
-        
-        if any([not isinstance(mapping_unit,MeaRMap_Unit), wavelength is None]):
-            return (fig,ax,None)
-        
-        # Check if the the data can be plot using tripcolor
-        if any([len(intensity) < 3, len(set(x_val)) < 2, len(set(y_val)) < 2]):
-            return (fig,ax,None)
-        
-        ax:Axes
-        ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
-        
-        # Plot the tripcolor using your existing data
-        # Note we're passing x, y directly, and not using `triangles`
-        tpc = ax.tripcolor(x_val, y_val, intensity, cmap=AppPlotEnum.PLT_COLOUR_MAP.value,
-                           shading=AppPlotEnum.PLT_SHADING.value, edgecolors=AppPlotEnum.PLT_EDGE_COLOUR.value)
-        
-        # Add colourbar and labels
-        cbar = fig.colorbar(ax.collections[0], ax=ax)
-        ax.set_title(title)
-        ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
-        ax.set_ylabel(AppPlotEnum.PLT_LBL_Y_AXIS.value)
-        
-        # Set the colourbar limits
-        if isinstance(clim,tuple) and len(clim) == 2:
-            if isinstance(clim[0],float) and isinstance(clim[1],float):
-                list(clim).sort()
-            cbar.mappable.set_clim(vmin=clim[0],vmax=clim[1])
-        
-        # print(f"Number of figures: {plt.get_fignums()}")
-        # print(f"Number of axes: {len(fig.axes)}")
-        
-        return (fig,ax,cbar)
+        else: raise ValueError('_retrieve_heatmap_data: Invalid mapping_unit or wavelength input.')
+        return x_val,y_val,intensity
     
-    def plot_heatmap_scatter(self, mapping_unit:MeaRMap_Unit|None=None, wavelength:float|None=None,
-                     clim:tuple[float,float]|None=None, title = '2D Mapping', size:float|None=None,
-                     fig:Figure|None=None, ax:Axes|None=None, clrbar:Colorbar|None=None) -> tuple[Figure,Axes,Colorbar]:
+    def plot_heatmap_scatter(
+        self,
+        mapping_unit:MeaRMap_Unit|None=None,
+        wavelength:float|None=None,
+        clim:tuple[float,float]|None=None,
+        title = '2D Mapping',
+        size:float|None=None,
+        ) -> None:
         """
         Plots a heatmap plot from a mapping unit, given its coordinates, and labels indicating the data column info.
         
@@ -2184,69 +2159,36 @@ class MeaRMap_Plotter:
             clim (tuple[float,float], optional): color limit for the heatmap. Defaults to None.
             title (str, optional): title of the resulting graph. Defaults to '2D Mapping'.
             size (float, optional): size of the scatter plot. Defaults to None.
-            fig (matplotlib.figure.Figure, optional): figure to plot the heatmap. Defaults to None.
-            ax (matplotlib.axes._subplots.AxesSubplot, optional): axis to plot the heatmap. Defaults to None.
-            clrbar (matplotlib.colorbar.Colorbar, optional): colorbar to plot the heatmap. Defaults to None.
-            
-        Returns:
-            tuple: (figure, axis, clrbar) of the plot
         """
-        # Do the calculation first for a lower figure off time
-        # (i.e., when the ax is cleared and not yet reassigned)
-        if isinstance(mapping_unit,MeaRMap_Unit) and wavelength is not None:    
-            # Retrieve the measurement data
-            df_plot:pd.DataFrame = mapping_unit.get_heatmap_table(wavelength)
-            label_x,label_y,_,_,label_intensity = mapping_unit.get_labels()
-            
-            # Convert the x-coordinate and y-coordinate into string to prevent any issues
-            values = df_plot.values
-            x_loc = df_plot.columns.get_loc(label_x)
-            y_loc = df_plot.columns.get_loc(label_y)
-            intensity_loc = df_plot.columns.get_loc(label_intensity)
-            
-            x_val = [val for val in values[:,x_loc]]
-            y_val = [val for val in values[:,y_loc]]
-            intensity = values[:,intensity_loc]
+        try: x_val, y_val, intensity = self._retrieve_heatmap_data(mapping_unit, wavelength)
+        except ValueError as e: print(f'Error in plot_heatmap_scatter: {e}'); return
         
-        if all([isinstance(fig,Figure), isinstance(ax,Axes)]):
-            try:
-                if isinstance(clrbar,Colorbar):
-                    clrbar.remove()
-                ax.clear()
-            except:
-                fig,ax = plt.subplots(figsize=self._figsize_in)
-        else:
-            fig,ax = plt.subplots(figsize=self._figsize_in)
-        
-        if any([not isinstance(mapping_unit,MeaRMap_Unit), wavelength is None]):
-            return (fig,ax,None)
+        if isinstance(self._cbar,Colorbar):
+            self._cbar.remove()
+        self._ax.clear()
         
         # Check if the the data can be plot using tripcolor
-        if any([len(intensity) < 3, len(set(x_val)) < 2, len(set(y_val)) < 2]):
-            return (fig,ax,None)
+        if any([len(intensity) < 3, len(set(x_val)) < 2, len(set(y_val)) < 2]): return
         
-        ax:Axes
-        ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
+        self._ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
         
-        figsize = fig.get_size_inches()
+        figsize = self._fig.get_size_inches()
         number_of_points = len(x_val)
         
         point_size = (figsize[0]*figsize[1])/number_of_points*750 if not isinstance(size,float) else size
-        ax.scatter(x_val, y_val, c=intensity, cmap=AppPlotEnum.PLT_COLOUR_MAP.value, s=point_size, linewidths=0, marker='s')
-
+        self._ax.scatter(x_val, y_val, c=intensity, cmap=AppPlotEnum.PLT_COLOUR_MAP.value, s=point_size, linewidths=0, marker='s')
+        
         # Add colourbar and labels
-        cbar:Colorbar = fig.colorbar(ax.collections[0], ax=ax)
-        ax.set_title(title)
-        ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
-        ax.set_ylabel(AppPlotEnum.PLT_LBL_Y_AXIS.value)
+        self._cbar:Colorbar = self._fig.colorbar(self._ax.collections[0], ax=self._ax)
+        self._ax.set_title(title)
+        self._ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
+        self._ax.set_ylabel(AppPlotEnum.PLT_LBL_Y_AXIS.value)
         
         # Set the colourbar limits
         if isinstance(clim,tuple) and len(clim) == 2:
             if isinstance(clim[0],float) and isinstance(clim[1],float):
                 list(clim).sort()
-            cbar.mappable.set_clim(vmin=clim[0],vmax=clim[1])
-        
-        return (fig,ax,cbar)
+            self._cbar.mappable.set_clim(vmin=clim[0],vmax=clim[1])
     
 def test_datasaveload_system_txt(storage_main:MeaRMap_Hub|None=None):
     if storage_main is None: storage_main = generate_dummy_mappingHub()
