@@ -45,7 +45,7 @@ from iris.gui import ShortcutsEnum
 try:
     from extensions.extension_template import Extension_TopLevel
     from extensions.extension_intermediary import Ext_DataIntermediary
-    from extensions.optics_calibration_aid.ext_opticsCalibrationAid import Ext_OpticsCalibrationAid
+    from extensions.optics_calibration_aid.Ext_OpticsCalibrationAid import Ext_OpticsCalibrationAid
     flg_import_extension = True
 except Exception as e:
     flg_import_extension = False
