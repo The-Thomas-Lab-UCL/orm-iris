@@ -43,8 +43,8 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
     
     sig_plotclicked = Signal(tuple)  # Signal emitted when the plot is clicked, sends (mappingUnit_ID, (x_mm, y_mm))
     
-    _sig_update_plot = Signal()  # Signal to update the plot in the main thread
-    _sig_update_comboboxes = Signal()  # Signal to update the comboboxes in the main thread
+    _sig_request_update_plot = Signal()  # Signal to update the plot in the main thread
+    _sig_request_update_comboboxes = Signal()  # Signal to update the comboboxes in the main thread
     
     def __init__(
         self,
@@ -78,9 +78,11 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         self._fig, self._ax = self._mapping_Plotter.get_figure_axes()
         
         # Latest measurement data storage for plotting purposes only
+        self._eve_plot_req = threading.Event()  # Event to request a plot update
+        self._eve_combo_req = threading.Event()  # Event to request a combobox update
         self._current_mappingUnit:MeaRMap_Unit = MeaRMap_Unit()
-        self._current_mappingUnit.add_observer(self.replot_heatmap)
-        
+        self._current_mappingUnit.add_observer(self._sig_request_update_plot.emit)
+
     # >>> Plotter selection setup <<<
         self._init_plotter_options_widgets()
     
@@ -117,8 +119,21 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         
         
     # > Set the connections <<
-        self._sig_update_plot.connect(lambda: self.plot_heatmap())
-        self._sig_update_comboboxes.connect(lambda: self._update_comboboxes())
+        # Plot update timer
+        self._sig_request_update_plot.connect(lambda: self.request_plot_heatmap())
+        self._timer_plot = QTimer(self)
+        self._timer_plot.setInterval(100)
+        self._timer_plot.timeout.connect(self._process_plot_request)
+        self.destroyed.connect(self._timer_plot.stop)
+        self._timer_plot.start()
+        
+        # Combobox update timer
+        self._sig_request_update_comboboxes.connect(lambda: self.request_combobox_update())
+        self._timer_combobox = QTimer(self)
+        self._timer_combobox.setInterval(100)
+        self._timer_combobox.timeout.connect(self._process_combobox_request)
+        self.destroyed.connect(self._timer_combobox.stop)
+        self._timer_combobox.start()
         
     def _init_plot_control_widgets(self):
         """
@@ -132,8 +147,8 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         self._combo_plot_SpectralPosition = wdg.combo_spectralpos
         
         # Bind selections to plot the latest measurement_data df
-        self._combo_plot_mappingUnitName.currentIndexChanged.connect(lambda: self._sig_update_comboboxes.emit())
-        self._combo_plot_SpectralPosition.currentIndexChanged.connect(lambda: self._sig_update_plot.emit())
+        self._combo_plot_mappingUnitName.currentIndexChanged.connect(lambda: self._sig_request_update_comboboxes.emit())
+        self._combo_plot_SpectralPosition.currentIndexChanged.connect(lambda: self._sig_request_update_plot.emit())
         
         
         # > Set up the save widgets
@@ -144,13 +159,13 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         self._entry_plot_clim_min = wdg.ent_cbar_min
         self._entry_plot_clim_max = wdg.ent_cbar_max
         self._chk_auto_clim = wdg.chk_autocbar
-        wdg.chk_autocbar.stateChanged.connect(self.replot_heatmap)
+        wdg.chk_autocbar.stateChanged.connect(lambda: self._sig_request_update_plot.emit())
         
         
         # Bind enter key and changes to replot the heatmap
         def bind_enter_replot():
             wdg.chk_autocbar.setChecked(False)
-            self.replot_heatmap()
+            self._sig_request_update_plot.emit()
         self._entry_plot_clim_min.editingFinished.connect(bind_enter_replot)
         self._entry_plot_clim_max.editingFinished.connect(bind_enter_replot)
         
@@ -159,12 +174,12 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         self._entry_plot_xlim_max = wdg.ent_xmax
         self._entry_plot_ylim_min = wdg.ent_ymin
         self._entry_plot_ylim_max = wdg.ent_ymax
-        
-        self._entry_plot_xlim_min.editingFinished.connect(self.replot_heatmap)
-        self._entry_plot_xlim_max.editingFinished.connect(self.replot_heatmap)
-        self._entry_plot_ylim_min.editingFinished.connect(self.replot_heatmap)
-        self._entry_plot_ylim_max.editingFinished.connect(self.replot_heatmap)
-        
+
+        self._entry_plot_xlim_min.editingFinished.connect(lambda: self._sig_request_update_plot.emit())
+        self._entry_plot_xlim_max.editingFinished.connect(lambda: self._sig_request_update_plot.emit())
+        self._entry_plot_ylim_min.editingFinished.connect(lambda: self._sig_request_update_plot.emit())
+        self._entry_plot_ylim_max.editingFinished.connect(lambda: self._sig_request_update_plot.emit())
+
         # > Set up the Raman shift / wavelength toggle
         self._chk_plot_in_RamanShift = wdg.chk_Ramanshift
         
@@ -201,12 +216,12 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         self._dict_plotter_kwargs_widgets.clear()
         for i,key in enumerate(kwargs.keys()):
             entry = qw.QLineEdit()
-            entry.editingFinished.connect(self.replot_heatmap)
+            entry.editingFinished.connect(lambda: self._sig_request_update_plot.emit())
             holder.addRow(f'{key}:',entry)
             self._dict_plotter_kwargs_widgets[key] = entry
-            
-        self.replot_heatmap()
-    
+
+        self._sig_request_update_plot.emit()
+
     def _get_plotter_kwargs(self) -> dict:
         """
         Get the plotter options for the current mapping plot
@@ -282,8 +297,8 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
             "This is a private method, only to be used when setting up a new mappingUnit to be observed"\
             "the mappingUnit set must be obtained from the internal self._mappingHub."
         self._current_mappingUnit = mappingUnit
-        self._current_mappingUnit.add_observer(self.replot_heatmap)
-        
+        self._current_mappingUnit.add_observer(self._sig_request_update_plot.emit)
+
     def _set_combobox_closest_value(self, new_val:str):
         """
         Set the combobox to the closest wavelength to the entered value
@@ -298,7 +313,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
             idx = self._current_mappingUnit.get_wavelength_idx(current_spectralPosition)
         self._combo_plot_SpectralPosition.setCurrentIndex(idx)
         
-        self._sig_update_plot.emit()
+        self._sig_request_update_plot.emit()
         
     def set_combobox_values(self,mappingUnit_name:str|None=None,wavelength:float|None=None) -> None:
         """
@@ -315,6 +330,22 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         if wavelength is None: wavelength = current_wavelength
             
         self._update_currentMappingUnit_observer(mappingUnit_name=mappingUnit_name)
+        
+    @Slot()
+    def _process_combobox_request(self) -> None:
+        """
+        Store a combobox update request to be executed in the main thread
+        """
+        if not self._eve_combo_req.is_set(): return
+        self._eve_combo_req.clear()
+        self._update_comboboxes()
+        
+    @Slot()
+    def request_combobox_update(self) -> None:
+        """
+        Request an update of the comboboxes
+        """
+        self._eve_combo_req.set()
         
     def _update_comboboxes(self, set_unit_name:str|None=None, set_wavelength:float|None=None) -> None:
         """
@@ -379,17 +410,26 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         self._current_mappingUnit = mappingUnit
         
         # Plot the changes
-        self._sig_update_plot.emit()
+        self._sig_request_update_plot.emit()
         
         self._combo_plot_mappingUnitName.blockSignals(False)
         self._combo_plot_SpectralPosition.blockSignals(False)
         
-        
-    def replot_heatmap(self) -> None:
+    @Slot()
+    def request_plot_heatmap(self) -> None:
         """
         Replot the heatmap using the current mappingHub and the selected mappingUnit_ID and SpectralPosition
         """
-        self._sig_update_plot.emit()
+        self._eve_plot_req.set()
+        
+    @Slot()
+    def _process_plot_request(self) -> None:
+        """
+        Store a plot request to be executed in the main thread
+        """
+        if not self._eve_plot_req.is_set(): return
+        self._eve_plot_req.clear()
+        self.plot_heatmap()
         
     def get_selected_mappingUnit(self) -> MeaRMap_Unit|None:
         """
@@ -409,7 +449,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
                 first valid mapping unit will be selected.
         """
         # Remove observer
-        try: self._current_mappingUnit.remove_observer(self.replot_heatmap)
+        try: self._current_mappingUnit.remove_observer(lambda: self._sig_request_update_plot.emit())
         except Exception as e: print('_update_currentMappingUnit_observer',e)
         
         try:
@@ -423,10 +463,10 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
             if len(list_valid_names) > 0: self._current_mappingUnit = self._mappingHub.get_MappingUnit(unit_name=list_valid_names[0])
             else: self._current_mappingUnit = MeaRMap_Unit()
         finally:
-            self._current_mappingUnit.add_observer(self.replot_heatmap)
+            self._current_mappingUnit.add_observer(self._sig_request_update_plot.emit)
         
-        self._sig_update_comboboxes.emit()
-        self._sig_update_plot.emit()
+        self._sig_request_update_comboboxes.emit()
+        self._sig_request_update_plot.emit()
     
     def plot_heatmap(self):
         """
@@ -601,7 +641,7 @@ def test_plotter():
         mappingHub=mappinghub,
         )
     wdg_plotter.sig_plotclicked.connect(lambda data: queue_click.put(data))
-    wdg_plotter.replot_heatmap()
+    wdg_plotter.request_plot_heatmap()
     lyt.addWidget(wdg_plotter)
 
     dataHub = Wdg_DataHub_Mapping(

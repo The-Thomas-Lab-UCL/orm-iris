@@ -396,4 +396,4 @@ class Frm_HeatmapOverlay(Wdg_MappingMeasurement_Plotter):
         
         self._set_plot_xylim()
         
-        self.replot_heatmap()
+        self.request_plot_heatmap()

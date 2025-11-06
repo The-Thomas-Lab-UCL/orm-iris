@@ -514,7 +514,7 @@ def test():
         stageHub=stageHub,
         getter_imgcal=lambda: cal,
     )
-    motion_controller.initialise_auto_updater()
+    motion_controller._init_workers()
     motion_controller.pack()
     
     imghub = Frm_DataHub_Image(main=root)

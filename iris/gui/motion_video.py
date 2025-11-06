@@ -41,6 +41,8 @@ from iris.controllers import CameraController, Controller_XY, Controller_Z
 from iris.resources.motion_video.brightfieldcontrol_ui import Ui_wdg_brightfield_controller
 from iris.resources.motion_video.stagecontrol_ui import Ui_stagecontrol
 
+WAIT_MOVEMENT_TIMEOUT = 10.0  # Timeout for waiting for the movement to finish [s] (reset if the stage is still moving)
+
 class BrightfieldController(qw.QWidget,Ui_wdg_brightfield_controller):
     def __init__(self,parent=None):
         super().__init__(parent)
@@ -129,7 +131,7 @@ class ResizableQLabel(qw.QLabel):
             super().setPixmap(scaled_pixmap)
         super().resizeEvent(event)
 
-class _Worker_move_breathing_z(QObject):
+class Motion_MoveBreathingZ_Worker(QObject):
     """
     Moves the z-stage up and down for a few cycles
     
@@ -168,6 +170,210 @@ class _Worker_move_breathing_z(QObject):
         self._breathing_timer.stop()
         self.signal_breathing_finished.emit()
 
+class Motion_AutoCoorReport_Worker(QObject):
+    
+    sig_coor = Signal(str)
+    
+    def __init__(self, stageHub:DataStreamer_StageCam, parent=None):
+        super().__init__(parent)
+        self._stageHub = stageHub
+        self._timer = QTimer(self)
+        self._timer.setInterval(100)
+        self._timer.timeout.connect(self._emit_coor)
+        
+    @Slot()
+    def start(self):
+        self._timer.start()
+        
+    def _emit_coor(self):
+        timestamp_req = get_timestamp_us_int()
+        result = self._stageHub.get_coordinates_closest(timestamp_req)
+        
+        if result is None:
+            self.sig_coor.emit('X: -- Y: -- Z: -- µm')
+            return
+        
+        coor_x,coor_y,coor_z = result
+        coor_x_um = float(coor_x * 1000)
+        coor_y_um = float(coor_y * 1000)
+        coor_z_um = float(coor_z * 1000)
+        
+        coor_str = 'X: {:.1f} Y: {:.1f} Z: {:.1f} µm'.format(coor_x_um,coor_y_um,coor_z_um)
+        self.sig_coor.emit(coor_str)
+
+class Motion_GetCoordinatesClosest_mm(QObject):
+    """
+    A worker to get the closest coordinates in mm from the stage controller
+    """
+    sig_coor = Signal(np.ndarray)
+    
+    def __init__(self, stageHub:DataStreamer_StageCam, parent=None):
+        super().__init__(parent)
+        self._stageHub = stageHub
+    
+    def _get_coor(self):
+        timestamp_req = get_timestamp_us_int()
+        result = self._stageHub.get_coordinates_closest(timestamp_req)
+        
+        if result is None:
+            return (None,None,None)
+        
+        coor_x,coor_y,coor_z = result
+        coor = np.array([coor_x,coor_y,coor_z])
+        return coor
+
+    @Slot()
+    def work_async(self):
+        coor = self._get_coor()
+        self.sig_coor.emit(coor)
+        
+    @Slot(queue.Queue)
+    def work_sync(self, q_ret:queue.Queue):
+        coor = self._get_coor()
+        q_ret.put(coor)
+    
+class Motion_GoToCoor_Worker(QObject):
+    """
+    A worker to move the stage to the target coordinates
+    """
+    sig_mvmt_started = Signal(str)
+    sig_mvmt_finished = Signal(str)
+    
+    msg_target_reached = 'Target reached'
+    msg_target_timeout = 'Timeout waiting for target'
+    msg_target_failed = 'Failed to set or reach target'
+    
+    def __init__(self, stageHub:DataStreamer_StageCam, ctrl_xy: 'Controller_XY',
+                 ctrl_z: 'Controller_Z', parent=None):
+        super().__init__(parent)
+        self._stageHub = stageHub
+        self.ctrl_xy = ctrl_xy
+        self.ctrl_z = ctrl_z
+        
+    def _get_coor(self) -> np.ndarray|None:
+        """
+        Gets the current coordinates from the stage hub
+
+        Returns:
+            np.ndarray: The current coordinates in mm (x,y,z)
+        """
+        timestamp_req = get_timestamp_us_int()
+        result = self._stageHub.get_coordinates_closest(timestamp_req)
+        
+        if result is None: return None
+        else: return np.array(result)
+        
+    def _notify_finish(self, thread_xy:threading.Thread, thread_z:threading.Thread,
+                       event_finished:threading.Event):
+        """
+        Waits for the target to be reached, the coordinate doesn't update within the timeout, raises a TimeoutError
+        
+        Args:
+            thread_xy (threading.Thread): The thread moving the XY stage
+            thread_z (threading.Thread): The thread moving the Z stage
+            timeout (float): Timeout in seconds
+                        
+        Raises:
+            TimeoutError: If the target is not reached within the timeout
+        """
+        timeout = WAIT_MOVEMENT_TIMEOUT
+        
+        start_time = time.time()
+        coor = self._get_coor()
+        while True:
+            if thread_xy.is_alive() or thread_z.is_alive():
+                thread_xy.join(timeout=0.1)
+                thread_z.join(timeout=0.1)
+            else:
+                event_finished.set()
+                self.sig_mvmt_finished.emit(self.msg_target_reached)
+                break
+            
+            if time.time() - start_time > timeout:
+                event_finished.set()
+                self.sig_mvmt_finished.emit(self.msg_target_timeout)
+            
+            coor_new = self._get_coor()
+            # Resets the timer if the coordinates are not the same (i.e., the stage is still moving)
+            if coor_new is None: continue
+            if coor is None: coor = coor_new
+            if np.allclose(coor,coor_new,atol=0.001): start_time = time.time()
+            coor = coor_new
+        
+    @Slot(tuple, threading.Event)
+    def work(
+        self,
+        coors_mm:tuple[float,float,float],
+        event_finished:threading.Event):
+        """
+        Moves the stage to specific coordinates, except if None is provided
+
+        Args:
+            coors_mm (tuple[float,float,float]): Target coordinates in mm (x,y,z). Use None to skip moving that axis.
+            event_finished (threading.Event): An event to signal when the movement is finished.
+        """
+        # If None is provided, assign the current coordinates (i.e., do not move)
+        coor_x_mm, coor_y_mm, coor_z_mm = coors_mm
+        if any([coor_x_mm is None,coor_y_mm is None,coor_z_mm is None]):
+            res = self._get_coor()
+            if res is None:
+                self.sig_mvmt_finished.emit(self.msg_target_failed)
+                return
+            coor_x_current,coor_y_current,coor_z_current = res
+            if coor_x_mm is None: coor_x_mm = coor_x_current
+            if coor_y_mm is None: coor_y_mm = coor_y_current
+            if coor_z_mm is None: coor_z_mm = coor_z_current
+        
+        self.sig_mvmt_started.emit('Moving to X: {:.3f} Y: {:.3f} Z: {:.3f} mm'.format(coor_x_mm,coor_y_mm,coor_z_mm))
+        
+        # Operate both stages at once
+        thread_xy_move = threading.Thread(target=self.ctrl_xy.move_direct,args=((coor_x_mm,coor_y_mm),))
+        thread_z_move = threading.Thread(target=self.ctrl_z.move_direct,args=(coor_z_mm,))
+        
+        thread_xy_move.start()
+        thread_z_move.start()
+
+        self._notify_finish(thread_xy_move,thread_z_move,event_finished)
+
+# class _worker_set_vel_relative(QObject):
+#     """
+#     A worker to set the velocity and acceleration parameters for the stages
+#     """
+#     sig_param_set = Signal(tuple)
+    
+#     def __init__(self, ctrl_xy: 'Controller_XY', ctrl_z: 'Controller_Z', parent=None):
+#         super().__init__(parent)
+#         self.ctrl_xy = ctrl_xy
+#         self.ctrl_z = ctrl_z
+        
+#     @Slot(tuple)
+#     def work(self, vel_params:tuple[float|None,float|None]) -> None:
+#         """
+#         Sets the velocity parameters for the motors
+        
+#         Args:
+#             vel_params (tuple[float|None,float|None]): Velocity parameters for the motors in percentage.
+#                 (vel_xy, vel_z). Use None to keep the current value.
+#         """
+#         vel_xy, vel_z = vel_params
+#         if isinstance(vel_xy,type(None)): vel_xy = self.ctrl_xy.get_vel_acc_relative()[1]
+#         if isinstance(vel_z,type(None)): vel_z = self.ctrl_z.get_vel_acc_relative()[1]
+        
+#         assert isinstance(vel_xy,(float,int)) and isinstance(vel_z,(float,int)), 'Invalid input type for the velocity parameters'
+        
+#         self.ctrl_xy.set_vel_acc_relative(vel_homing=vel_xy,vel_move=vel_xy)
+#         self.ctrl_z.set_vel_acc_relative(vel_homing=vel_z,vel_move=vel_z)
+        
+#     @Slot(queue.Queue)
+#     def _get_current_vel(self, q_ret:queue.Queue) -> None:
+#         """
+#         Gets the current velocity parameters for the motors
+#         """
+#         speed_xy = self.ctrl_xy.get_vel_acc_relative()[1]
+#         speed_z = self.ctrl_z.get_vel_acc_relative()[1]
+
+#         q_ret.put((speed_xy,speed_z))
+
 class Wdg_MotionController(qw.QGroupBox):
     """
     A class to control the app subwindow for the motion:
@@ -183,8 +389,10 @@ class Wdg_MotionController(qw.QGroupBox):
     Args:
         tk (None): Nothing needed here
     """
-    signal_statbar_message = Signal(str,str)  # A signal to update the status bar message
-    signal_breathing_stopped = Signal()
+    sig_statbar_message = Signal(str,str)  # A signal to update the status bar message
+    sig_breathing_stopped = Signal()
+    
+    _sig_go_to_coordinates = Signal(tuple,threading.Event)
     
     def __init__(
         self,
@@ -262,11 +470,11 @@ class Wdg_MotionController(qw.QGroupBox):
         self._init_stageparam_widgets(self._wdg_stage)
         
     # >>> Status update <<<
-        self.signal_statbar_message.connect(self.status_update)
-        self.signal_statbar_message.emit('Initialising the motion controllers','yellow')
+        self.sig_statbar_message.connect(self.status_update)
+        self.sig_statbar_message.emit('Initialising the motion controllers','yellow')
         self._motion_controller_initialisation()
         
-        if main: self.initialise_auto_updater()
+        if main: self._init_workers()
 
     def _init_stageparam_widgets(self, widget:StageControl):
         """
@@ -427,7 +635,6 @@ class Wdg_MotionController(qw.QGroupBox):
             stageHub (DataStreamer_StageCam): The stage hub for video streaming
             wdg_video (BrightfieldController): The widget for the video feed
         """
-        print('here')
         # > Video
         lyt = qw.QVBoxLayout()
         self._lbl_video = ResizableQLabel(min_height=self._video_height,parent=wdg_video)    # A label to show the video feed
@@ -463,6 +670,56 @@ class Wdg_MotionController(qw.QGroupBox):
         self._combo_vidcorrection = wdg_video.combo_image_correction
         self._combo_vidcorrection.addItems(list(stageHub.Enum_CamCorrectionType.__members__))
         self._combo_vidcorrection.setCurrentIndex(0)
+        
+    
+    def _init_workers(self):
+        """
+        Initialises the auto-updaters to be used post widget initialisations
+        (ALL THREADS) to prevent the main thread from being blocked
+        """
+        self.video_initialise()
+        # For the coordinate status bar
+        self._worker_coor_report = Motion_AutoCoorReport_Worker(stageHub=self._stageHub)
+        self._worker_coor_report.sig_coor.connect(self._lbl_coor.setText)
+        
+        self._thread_coor_report = QThread()
+        self._worker_coor_report.moveToThread(self._thread_coor_report)
+        
+        self._thread_coor_report.started.connect(self._worker_coor_report.start)
+        self._thread_coor_report.finished.connect(self._worker_coor_report.deleteLater)
+        self._thread_coor_report.finished.connect(self._thread_coor_report.deleteLater)
+        self._thread_coor_report.start()
+        
+        # For _worker_get_coordinates_closest_mm
+        self._worker_getcoorclosest = Motion_GetCoordinatesClosest_mm(stageHub=self._stageHub)
+        self._thread_getcoorclosest = QThread()
+        self._worker_getcoorclosest.moveToThread(self._thread_getcoorclosest)
+        self._thread_getcoorclosest.finished.connect(self._worker_getcoorclosest.deleteLater)
+        self._thread_getcoorclosest.finished.connect(self._thread_getcoorclosest.deleteLater)
+        self._thread_getcoorclosest.start()
+        
+        # For _worker_go_to_coordinates
+        self._worker_gotocoor = Motion_GoToCoor_Worker(
+            stageHub=self._stageHub,
+            ctrl_xy=self.ctrl_xy,
+            ctrl_z=self.ctrl_z)
+        self._worker_gotocoor.sig_mvmt_started.connect(self._statbar.showMessage)
+        self._sig_go_to_coordinates.connect(self._worker_gotocoor.work)
+        
+        self._thread_gotocoor = QThread()
+        self._worker_gotocoor.moveToThread(self._thread_gotocoor)
+        self._thread_gotocoor.finished.connect(self._worker_gotocoor.deleteLater)
+        self._thread_gotocoor.finished.connect(self._thread_gotocoor.deleteLater)
+        self._thread_gotocoor.start()
+        
+    def get_goto_worker(self) -> Motion_GoToCoor_Worker:
+        """
+        Returns the worker to command the stage to go to specific coordinates
+
+        Returns:
+            Motion_GoToCoor_Worker: The worker to perform the goto coordinate command.
+        """
+        return self._worker_gotocoor
         
     def _set_imageProc_gain(self):
         """
@@ -575,15 +832,6 @@ class Wdg_MotionController(qw.QGroupBox):
         self._chkbox_scalebar.setChecked(False)
         return
         
-    def initialise_auto_updater(self):
-        """
-        Initialises the auto-updaters to be used post widget initialisations
-        (ALL THREADS) to prevent the main thread from being blocked
-        """
-        self.video_initialise()
-        # For the coordinate status bar
-        threading.Thread(target=self.coordinate_updater, daemon=False).start()
-    
     def video_terminate(self):
         self._flg_isvideorunning = False
         # By turning this flag off, the video autoupdater should automatically terminate, 
@@ -625,8 +873,8 @@ class Wdg_MotionController(qw.QGroupBox):
             threading.Thread: The thread started
         """
         # Store references to prevent premature destruction
-        self._breathing_z_worker = _Worker_move_breathing_z(self.ctrl_z)
-        self._breathing_z_worker.signal_breathing_finished.connect(self.signal_breathing_stopped)
+        self._breathing_z_worker = Motion_MoveBreathingZ_Worker(self.ctrl_z)
+        self._breathing_z_worker.signal_breathing_finished.connect(self.sig_breathing_stopped)
         self._breathing_z_thread = QThread()
         self._breathing_z_worker.moveToThread(self._breathing_z_thread)
         self._breathing_z_thread.started.connect(self._breathing_z_worker.start)
@@ -652,7 +900,7 @@ class Wdg_MotionController(qw.QGroupBox):
         self._btn_z_breathing.setText('Breathing')
         self._btn_z_breathing.released.connect(self._start_breathing_z)
         self._btn_z_breathing.setStyleSheet('')
-            
+        
     def move_jog(self,dir:str):
         """
         Moves the stage per request from the button presses
@@ -662,7 +910,7 @@ class Wdg_MotionController(qw.QGroupBox):
             as described in self.motion_button_manager
         """
         def _move_jog():
-            self.signal_statbar_message.emit(f'Jogging to: {dir}', 'yellow')
+            self.sig_statbar_message.emit(f'Jogging to: {dir}', 'yellow')
             
             if dir not in ['yfwd','xfwd','zfwd','yrev','xrev','zrev']:
                 raise SyntaxError('move_jog: Invalid direction input')
@@ -671,7 +919,7 @@ class Wdg_MotionController(qw.QGroupBox):
             elif dir in ['zfwd','zrev']:
                 self.ctrl_z.move_jog(dir)
                 
-            self.signal_statbar_message.emit(None, None)
+            self.sig_statbar_message.emit(None, None)
             
         if hasattr(self,'_thread_jog') and self._thread_jog.is_alive(): return
         self._thread_jog = threading.Thread(target=_move_jog)
@@ -687,7 +935,7 @@ class Wdg_MotionController(qw.QGroupBox):
         jog_x_um = float(jog_x_mm * 10**3)
         jog_y_um = float(jog_y_mm * 10**3)
         if jog_x_um!=jog_y_um:
-            self.signal_statbar_message.emit('Jogging parameters XY are not the same','yellow')
+            self.sig_statbar_message.emit('Jogging parameters XY are not the same','yellow')
             print('Jogging parameters XY are not the same. Jog x: {:.1f}µm Jog y: {:.1f}µm'.format(jog_x_mm,jog_y_mm))
         jog_xy_um = jog_x_um
         jog_z_um = float(jog_z_mm * 10**3)
@@ -814,7 +1062,7 @@ class Wdg_MotionController(qw.QGroupBox):
         """
         def clear_status():
             time.sleep(2)
-            self.signal_statbar_message.emit('Motor parameters have been set', 'green')
+            self.sig_statbar_message.emit('Motor parameters have been set', 'green')
             
         try:
             speed_xy = self.ent_speed_xy.text()
@@ -831,9 +1079,9 @@ class Wdg_MotionController(qw.QGroupBox):
             self.ctrl_xy.set_vel_acc_relative(vel_homing=speed_xy,vel_move=speed_xy)
             self.ctrl_z.set_vel_acc_relative(vel_homing=speed_z,vel_move=speed_z)
             
-            self.signal_statbar_message.emit('Motor parameters have been set', 'green')
+            self.sig_statbar_message.emit('Motor parameters have been set', 'green')
         except:
-            self.signal_statbar_message.emit('Invalid input for the motor parameters', 'yellow')
+            self.sig_statbar_message.emit('Invalid input for the motor parameters', 'yellow')
         finally:
             self._update_set_vel_labels()
         
@@ -855,21 +1103,12 @@ class Wdg_MotionController(qw.QGroupBox):
         try: coor_z_mm = float(coor_z_um_str)/1e3
         except: coor_z_mm = coor_z_current_mm
         
-        threading.Thread(target=self.go_to_coordinates,args=[coor_x_mm,coor_y_mm,coor_z_mm]).start()
+        self.go_to_coordinates(coor_x_mm,coor_y_mm,coor_z_mm)
         
         # Empty the entry boxes
         self.ent_coor_x.setText('')
         self.ent_coor_y.setText('')
         self.ent_coor_z.setText('')
-        
-    def isontarget_gotocoor(self) -> bool:
-        """
-        Returns the status of the target reached for the go to coordinates
-        
-        Returns:
-            bool: True if the target is reached, False otherwise
-        """
-        return self._flg_ontarget_gotocoor.is_set()
         
     def check_coordinates(self,coor_mm:tuple[float,float,float]) -> bool:
         """
@@ -885,83 +1124,31 @@ class Wdg_MotionController(qw.QGroupBox):
         pass
         return True
     
-    def go_to_coordinates(self,coor_x_mm = None, coor_y_mm = None, coor_z_mm = None, override_controls:bool=False, timeout=10.0):
+    @Slot(tuple,bool,threading.Event)
+    def go_to_coordinates(
+        self,
+        coors_mm:tuple[float|None,float|None,float|None]=(None,None,None),
+        override_controls:bool=False,
+        event_finish:threading.Event|None=None):
         """
-        Moves the stage to specific coordinates, except if None is provided
+        Moves the stage to specific coordinates, except if None is provided. (Asynchronous)
 
         Args:
-            coor_x (Decimal, optional): x-channel xy-stage coordinate. Defaults to None.
-            coor_y (Decimal, optional): y-channel xy-stage coordinate. Defaults to None.
-            coor_z (Decimal, optional): z-stage coordinate. Defaults to None.
-            override_controls (bool, optional): If True, does not automatically disable/enable the controls. Defaults to False.
-            timeout (float, optional): Timeout in seconds. Defaults to 10.0.
+            coors_mm (tuple[float|None,float|None,float|None], optional): A tuple of x, y, and z coordinates in mm to move to. If None
+            override_controls (bool, optional): If True, does not disable/enable the controls. Defaults to False.
+            event_finish (threading.Event, optional): An event to set when the movement is finished. Defaults to None.
             
         Raises:
             TimeoutError: If the stage does not move within the timeout
         """
-        def wait_for_target():
-            """
-            Waits for the target to be reached, the coordinate doesn't update within the timeout, raises a TimeoutError
-                
-            Raises:
-                TimeoutError: If the target is not reached within the timeout
-            """
-            nonlocal self,thread_xy_move,thread_z_move,timeout
-            
-            start_time = time.time()
-            coor = self._current_coor.copy()
-            while True:
-                if thread_xy_move.is_alive() or thread_z_move.is_alive():
-                    thread_xy_move.join(timeout=0.1)
-                    thread_z_move.join(timeout=0.1)
-                else:
-                    self._flg_ontarget_gotocoor.set()
-                    break
-                
-                if time.time() - start_time > timeout:
-                    raise TimeoutError('Timeout waiting for the target to be reached')
-                
-                coor_new = self._current_coor.copy()
-                # Resets the timer if the coordinates are not the same
-                if np.allclose(coor,coor_new,atol=0.001): start_time = time.time()
-                coor = coor_new
+        coor_x_mm,coor_y_mm,coor_z_mm = coors_mm
+        if not override_controls: self.disable_widgets()
+        self._sig_go_to_coordinates.emit((coor_x_mm,coor_y_mm,coor_z_mm), event_finish)
         
-        if not override_controls: self.disable_controls()
-        
-        # If None is provided, assign the current coordinates (i.e., do not move)
-        if any([coor_x_mm is None,coor_y_mm is None,coor_z_mm is None]):
-            res = self.get_coordinates_closest_mm()
-            if res is None:
-                qw.QMessageBox.critical(self, 'Error', 'Failed to get current coordinates')
-                return
-            coor_x_current,coor_y_current,coor_z_current = res
-            if coor_x_mm is None:
-                coor_x_mm = coor_x_current
-            if coor_y_mm is None:
-                coor_y_mm = coor_y_current
-            if coor_z_mm is None:
-                coor_z_mm = coor_z_current
-        
-        # Let the user know that it's currently moving
-        self.signal_statbar_message.emit('Going to: {:.0f}X {:.0f}Y {:.0f}Z'
-                           .format(coor_x_mm*1e3,coor_y_mm*1e3,coor_z_mm*1e3),'yellow') # type: ignore
-        
-        # Add a check
-        self._flg_ontarget_gotocoor.clear()
-        
-        # Operate both stages at once
-        thread_xy_move = threading.Thread(target=self.ctrl_xy.move_direct,args=((coor_x_mm,coor_y_mm),))
-        thread_z_move = threading.Thread(target=self.ctrl_z.move_direct,args=(coor_z_mm,))
-        
-        thread_xy_move.start()
-        thread_z_move.start()
-        
-        wait_for_target()
-        
-        if not override_controls: self.enable_controls()
+        if not override_controls: self.enable_widgets()
         
         # Resets the statusbar, let the user know that it's done moving
-        self.signal_statbar_message.emit('Stage movement complete', None)
+        self.sig_statbar_message.emit('Stage movement complete', None)
 
     def get_coordinates_closest_mm(self) -> tuple[float|None,float|None,float|None]:
         """
@@ -995,9 +1182,9 @@ class Wdg_MotionController(qw.QGroupBox):
         
         def _move():
             if dir not in ['yfwd','xfwd','zfwd','yrev','xrev','zrev','xyhome','zhome']:
-                self.signal_statbar_message.emit(f'Moving: {dir}', 'yellow')
+                self.sig_statbar_message.emit(f'Moving: {dir}', 'yellow')
             elif dir in ['xstop','ystop','zstop']:
-                self.signal_statbar_message.emit(f'Stopping: {dir}', None)
+                self.sig_statbar_message.emit(f'Stopping: {dir}', None)
             
             if dir in ['yfwd','xfwd','yrev','xrev']:
                 self.ctrl_xy.move_continuous(dir)
@@ -1013,7 +1200,7 @@ class Wdg_MotionController(qw.QGroupBox):
                 self.ctrl_z.homing_n_coor_calibration()
             else: raise SyntaxError('motion_button_manager: Invalid direction input')
             
-            self.signal_statbar_message.emit(None, None)
+            self.sig_statbar_message.emit(None, None)
             
         if hasattr(self,'_thread_move') and self._thread_move.is_alive(): return
             
@@ -1027,24 +1214,24 @@ class Wdg_MotionController(qw.QGroupBox):
         # Re-enables the controls
         self._update_set_vel_labels()
         self._update_set_jog_labels()
-        self.enable_controls()
+        self.enable_widgets()
         
-    def disable_controls(self):
+    def disable_widgets(self):
         """
-        Disables all stage controls
+        Disables all stage control widgets
         """
         all_widgets = get_all_widgets(self._wdg_stage)
         [widget.setEnabled(False) for widget in all_widgets if isinstance(widget,(qw.QPushButton,qw.QLineEdit))]
         
-    def enable_controls(self):
+    def enable_widgets(self):
         """
-        Enables all stage controls
+        Enables all stage control widgets
         """
         all_widgets = get_all_widgets(self._wdg_stage)
         [widget.setEnabled(True) for widget in all_widgets if isinstance(widget,(qw.QPushButton,qw.QLineEdit))]
         
         # Updates the statusbar
-        self.signal_statbar_message.emit('Stage controller ready', None)
+        self.sig_statbar_message.emit('Stage controller ready', None)
 
     def get_current_image(self, wait_newimage:bool=False) -> Image.Image|None:
         """
@@ -1138,7 +1325,7 @@ class Wdg_MotionController(qw.QGroupBox):
                     img = self._camera_ctrl.img_capture()
                 else:
                     img:Image.Image = self._stageHub.get_image(request=self._stageHub.Enum_CamCorrectionType[request])
-                video_width = int(img.size[1]/img.size[0]*self._video_height)
+                # video_width = int(img.size[1]/img.size[0]*self._video_height)
                 
                 # Add a scalebar to it
                 img = self._overlay_scalebar(img) if self._chkbox_scalebar.isChecked() else img
@@ -1161,23 +1348,6 @@ class Wdg_MotionController(qw.QGroupBox):
                 if time_elapsed < 1/AppVideoEnum.VIDEOFEED_REFRESH_RATE.value:
                     time.sleep(1/AppVideoEnum.VIDEOFEED_REFRESH_RATE.value - time_elapsed)
             except Exception as e: print(f'Video feed failed: {e}'); time.sleep(0.02)
-        
-    def coordinate_updater(self):
-        while True:
-            try:
-                # Get the coordinates
-                res = self.get_coordinates_closest_mm()
-                if res is None: continue
-                coor_x,coor_y,coor_z = res
-                coor_x_um = float(coor_x) * 1e3 # type: ignore
-                coor_y_um = float(coor_y) * 1e3 # type: ignore
-                coor_z_um = float(coor_z) * 1e3 # type: ignore
-                self._lbl_coor.setText('{:.1f}, {:.1f}, {:.1f}'
-                                        .format(coor_x_um,coor_y_um,coor_z_um))
-                time.sleep(1/AppPlotEnum.DISPLAY_COORDINATE_REFRESH_RATE.value)
-            except Exception as e:
-                print(f'Coordinate updater failed: {e}')
-                time.sleep(0.005)
     
     @Slot(str,str)
     def status_update(self,message=None,bg_colour=None):
@@ -1231,7 +1401,7 @@ def generate_dummy_motion_controller(parent:qw.QWidget) -> Wdg_MotionController:
         getter_imgcal=lambda: None
     )
     
-    frm_motion.initialise_auto_updater()
+    frm_motion._init_workers()
     
     return frm_motion
 

@@ -44,7 +44,7 @@ class Hilvl_CoorGen_UiDesign(qw.QWidget, Ui_hilvl_coorGen):
     def __init__(self, parent):
         super().__init__(parent)
         self.setupUi(self)
-        qw.QVBoxLayout(self)
+        # qw.QVBoxLayout(self)
 
 class Coor_saveload_worker(QObject):
     
@@ -57,15 +57,14 @@ class Coor_saveload_worker(QObject):
     
     message_loaded_lastsession = "Previous unfinished mapping coordinates found and has been loaded"
     
-    def __init__(self,parent,mappingCoorHub:List_MeaCoor_Hub):
+    def __init__(self,mappingCoorHub:List_MeaCoor_Hub):
         """
         Initialises the treeview for the mapping coordinates.
         
         Args:
-            parent (tk.Tk | tk.Frame): The parent frame or window.
             mappingCoorHub (MappingCoordinatesHub): The hub for the mapping coordinates.
         """
-        super().__init__(parent)
+        super().__init__()
         self._mappingCoorHub = mappingCoorHub
     
     @Slot(str, list, int)
@@ -193,8 +192,8 @@ class DataHub_Coor_UiDesign(qw.QWidget, Ui_dataHub_coor):
     def __init__(self, parent):
         super().__init__(parent)
         self.setupUi(self)
-        lyt = qw.QVBoxLayout(self)
-        self.setLayout(lyt)
+        # lyt = qw.QVBoxLayout(self)
+        # self.setLayout(lyt)
 
 class Wdg_Treeview_MappingCoordinates(qw.QWidget):
     """
@@ -243,7 +242,7 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         self._mappingCoorHub.add_observer(self._sig_update_tree.emit)
         
         # > Worker and thread setup <
-        self._worker = Coor_saveload_worker(self,self._mappingCoorHub)
+        self._worker = Coor_saveload_worker(self._mappingCoorHub)
         self._thread = QThread()
         self._worker.moveToThread(self._thread)
         
@@ -296,9 +295,9 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         if flg_message:
             if len(list_sel_mapCoor) == 0:
                 qw.QMessageBox.information(self, 'No selection', 'No mapping coordinates have been selected.')
-            list_show_names = list_sel_mapCoor[:]
+            list_show_names = [mc.mappingUnit_name for mc in list_sel_mapCoor]
             if len(list_sel_mapCoor) > 3:
-                list_show_names = list_names[:3] + ['...']
+                list_show_names = [mc.mappingUnit_name for mc in list_sel_mapCoor[:3]] + ['...']
             qw.QMessageBox.information(self, 'Selected mapping coordinates',
                                 f'The following mapping coordinates have been selected:\n\n{list_show_names}')
         return list_sel_mapCoor

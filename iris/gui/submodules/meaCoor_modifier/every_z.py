@@ -255,7 +255,7 @@ def test():
     root.title('Test')
     
     frm_motion = generate_dummy_motion_controller(root)
-    frm_motion.initialise_auto_updater()
+    frm_motion._init_workers()
     frm_motion.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
     
     coorUnit = MeaCoor_mm(

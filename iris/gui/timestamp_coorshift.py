@@ -113,7 +113,7 @@ class sFrm_xyCoorTimestampShift(tk.Frame):
             )
             
             # Update the plotter
-            self._frm_heatmap_plotter.replot_heatmap()
+            self._frm_heatmap_plotter.request_plot_heatmap()
             
             self._frm_heatmap_plotter.set_combobox_values(mappingUnit_name=shifted_unitname)
             

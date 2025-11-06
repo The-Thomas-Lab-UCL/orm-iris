@@ -125,7 +125,7 @@ class MeaRMap_Unit():
             'mapping_measurement_unit: The measurement keys are not the same as the measurement types.'
         
         # Observer setup
-        self._list_observers = []
+        self._dict_observers:dict[Callable,bool] = {}
         
     def get_laser_params(self) -> tuple[float,float]:
         """
@@ -730,20 +730,20 @@ class MeaRMap_Unit():
         Adds an observer to the list of observers.
         """
         assert callable(observer), 'add_observer: The input data type is not correct. Expected a callable.'
-        self._list_observers.append(observer)
+        self._dict_observers[observer] = True
 
     def remove_observer(self, observer: Callable) -> None:
         """
         Removes an observer from the list of observers.
         """
-        try: self._list_observers.remove(observer)
+        try: del self._dict_observers[observer]
         except Exception as e: print(f"Error removing observer: {e}")
 
     def _notify_observers(self) -> None:
         """
         Notifies all observers of a change.
         """
-        for observer in self._list_observers:
+        for observer in list(self._dict_observers.keys()):
             try: observer()
             except Exception as e: print(f"Error notifying observer: {e}")
     
@@ -996,7 +996,9 @@ class MeaRMap_Hub():
         self._dict_mappingMeasurementUnits['measurement_unit'].append(mapping_unit)
         
         self._dict_mappingUnit_NameID[mapping_unit.get_unit_name()] = mapping_unit.get_unit_id()
-
+        
+        mapping_unit.add_observer(self._notify_observers)
+        
         if notify: self._notify_observers()
         
     def extend_mapping_unit(self,list_mapping_unit:list[MeaRMap_Unit]) -> None:
@@ -1059,6 +1061,8 @@ class MeaRMap_Hub():
         
         # Delete the object itself and all of its references
         unit:MeaRMap_Unit = self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx]
+        try: unit.remove_observer(self._notify_observers)
+        except Exception as e: print(f"Error in remove_mapping_unit_id: {e}")
         unit.delete_self()
         del self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx]
         
@@ -1071,6 +1075,11 @@ class MeaRMap_Hub():
         """
         Deletes all mapping_measurement_unit objects from the mapping_measurements dictionary.
         """
+        list_units = self._dict_mappingMeasurementUnits['measurement_unit']
+        for unit in list_units:
+            try: unit.remove_observer(self._notify_observers)
+            except Exception as e: print(f"Error in delete_all_mapping_units: {e}")
+            unit.delete_self()
         self._dict_mappingMeasurementUnits[self._unit_id_key].clear()
         self._dict_mappingMeasurementUnits['measurement_unit'].clear()
         self._dict_mappingUnit_NameID.clear()

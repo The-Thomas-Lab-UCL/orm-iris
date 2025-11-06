@@ -1,3 +1,4 @@
+
 """
 A class that manages the motion controller aspect for the Ocean Direct Raman spectrometer
 """
@@ -137,9 +138,6 @@ class AcquisitionParams(TypedDict):
     laserwavelength_nm: float
     extra_metadata: dict
 
-# QMetaType.registerType(AcquisitionParams.__name__) # type: ignore
-# QMetaType.registerType(MeaRaman)            # type: ignore ; PySide6 issue with custom class
-
 class RamanMeasurement_Worker(QObject):
     """
     A class defining the worker functions for Raman measurement acquisition.
@@ -164,16 +162,20 @@ class RamanMeasurement_Worker(QObject):
         
         self._last_measurement:MeaRaman|None = None
                
-    def append_queue_observer_measurement(self, queue_observer: queue.Queue) -> None:
+    @Slot(queue.Queue, threading.Event)
+    def append_queue_observer_measurement(self, queue_observer: queue.Queue, done:threading.Event) -> None:
         """
         Appends a queue observer to the list of queue observers.
 
         Args:
             queue_observer (queue.Queue): The queue observer to be appended.
+            done (threading.Event): The event to signal when done.
         """
         assert isinstance(queue_observer, queue.Queue), "queue_observer must be an instance of queue.Queue"
         self._list_queue_observer.append(queue_observer)
+        done.set()
         
+    @Slot(queue.Queue)
     def remove_queue_observer_measurement(self, queue_observer: queue.Queue) -> None:
         """
         Removes a queue observer from the list of queue observers.
@@ -182,7 +184,8 @@ class RamanMeasurement_Worker(QObject):
             queue_observer (queue.Queue): The queue observer to be removed.
         """
         assert isinstance(queue_observer, queue.Queue), "queue_observer must be an instance of queue.Queue"
-        self._list_queue_observer.remove(queue_observer)
+        try: self._list_queue_observer.remove(queue_observer)
+        except: pass
         
     @Slot()
     def stop_acquisition(self) -> None:
@@ -283,7 +286,8 @@ class RamanMeasurement_Worker(QObject):
             measurement (MeaRaman): The acquired Raman measurement.
         """
         for q in self._list_queue_observer:
-            q.put(measurement)
+            try: q.put(measurement)
+            except Exception as e: print(f'Error in _notify_queue_observers: {e}')
         
     def acquire_continuous_burst_measurement_trigger(
         self,
@@ -342,14 +346,14 @@ class Wdg_SpectrometerController(qw.QWidget):
     A class defining the app subwindow for the Raman spectrometer.
     """
     sig_set_integration_time_us = Signal(int)
-    _sig_perform_mea_sngl = Signal()
-    _sig_perform_mea_cont = Signal()
-    _sig_request_mea_stop = Signal()
     
     _sig_request_mea_sngl = Signal(AcquisitionParams)
     _sig_request_mea_cont = Signal(AcquisitionParams)
+    _sig_request_mea_stop = Signal()
     
     _sig_request_lastmea = Signal() # Signal to request the last measurement from the acquisition worker
+    _sig_append_queue_observer = Signal(queue.Queue, threading.Event)    # Signal to append a queue observer to the acquisition worker
+    _sig_remove_queue_observer = Signal(queue.Queue)    # Signal to remove a queue observer from the acquisition worker
     
     def __init__(
         self,
@@ -435,6 +439,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._q_plt_mea = queue.Queue() # Queue for plotting measurements (will plot the latest measurement only)
         self._plt_timer = QTimer()
         self._plt_timer.timeout.connect(self._auto_update_plot)
+        self._plt_timer.setSingleShot(True)
         self._plt_timer.setInterval(50) # Update every 50 ms (will be dynamically adjusted later)
         self._plt_timer.start()
         
@@ -477,8 +482,8 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._btn_sngl_mea = widget.btn_snglmea
         self._btn_cont_mea = widget.btn_contmea
         
-        self._btn_sngl_mea.clicked.connect(self._sig_perform_mea_sngl.emit)
-        self._btn_cont_mea.clicked.connect(self._sig_perform_mea_cont.emit)
+        self._btn_sngl_mea.clicked.connect(self._perform_single_measurement)
+        self._btn_cont_mea.clicked.connect(self._perform_continuous_measurement)
         
     # Add buttons and labels for device parameter setups
         ## Label to notify the users of the current device parameters
@@ -534,6 +539,11 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._entry_laserwavelength.textChanged.connect(lambda: self._set_laserMetadata())
         
     # >>> Connections setup <<<
+        # Connect the append queue observer signal to the acquisition worker
+        self._sig_append_queue_observer.connect(self._worker_acquisition.append_queue_observer_measurement)
+        self._sig_remove_queue_observer.connect(self._worker_acquisition.remove_queue_observer_measurement)
+        self._sig_append_queue_observer.emit(self._q_plt_mea, threading.Event())
+        
         # Connect the acquisition done signal to reset the widgets and statusbar
         self._worker_acquisition.sig_acq_done.connect(lambda: self._statbar.showMessage("Raman controller ready"))
         self._worker_acquisition.sig_acq_done.connect(lambda: self._statbar.setStyleSheet(""))
@@ -542,6 +552,15 @@ class Wdg_SpectrometerController(qw.QWidget):
     # >>> Finalise the setup <<<
         # Update the statusbar
         self._statbar.showMessage("Raman controller ready")
+    
+    def get_mea_worker(self) -> RamanMeasurement_Worker:
+        """
+        Returns the Raman measurement worker
+
+        Returns:
+            RamanMeasurement_Worker: The Raman measurement worker
+        """
+        return self._worker_acquisition
     
     def _set_laserMetadata(self):
         """
@@ -651,10 +670,6 @@ class Wdg_SpectrometerController(qw.QWidget):
         """
         Initializes the connection for the measurement buttons
         """
-        # Button commands
-        self._sig_perform_mea_sngl.connect(self.perform_single_measurement)
-        self._sig_perform_mea_cont.connect(self.perform_continuous_measurement)
-        
         # Connection to the acquisition worker
         self._sig_request_mea_sngl.connect(self._worker_acquisition.acquire_single_measurement)
         self._sig_request_mea_cont.connect(self._worker_acquisition.acquire_continuous_measurement)
@@ -700,51 +715,8 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._entry_ymin.setText('')
         self._entry_ymax.setText('')
     
-    def perform_continuous_single_measurements(self,queue_mea:queue.Queue|None=None):
-        """
-        Perform continuous measurement until stopped. Generates a single measurement for each iteration, which is put into the queue.
-        The measurement is then analysed and plotted. Accumulation is set to 1.
-        
-        Args:
-            queue_mea (queue.Queue, optional): A queue to put the result in. Defaults to None.
-        """
-        self._statbar.showMessage("Continuous single measurements in progress")
-        self._statbar.setStyleSheet("background-color: yellow;")
-        
-        # Turn the continuous measurement button into a stop button
-        self._btn_cont_mea.setText('STOP')
-        self._btn_cont_mea.setStyleSheet("background-color: red;")
-        self._btn_cont_mea.clicked.disconnect()
-        
-        int_time_ms = int(self._controller.set_integration_time_us(int(self.integration_time_ms*1000))/1000)
-        extra_metadata = self._generate_metadata_dict()
-        
-        # Start the measurement worker
-        thread = QThread()
-        worker = RamanMeasurement_Worker(ramanHub=self._ramanHub)
-        worker.moveToThread(thread)
-        
-        thread.started.connect(worker.acquire_single_measurement_nonstop(
-            max_accumulation=self._accumulation,
-            int_time_ms=int_time_ms,
-            laserpower_mW=self._laserpower_mW,
-            laserwavelength_nm=self._laserwavelength_nm,
-            extra_metadata=extra_metadata,
-            queue_mea=queue_mea
-        ))
-        
-        worker.finished.connect(self.pause_auto_measurement)
-        worker.finished.connect(lambda: self._statbar.showMessage("Raman controller ready"))
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        
-        self._btn_cont_mea.clicked.connect(lambda: worker.stop_acquisition())
-        
-        thread.start()
-    
     @Slot()
-    def perform_continuous_measurement(self):
+    def _perform_continuous_measurement(self):
         """
         Perform continuous measurement until stopped.
         """
@@ -759,11 +731,22 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._btn_cont_mea.clicked.connect(self._sig_request_mea_stop.emit)
         
         # Sets the integration time and accumulation
-        int_time_ms = self._controller.set_integration_time_us(int(self.integration_time_ms*1000))//1000
         self.update_label_device_parameters(accum=self._accumulation)
         
-        # Set up the queue observers
-        self._append_remove_observer_queue_to_worker(self._q_plt_mea)
+        dict_params = self.generate_acquisition_params()
+        
+        # Start the measurement
+        self._sig_request_mea_cont.emit(dict_params)
+        
+    def generate_acquisition_params(self) -> AcquisitionParams:
+        """
+        Generates the acquisition parameters based on the current settings
+
+        Returns:
+            AcquisitionParams: The acquisition parameters
+        """
+        # Sets the integration time and accumulation
+        int_time_ms = self._controller.set_integration_time_us(int(self.integration_time_ms*1000))//1000
         
         # Initialise the measurement parameters
         dict_metadata_extra = self._generate_metadata_dict()
@@ -774,104 +757,10 @@ class Wdg_SpectrometerController(qw.QWidget):
             'laserwavelength_nm': self._laserwavelength_nm,
             'extra_metadata': dict_metadata_extra,
         }
-        
-        
-        # Start the measurement
-        self._sig_request_mea_cont.emit(dict_params)
-            
-    def perform_ContinuousMeasurement_trigger(self) -> tuple[threading.Thread,queue.Queue,Callable,Callable,Callable,Callable]:
-        """
-        Wraps the _perform_ContinuousMeasurement_trigger function to be used in a separate process,
-        and return the thread, queues, and functions to trigger and stop the measurement.
-        
-        Returns:
-            tuple[threading.Thread,queue.Queue,Callable,Callable,Callable,Callable]: 
-                The thread, return queue, start function, store function, ignore function, and stop function
-        """
-        raise NotImplementedError
-        # TODO: thread return is not implemented properly here yet. Need to work with the Pyside threading.
-        q_trigger = queue.Queue()
-        q_return = queue.Queue()
-        thread = self._perform_ContinuousMeasurement_trigger(q_trigger,q_return)
-        
-        def start_measurement(): q_trigger.put(None)
-        def store_prev_measurements(): q_trigger.put(None)
-        def ignore_prev_measurements(): q_trigger.put(1)
-        def stop_measurement(): q_trigger.put(0)
-        
-        return thread,q_return,start_measurement,store_prev_measurements,ignore_prev_measurements,stop_measurement
-    
-    def _perform_ContinuousMeasurement_trigger(self,q_trigger:queue.Queue,q_return:queue.Queue) -> None:
-        """
-        Perform continuous measurement until stopped.
-        
-        Idea: clicking the button once should activate the mode and clicking it again should turn it off
-        
-        Args:
-            q_trigger (queue.Queue): A queue to trigger the resume/stop of the continuous measurement. True to trigger the next measurement, False to stop.
-            q_return (queue.Queue): A queue to return the result of the measurement after every trigger command.
-            
-        Usage:
-            1. Prepare an external queue for the trigger and return
-            2. Call this function
-            3. Put anything to trigger to initialise the measurement
-            4. For every next [any], measurements between this trigger and the previous trigger timestmap
-            5. Put 0 to stop the measurement or 1 to skip the measurements
-                between this trigger and the previous timestamp (e.g., when the stage is moving
-                and the measurement is not needed)
-        """
-        if not self._ramanHub.isrunning_auto_measurement(): self.resume_auto_measurement()
-        else: print('!!!!! Auto-measurement is already running, a part of the program did NOT TERMINATE it properly !!!!!')
-        
-        self._statbar.showMessage("Continuous measurement in progress")
-        self._statbar.setStyleSheet("background-color: yellow;")
-        
-        int_time_ms = self._controller.set_integration_time_us(int(self.integration_time_ms*1000))//1000
-        self.update_label_device_parameters(accum=self._accumulation)
-        
-        # Initialise the analyser and plotter
-        extra_metadata = self._generate_metadata_dict()
-        
-        # Initializes the measurement
-        self._ramanHub.wait_MeasurementUpdate()
-        
-        # Initialise the thread and worker
-        self._thread_mea = QThread()
-        self._worker_mea = RamanMeasurement_Worker(ramanHub=self._ramanHub)
-        self._worker_mea.moveToThread(self._thread_mea)
-        self._thread_mea.started.connect(lambda: self._worker_mea.acquire_continuous_burst_measurement_trigger(
-            q_trigger=q_trigger,
-            q_return=q_return,
-            laserpower_mW=self._laserpower_mW,
-            laserwavelength_nm=self._laserwavelength_nm,
-            extra_metadata=extra_metadata,
-        ))
-        self._worker_mea.mea_acquired_get.connect(
-            lambda mea: self._update_plot(mea, title='Continuous Raman Measurement')
-        )
-        self._worker_mea.finished.connect(lambda: self.reset_enable_widgets())
-        self._worker_mea.finished.connect(lambda: self._statbar.showMessage("Raman controller ready"))
-        self._worker_mea.finished.connect(self._thread_mea.quit)
-        self._worker_mea.finished.connect(self._worker_mea.deleteLater)
-        self._thread_mea.finished.connect(self._thread_mea.deleteLater)
-        
-        self._thread_mea.start()
-    
-    @Slot()
-    def pause_auto_measurement(self):
-        """
-        Pauses the auto-measurement in the RamanHub
-        """
-        self._ramanHub.pause_auto_measurement()
-        
-    def resume_auto_measurement(self):
-        """
-        Resumes the auto-measurement in the RamanHub
-        """
-        self._ramanHub.resume_auto_measurement()
+        return dict_params
         
     @Slot()
-    def perform_single_measurement(self, queue_measurement:queue.Queue|None=None):
+    def _perform_single_measurement(self):
         """
         Perform multiple measurements based on the self.measurement_accumulation, averages, and 
         updates the displayed figure all the time.
@@ -881,22 +770,9 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._statbar.setStyleSheet("background-color: yellow;")
         
         # Sets the integration time and accumulation
-        int_time_ms = self._controller.set_integration_time_us(int(self.integration_time_ms*1000))//1000
         self.update_label_device_parameters(accum=self._accumulation)
         
-        # Set up the queue observers
-        if isinstance(queue_measurement,queue.Queue): self._append_remove_observer_queue_to_worker(queue_measurement)
-        self._append_remove_observer_queue_to_worker(self._q_plt_mea)
-        
-        # Initialise the measurement parameters
-        dict_metadata_extra = self._generate_metadata_dict()
-        dict_params:AcquisitionParams = {
-            'accumulation': self._accumulation,
-            'int_time_ms': int_time_ms,
-            'laserpower_mW': self._laserpower_mW,
-            'laserwavelength_nm': self._laserwavelength_nm,
-            'extra_metadata': dict_metadata_extra,
-        }
+        dict_params = self.generate_acquisition_params()
         
         # Start the measurement
         self._sig_request_mea_sngl.emit(dict_params)
@@ -908,14 +784,11 @@ class Wdg_SpectrometerController(qw.QWidget):
         Args:
             queue_observer (queue.Queue): The queue observer to be added
         """
-        def remove_queue_observer():
-            try: self._worker_acquisition.remove_queue_observer_measurement(queue_observer)
-            except Exception as e: print("Error removing queue observer:", e)
-        
-        self._worker_acquisition.append_queue_observer_measurement(queue_observer)
-        self._worker_acquisition.sig_acq_done.connect(remove_queue_observer)
+        append_done = threading.Event()
+        self._sig_append_queue_observer.emit(queue_observer, append_done)
+        self._worker_acquisition.sig_acq_done.connect(lambda: self._sig_remove_queue_observer.emit(queue_observer))
+        append_done.wait()
 
-    @Slot()
     def _auto_update_plot(self):
         """
         Auto-update the plot with the latest measurement in the queue
@@ -924,7 +797,6 @@ class Wdg_SpectrometerController(qw.QWidget):
             measurement:MeaRaman|None = None
             while not self._q_plt_mea.empty():
                 measurement = self._q_plt_mea.get_nowait()
-                if self._q_plt_mea.qsize() < 5: break
             if not isinstance(measurement,MeaRaman) and not measurement is None:
                 raise TypeError("Invalid measurement type in the plot queue") # pyright: ignore[reportPossiblyUnboundVariable] ; it is guaranteed to be assigned if no exception is raised
             self._update_plot(measurement, title='Raw Raman Spectrum')
@@ -986,7 +858,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._btn_cont_mea.clicked.disconnect()
         self._btn_cont_mea.setText('Continuous measurement')
         self._btn_cont_mea.setStyleSheet("")
-        self._btn_cont_mea.clicked.connect(self._sig_perform_mea_cont.emit)
+        self._btn_cont_mea.clicked.connect(self._perform_continuous_measurement)
         self._btn_cont_mea.setEnabled(True)
         
     def terminate(self):
@@ -1027,13 +899,39 @@ def create_dummy_image(counter):
 
     return image
 
-if __name__ == '__main__':
+def generate_dummy_spectrometer_controller(parent:qw.QWidget, processor:mpp.Pool,
+    dataHub:Wdg_DataHub_Mapping|None=None) -> Wdg_SpectrometerController:
+    """
+    Generates a dummy spectrometer controller for testing purposes.
+
+    Args:
+        parent (qw.QWidget): The parent widget for the controller.
+        processor (mpp.Pool): The multiprocessing pool for data processing.
+    """
     base_manager = get_my_manager()
     initialise_manager_raman(base_manager)
     base_manager.start()
     RamanController_proxy, dict_MeaRaman_proxy = initialise_proxy_raman(base_manager)
     RamanHub = DataStreamer_Raman(RamanController_proxy,dict_MeaRaman_proxy)
     RamanHub.start()
+
+    wdg_Raman = Wdg_SpectrometerController(
+        parent=parent,
+        processor=processor,
+        controller=RamanController_proxy,
+        ramanHub=RamanHub,
+        dataHub=dataHub,
+    )
+    return wdg_Raman
+    
+
+if __name__ == '__main__':
+    # base_manager = get_my_manager()
+    # initialise_manager_raman(base_manager)
+    # base_manager.start()
+    # RamanController_proxy, dict_MeaRaman_proxy = initialise_proxy_raman(base_manager)
+    # RamanHub = DataStreamer_Raman(RamanController_proxy,dict_MeaRaman_proxy)
+    # RamanHub.start()
     
     print(os.cpu_count())
     processor = mpp.Pool()
@@ -1049,12 +947,10 @@ if __name__ == '__main__':
     # root = tk.Tk()
     
     # dataHub = Frm_DataHub_Mapping(master=root)
-    raman_frame = Wdg_SpectrometerController(
+    raman_frame = generate_dummy_spectrometer_controller(
         parent=central_widget,
         processor=processor,
-        controller=RamanController_proxy,
-        ramanHub=RamanHub,
-        dataHub=None
+        dataHub=None,
     )
     layout.addWidget(raman_frame)
     main_window.show()

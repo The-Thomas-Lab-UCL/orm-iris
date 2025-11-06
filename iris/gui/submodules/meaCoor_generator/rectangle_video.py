@@ -462,7 +462,7 @@ def test():
         z_controller=zctrl,
         stageHub=stageHub
     )
-    motion_controller.initialise_auto_updater()
+    motion_controller._init_workers()
     motion_controller.pack()
     
     mapping_method = Rect_Video(root,motion_controller,status_bar)

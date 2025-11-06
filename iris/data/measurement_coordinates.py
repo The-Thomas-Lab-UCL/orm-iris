@@ -236,7 +236,7 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         super().append(mapCoor)
         self._notify_observers()
         
-    def extend(self, mapCoor:list[MeaCoor_mm]):
+    def extend(self, mapCoor:list[MeaCoor_mm], *args, **kwargs):
         """
         Extends the list with a list of mapping coordinates objects.
         
@@ -248,7 +248,7 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         super().extend(mapCoor)
         self._notify_observers()
         
-    def pop(self, idx:int) -> MeaCoor_mm:
+    def pop(self, idx:int, *args, **kwargs) -> MeaCoor_mm:
         """
         Pops a mapping coordinates object from the list by index.
         
@@ -278,7 +278,7 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         if not isinstance(list_unitNames, list) or not all(isinstance(name, str) for name in list_unitNames):
             raise TypeError(f"Expected list of str, got {type(list_unitNames)}")
         
-        list_mapCoor = [self[self.search_mappingCoor(name)] for name in list_unitNames if self.search_mappingCoor(name) is not None]
+        list_mapCoor = [self[idx] for idx in range(len(self)) if self[idx].mappingUnit_name in list_unitNames]
         return list_mapCoor
     
     def generate_dummy_data(self, num_units:int=5, num_coords:int=10):

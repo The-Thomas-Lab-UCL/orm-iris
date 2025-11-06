@@ -14,7 +14,7 @@ from tkinter import messagebox
 
 from iris.gui.motion_video import Wdg_MotionController
 from iris.gui.raman import Wdg_SpectrometerController
-from iris.gui.hilvl_Raman import Frm_HighLvlController_Raman
+from iris.gui.hilvl_Raman import Wdg_HighLvlController_Raman
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
 from iris.gui.hilvl_Brightfield import Frm_HighLvlController_Brightfield
@@ -141,7 +141,7 @@ class controller_app(tk.Tk):
             dataHub_img=self._dataHub_img,
             dataHub_imgcal=self._dataHub_imgcal)
         
-        self._hilvl_raman = Frm_HighLvlController_Raman(
+        self._hilvl_raman = Wdg_HighLvlController_Raman(
             parent=notebook,
             motion_controller=self._motion,
             stageHub=stage_hub,
@@ -151,7 +151,7 @@ class controller_app(tk.Tk):
             dataHub_img=self._dataHub_img,
             dataHub_imgcal=self._dataHub_imgcal,
             coorHub=self._coorHub,
-            frm_coorGen=self._hilvl_coorGen,
+            wdg_coorGen=self._hilvl_coorGen,
             processor=self._processor)
         
         self._hilvl_brightfield = Frm_HighLvlController_Brightfield(
@@ -319,7 +319,7 @@ class controller_app(tk.Tk):
         """
         self.wait_visibility()
         
-        self._motion.initialise_auto_updater()
+        self._motion._init_workers()
         self._raman.initialise_spectrometer_n_analyser()
         [extension.initialise() for extension in self._list_extensions_toplevel]
         
