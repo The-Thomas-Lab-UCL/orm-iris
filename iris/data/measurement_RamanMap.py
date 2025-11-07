@@ -997,7 +997,7 @@ class MeaRMap_Hub():
         
         self._dict_mappingUnit_NameID[mapping_unit.get_unit_name()] = mapping_unit.get_unit_id()
         
-        # mapping_unit.add_observer(self._notify_observers)
+        mapping_unit.add_observer(self._notify_observers)
         
         if notify: self._notify_observers()
         
