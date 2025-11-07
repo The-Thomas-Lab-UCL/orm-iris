@@ -125,7 +125,7 @@ class MeaRMap_Unit():
             'mapping_measurement_unit: The measurement keys are not the same as the measurement types.'
         
         # Observer setup
-        self._dict_observers:dict[Callable,bool] = {}
+        self._list_observers = []
         
     def get_laser_params(self) -> tuple[float,float]:
         """
@@ -730,20 +730,20 @@ class MeaRMap_Unit():
         Adds an observer to the list of observers.
         """
         assert callable(observer), 'add_observer: The input data type is not correct. Expected a callable.'
-        self._dict_observers[observer] = True
+        self._list_observers.append(observer)
 
     def remove_observer(self, observer: Callable) -> None:
         """
         Removes an observer from the list of observers.
         """
-        try: del self._dict_observers[observer]
+        try: self._list_observers.remove(observer)
         except Exception as e: print(f"Error removing observer: {e}")
 
     def _notify_observers(self) -> None:
         """
         Notifies all observers of a change.
         """
-        for observer in list(self._dict_observers.keys()):
+        for observer in self._list_observers:
             try: observer()
             except Exception as e: print(f"Error notifying observer: {e}")
     
@@ -997,7 +997,7 @@ class MeaRMap_Hub():
         
         self._dict_mappingUnit_NameID[mapping_unit.get_unit_name()] = mapping_unit.get_unit_id()
         
-        mapping_unit.add_observer(self._notify_observers)
+        # mapping_unit.add_observer(self._notify_observers)
         
         if notify: self._notify_observers()
         

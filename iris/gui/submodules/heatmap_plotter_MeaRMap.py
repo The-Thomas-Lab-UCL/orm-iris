@@ -93,6 +93,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         holder.addWidget(self._canvas_widget)
         self._canvas_id_interaction = self._canvas_widget.mpl_connect('button_press_event', self._retrieve_click_idxcol) # The plot widget's canvas ID for interaction setups
         self._isplotting = False
+        self._isupdating_comboboxes = False
         
         # Initialise the plot with a dummy plot
         self._func_current_plotter()
@@ -120,6 +121,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         
     # > Set the connections <<
         # Plot update timer
+        # self._sig_request_update_plot.connect(lambda: self.plot_heatmap())
         self._sig_request_update_plot.connect(lambda: self.request_plot_heatmap())
         self._timer_plot = QTimer(self)
         self._timer_plot.setInterval(100)
@@ -128,12 +130,14 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         self._timer_plot.start()
         
         # Combobox update timer
+        # self._sig_request_update_comboboxes.connect(lambda: self._update_comboboxes())
         self._sig_request_update_comboboxes.connect(lambda: self.request_combobox_update())
         self._timer_combobox = QTimer(self)
         self._timer_combobox.setInterval(100)
         self._timer_combobox.timeout.connect(self._process_combobox_request)
         self.destroyed.connect(self._timer_combobox.stop)
         self._timer_combobox.start()
+        
         
     def _init_plot_control_widgets(self):
         """
@@ -356,6 +360,9 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
             set_wavelength (float|None): Wavelength to be selected after the refresh if possible. It will\
                 be set to Raman shift automatically according to the checkbox state.
         """
+        if self._isupdating_comboboxes: return
+        
+        self._isupdating_comboboxes = True
         self._combo_plot_mappingUnitName.blockSignals(True)
         self._combo_plot_SpectralPosition.blockSignals(True)
         
@@ -414,6 +421,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         
         self._combo_plot_mappingUnitName.blockSignals(False)
         self._combo_plot_SpectralPosition.blockSignals(False)
+        self._isupdating_comboboxes = False
         
     @Slot()
     def request_plot_heatmap(self) -> None:
@@ -466,7 +474,6 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
             self._current_mappingUnit.add_observer(self._sig_request_update_plot.emit)
         
         self._sig_request_update_comboboxes.emit()
-        self._sig_request_update_plot.emit()
     
     def plot_heatmap(self):
         """

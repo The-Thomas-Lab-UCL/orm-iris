@@ -11,6 +11,7 @@ import multiprocessing.pool as mpp
 import threading
 import queue
 from typing import Callable, Any, TypedDict
+from enum import Enum
 
 import time
 import cv2
@@ -138,6 +139,16 @@ class AcquisitionParams(TypedDict):
     laserwavelength_nm: float
     extra_metadata: dict
 
+class Enum_ContinuousMeasurementTrigger(Enum):
+    """
+    Enum for the continuous measurement trigger options.
+    """
+    START = 'start'
+    PAUSE = 'pause'
+    FINISH = 'finish'
+    STORE = 'store'
+    IGNORE = 'ignore'
+
 class RamanMeasurement_Worker(QObject):
     """
     A class defining the worker functions for Raman measurement acquisition.
@@ -207,11 +218,88 @@ class RamanMeasurement_Worker(QObject):
         self._acquisition_params = params
         self._ramanHub.resume_auto_measurement()
         
-        self._acquire_measurement(params)
+        self._acquire_one_measurement(params)
         
         self.sig_acq_done.emit()
         self._ramanHub.pause_auto_measurement()
-
+        
+    
+    @Slot(AcquisitionParams, queue.Queue, queue.Queue, threading.Event)
+    def acquire_continuous_burst_measurement_trigger(
+        self,
+        params:AcquisitionParams,
+        q_trigger:queue.Queue[Enum_ContinuousMeasurementTrigger],
+        q_return:queue.Queue[MeaRaman],
+        event_ready:threading.Event,
+        ):
+        """
+        Acquires the spectrum in a continuous manner (one after another consecutively)
+        and puts them in the return queue or ignore them based on the commands from q_trigger.
+        For the full list of available commands, refer to the Enum_ContinuousMeasurementTrigger class.
+        
+        NOTE: The first command in q_trigger MUST be START to begin the measurement, followed by either
+        STORE or IGNORE commands. To stop the measurement, send the FINISH command.
+        
+        NOTE: This function **blocks** the thread until the FINISH command is received.
+        
+        Args:
+            params (AcquisitionParams): The acquisition parameters that will be fixed to the acquired measurements.
+            q_trigger (queue.Queue): The trigger queue to command the measurement actions.
+            q_return (queue.Queue): The return queue where the acquired measurements are put.
+            event_ready (threading.Event): The event to signal when the process is ready for the next command,
+                triggered after receiving the START command and after the measurements are put in the return queue
+                after each STORE command.
+        """
+        self._acquisition_params = params
+        self._ramanHub.resume_auto_measurement()
+        
+        trigger = q_trigger.get()
+        if not trigger == Enum_ContinuousMeasurementTrigger.START:
+            raise ValueError('The first trigger command must be START to begin the continuous measurement.')
+        
+        list_timestamp_trigger = [get_timestamp_us_int()]
+        self._isacquiring = True
+        
+        EnumTrig = Enum_ContinuousMeasurementTrigger
+        
+        event_ready.set()
+        while self._isacquiring:
+            # Wait for the trigger to start the next measurement or to stop
+            trigger = q_trigger.get()
+            if trigger == EnumTrig.FINISH: break
+            
+            # Retrieve the measurements
+            list_timestamp_trigger.append(get_timestamp_us_int())
+            list_timestamp_mea_int,list_spectrum,list_integration_time_ms=\
+                self._ramanHub.get_measurement(
+                    timestamp_start=list_timestamp_trigger[-2],
+                    timestamp_end=list_timestamp_trigger[-1])
+            list_timestamp_trigger.pop(0) # Remove the first element (not needed anymore)
+            
+            if trigger == EnumTrig.IGNORE: continue
+            
+            list_measurement = []
+            for ts_int,spectrum_raw,int_time_ms in zip(list_timestamp_mea_int,list_spectrum,list_integration_time_ms):
+                measurement = MeaRaman(
+                    timestamp=ts_int,
+                    int_time_ms=int_time_ms,
+                    laserPower_mW=params['laserpower_mW'],
+                    laserWavelength_nm=params['laserwavelength_nm'],
+                    extra_metadata=params['extra_metadata'])
+                measurement.set_raw_list(df_mea=spectrum_raw, timestamp_int=ts_int)
+                list_measurement.append(measurement)
+            
+            # Return the measurement result
+            for mea in list_measurement:
+                mea.calculate_analysed()
+                q_return.put(mea)
+                self._notify_queue_observers(measurement=mea)
+                
+            event_ready.set()
+            
+        self.sig_acq_done.emit()
+        self._ramanHub.pause_auto_measurement()
+        
     @Slot(AcquisitionParams)
     def _schedule_next_acquisition_cycle(self, params:AcquisitionParams):
         """
@@ -224,7 +312,7 @@ class RamanMeasurement_Worker(QObject):
             return
             
         try:
-            self._acquire_measurement(params)
+            self._acquire_one_measurement(params)
             QTimer.singleShot(0, lambda: self._schedule_next_acquisition_cycle(params))
         except Exception as e:
             self._isacquiring = False
@@ -232,7 +320,7 @@ class RamanMeasurement_Worker(QObject):
             self.sig_acq_done.emit()
             self._ramanHub.pause_auto_measurement()
 
-    def _acquire_measurement(self, params:AcquisitionParams):
+    def _acquire_one_measurement(self, params:AcquisitionParams):
         """
         Acquire a single measurement
 
@@ -288,58 +376,6 @@ class RamanMeasurement_Worker(QObject):
         for q in self._list_queue_observer:
             try: q.put(measurement)
             except Exception as e: print(f'Error in _notify_queue_observers: {e}')
-        
-    def acquire_continuous_burst_measurement_trigger(
-        self,
-        q_trigger:queue.Queue,
-        q_return:queue.Queue,
-        laserpower_mW:float,
-        laserwavelength_nm:float,
-        extra_metadata:dict,
-        ):
-        raise NotImplementedError
-        # TODO: move the trigger functionality to the main GUI and have this function only handle the acquisition
-        self._ramanHub.wait_MeasurementUpdate()
-        trigger = q_trigger.get()
-        list_timestamp_trigger = [get_timestamp_us_int()]
-        self._isacquiring = True
-        while self._isacquiring:
-            # Wait for the trigger to start the next measurement or to stop
-            trigger = q_trigger.get()
-            if trigger == 0: self._isacquiring = False; break
-            
-            # Retrieve the measurements
-            list_timestamp_trigger.append(get_timestamp_us_int())
-            list_timestamp_mea_int,list_spectrum,list_integration_time_ms=\
-                self._ramanHub.get_measurement(
-                    timestamp_start=list_timestamp_trigger[-2],
-                    timestamp_end=list_timestamp_trigger[-1])
-            list_timestamp_trigger.pop(0) # Remove the first element (not needed anymore)
-            
-            # >>> Skips the measurement if the trigger is 1. <<<
-            # This REMOVES the measurement between the trigger timestamp
-            # and the previous timestamp
-            if trigger == 1: continue
-            
-            list_measurement = []
-            for ts_int,spectrum_raw,int_time_ms in zip(list_timestamp_mea_int,list_spectrum,list_integration_time_ms):
-                measurement = MeaRaman(
-                    timestamp=ts_int,
-                    int_time_ms=int_time_ms,
-                    laserPower_mW=laserpower_mW,
-                    laserWavelength_nm=laserwavelength_nm,
-                    extra_metadata=extra_metadata)
-                measurement.set_raw_list(df_mea=spectrum_raw, timestamp_int=ts_int)
-                list_measurement.append(measurement)
-            
-            # Return the measurement result
-            for i, measurement in enumerate(list_measurement):
-                measurement.calculate_analysed()
-                q_return.put((list_timestamp_mea_int[i], measurement))
-                self.mea_acquired_get.emit(measurement)
-                
-        self._ramanHub.pause_auto_measurement()
-        self.finished.emit(True)
 
 class Wdg_SpectrometerController(qw.QWidget):
     """
@@ -388,7 +424,7 @@ class Wdg_SpectrometerController(qw.QWidget):
 
 # >>> Threading and worker setups <<<
     # >> Communciation with the controller <<
-        self._thread_controller = QThread()
+        self._thread_controller = QThread(self)
         self._worker_controller = Spectrometer_Control_Workers(controller=self._controller)
         self._worker_controller.moveToThread(self._thread_controller)
         self.destroyed.connect(self._thread_controller.quit)
@@ -397,7 +433,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._thread_controller.start()
         
     # >> Acquisition <<
-        self._thread_acquisition = QThread()
+        self._thread_acquisition = QThread(self)
         self._worker_acquisition = RamanMeasurement_Worker(
             ramanHub=self._ramanHub
         )

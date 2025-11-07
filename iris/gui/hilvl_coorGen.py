@@ -243,7 +243,7 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         
         # > Worker and thread setup <
         self._worker = Coor_saveload_worker(self._mappingCoorHub)
-        self._thread = QThread()
+        self._thread = QThread(self)
         self._worker.moveToThread(self._thread)
         
         self.destroyed.connect(self._thread.quit)

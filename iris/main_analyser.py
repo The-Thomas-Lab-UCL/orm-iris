@@ -211,7 +211,7 @@ class Heatmap_InteractivePlotter(tk.Frame):
         self._thd_auto_clickcheck.start()
     
     def update_plot(self):
-        self._heatmapPlotter.request_plot_heatmap()
+        self._heatmapPlotter.replot_heatmap()
     
     def get_Frm_MappingMeasurement_Plotter(self) -> Wdg_MappingMeasurement_Plotter:
         """
@@ -368,7 +368,7 @@ class EventHandler():
             self._flg_update_hub.clear()
             
             try:
-                self._heatmapPlotter.request_plot_heatmap()
+                self._heatmapPlotter.replot_heatmap()
                 self.initialise_callbacks()
             except Exception as e: (f'_auto_update_Hub: {e}')
         

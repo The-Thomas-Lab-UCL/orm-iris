@@ -27,7 +27,7 @@ if __name__ == '__main__':
 from iris.utils.general import *
 
 from iris.gui.motion_video import Wdg_MotionController, Motion_GoToCoor_Worker
-from iris.gui.raman import Wdg_SpectrometerController, RamanMeasurement_Worker, AcquisitionParams
+from iris.gui.raman import Wdg_SpectrometerController, RamanMeasurement_Worker, AcquisitionParams, Enum_ContinuousMeasurementTrigger as EnumTrig
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 # from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
 from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates, Wdg_Hilvl_CoorGenerator
@@ -48,6 +48,7 @@ from iris.gui import AppRamanEnum, AppPlotEnum
 
 from iris.resources.hilvl_Raman_ui import Ui_Hilvl_Raman
 
+# QMetaType().registerType()  # pyright: ignore[reportArgumentType] ; register custom type for signal-slot mechanism
 # QMetaType.registerType(MeaRMap_Hub)  # pyright: ignore[reportArgumentType] ; register custom type for signal-slot mechanism
 # QMetaType.registerType(MeaRMap_Unit) # pyright: ignore[reportArgumentType] ; register custom type for signal-slot mechanism
 
@@ -84,13 +85,35 @@ class Hilvl_MeasurementStorer_Worker(QObject):
     sig_gotmea = Signal() # Emitted when a measurement is received from the queue
     sig_error = Signal(str)
     sig_finished = Signal()
+    sig_finished_relay_msg = Signal(str)    # To relay finished messages once the imaging and the saving are both done. The message is obtained from the acquisition worker.
     
-    def __init__(self, mapping_unit:MeaRMap_Unit, queue_measurement:queue.Queue):
+    def __init__(self, datastreamer_stage:DataStreamer_StageCam):
         super().__init__()
+        self._ds_stage = datastreamer_stage
+        self._isrunning = True
+        
+    @Slot(MeaRMap_Unit, queue.Queue)
+    def set_save_params(
+        self,
+        mapping_unit:MeaRMap_Unit,
+        queue_measurement:queue.Queue[MeaRaman]):
+        """
+        Sets the parameters for the autosaver
+
+        Args:
+            mapping_unit (MeaRMap_Unit): The mapping unit to store the measurement data
+            queue_measurement (queue.Queue): The queue to store the measurement data
+        """
         self._mapping_unit = mapping_unit
         self._queue_measurement = queue_measurement
         
+    @Slot()
+    def start_autosaver(self):
+        """
+        Starts the measurement autosaver
+        """
         self._isrunning = True
+        self._schedule_next_autosave()
         
     @Slot()
     def stop_autosaver(self):
@@ -99,6 +122,7 @@ class Hilvl_MeasurementStorer_Worker(QObject):
         """
         self._isrunning = False
     
+    @Slot()
     def _schedule_next_autosave(self):
         """
         Schedules the next autosave measurement
@@ -114,6 +138,7 @@ class Hilvl_MeasurementStorer_Worker(QObject):
             else:
                 self.sig_finished.emit()
     
+    @Slot()
     def _autosave_measurement(self):
         """
         A function to automatically grabs the measurement data form the
@@ -133,18 +158,31 @@ class Hilvl_MeasurementStorer_Worker(QObject):
             except Exception as e: self.sig_error.emit(f'Error in autosaver: {e}'); return
             
             try:
-                timestamp_mea,coor,measurement = result
+                mea:MeaRaman = result
+                ts = mea.get_latest_timestamp()
+                coor = self._ds_stage.get_coordinates_interpolate(ts)
+                assert coor is not None, 'No stage coordinates found for the measurement timestamp'
                 
-                timestamp_mea:int
-                measurement:MeaRaman
-                
-                measurement.check_uptodate(autoupdate=True)
+                mea.check_uptodate(autoupdate=True)
                 self._mapping_unit.append_ramanmeasurement_data(
-                    timestamp=timestamp_mea,
+                    timestamp=ts,
                     coor=coor,
-                    measurement=measurement
+                    measurement=mea
                 )
             except Exception as e: self.sig_error.emit(f'Error in autosaver: {e}')
+            
+    @Slot(str)
+    def relay_finished_message(self, msg:str):
+        """
+        Relays the finished message when the autosaver is done
+
+        Args:
+            msg (str): The message to relay
+        """
+        if not self._isrunning and self._queue_measurement.empty():
+            self.sig_finished_relay_msg.emit(msg)
+        else:
+            QTimer.singleShot(100, lambda: self.relay_finished_message(msg))
 
 class Hilvl_MeasurementAcq_Worker(QObject):
     """
@@ -169,11 +207,12 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     
     _sig_stop_autosaver = Signal()
     _sig_gotocor = Signal(tuple, threading.Event)
-    _sig_setvelrel = Signal(float)
+    _sig_setvelrel = Signal(float, float, threading.Event)
     _sig_append_queue_mea = Signal(queue.Queue, threading.Event)
     _sig_remove_queue_mea = Signal(queue.Queue)
     _sig_acquire_discrete_mea = Signal(AcquisitionParams)
-    _sig_acquire_continuous_mea = Signal(AcquisitionParams)
+    _sig_acquire_continuous_mea = Signal(AcquisitionParams, queue.Queue, queue.Queue, threading.Event)
+    _sig_acquire_list_coors = Signal(list, threading.Event)
 
     def __init__(self, mapping_hub:MeaRMap_Hub):
         """
@@ -197,9 +236,14 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         self._isacquiring = False
     
     @Slot(AcquisitionParams, list, queue.Queue)
-    def run_scan_discrete(self, params:AcquisitionParams, mapping_coordinates:list, q_mea_out:queue.Queue):
+    def run_scan_discrete(
+        self,
+        params:AcquisitionParams,
+        mapping_coordinates:list,
+        q_mea_out:queue.Queue[MeaRaman]):
+        print("Starting discrete mapping measurement...")
+        
         # Go through all the coordinates
-        print('Starting discrete mapping measurement...')
         while not self._q_mea_acq.empty(): self._q_mea_acq.get()   # Clear the acquisition queue
         
         print(params)
@@ -213,8 +257,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         for coor in mapping_coordinates:
             try:
                 if not self._isacquiring:
-                    self.sig_mea_done.emit()
-                    self.sig_mea_done_msg.emit(self.msg_mea_cancelled)
+                    self.emit_finish_signals(self.msg_mea_cancelled)
                     break
                 
                 # Go to the requested coordinates
@@ -227,130 +270,109 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 
                 # Trigger the acquisition and wait for the return queue to be filled
                 self._sig_acquire_discrete_mea.emit(params)
+                
                 mea:MeaRaman = self._q_mea_acq.get(timeout=int_time/1000 * 10) # Waits up to 10x the integration time for the measurement
                 
-                ts = mea.get_latest_timestamp()
-                
                 # Send the measurement data to the autosaver
-                q_mea_out.put((ts,coor,mea))
+                q_mea_out.put(mea)
                 
             except Exception as e:
-                self.sig_mea_done_msg.emit(self.msg_mea_error + str(e))
+                self.emit_finish_signals(self.msg_mea_error + str(e))
                 print('Error in run_scan_discrete:',e)
         
         self._sig_remove_queue_mea.emit(self._q_mea_acq)
-        self.sig_mea_done.emit()
-        self.sig_mea_done_msg.emit(self.msg_mea_finished)
+        self.emit_finish_signals(self.msg_mea_finished)
         return
     
-    # def run_scan_continuous(self, mapping_coordinates_ends:list,mapping_speed_rel:int):
-    #     """
-    #     Scans the mapping coordinates continuously based on the given scan coordinates.
+    @Slot(AcquisitionParams, list, int, queue.Queue)
+    def run_scan_continuous(
+        self,
+        params:AcquisitionParams,
+        mapping_coordinates_ends:list,
+        mapping_speed_rel:int,
+        q_mea_out:queue.Queue):
+        """
+        Scans the mapping coordinates continuously based on the given scan coordinates.
 
-    #     Args:
-    #         mapping_coordinates_ends (list): List of scan coordinates (end coordinates of each scan lines)
-    #         mapping_speed_rel (int): The relative speed to move between the coordinates
-    #     """
-    # # > Prep for the loop Calculate the number of measurements to be done <
-    #     total_coordinates = len(mapping_coordinates_ends)  # Total number of coordinates
-    #     total_lines = int(total_coordinates/2)  # Total number of lines to be scanned
+        Args:
+            params (AcquisitionParams): The acquisition parameters for the measurement
+            mapping_coordinates_ends (list): List of scan coordinates (end coordinates of each scan lines)
+            mapping_speed_rel (int): The relative speed to move between the coordinates
+            q_mea_out (queue.Queue): The queue to store the measurement data
+        """
+        # Prepare the events to synchronise the movement and measurement
+        event_finish_setvel = threading.Event()
+        event_finish_goto = threading.Event()
         
-    # # >>> Perform the mapping measurement <<<
-    #     for i, coor in enumerate(mapping_coordinates_ends):
-    #         if not self._isacquiring: break   # Stops the measurement immediately when required.
+        # Prepare the measurement queue to save the measurement data into
+        # the mapping unit (set up in the main thread)
+        event_ready = threading.Event()
+        self._sig_append_queue_mea.emit(self._q_mea_acq, event_ready)
+        q_trig = queue.Queue()  # Queue to send the measurement trigger commands
+        self._sig_acquire_continuous_mea.emit(params, q_trig, self._q_mea_acq, event_ready)
+        
+        # >>> Perform the mapping measurement <<<
+        for i, coor in enumerate(mapping_coordinates_ends):
+            if not self._isacquiring:
+                self.emit_finish_signals(self.msg_mea_cancelled)
+                break   # Stops the measurement immediately when required.
             
-    #         if i == 0: func_start_Raman()
-    #         elif i%2 == 1:
-    #             func_ignore_Raman()
-    #             self.motion_controller.set_vel_relative(vel_xy=mapping_speed_rel)   # Set actual speed to move between x-coordinates
-    #         else:
-    #             func_store_Raman()
-    #             self.motion_controller.set_vel_relative(vel_xy=100) # Set actual speed to move between x-coordinates
+            event_finish_setvel.clear()
+            if i == 0:
+                event_ready.clear()
+                q_trig.put(EnumTrig.START)
+                event_ready.wait()
+            elif i%2 == 1:
+                event_ready.clear()
+                q_trig.put(EnumTrig.STORE)
+                self._sig_setvelrel.emit(mapping_speed_rel, -1.0, event_finish_setvel)   # Set actual speed to move between x-coordinates
+                event_ready.wait()
+            else:
+                q_trig.put(EnumTrig.IGNORE)
+                self._sig_setvelrel.emit(100.0, -1.0, event_finish_setvel) # Set actual speed to move between x-coordinates
+            event_finish_setvel.wait()
             
-    #         # Wait for the previous batch processing to finish
-    #         q_size = queue_measurement.qsize()
-    #         flg_restart_Raman = False
-    #         if q_size > AppRamanEnum.CONTINUOUS_MEASUREMENT_BUFFER_SIZE.value:
-    #             while not queue_measurement.empty():
-    #                 print(f'Measurement buffer full:\nAdjust [APP - RAMAN MEASUREMENT CONTROLLER] "continuous_measurement_buffer_size"\nin the config.ini file to adjust the buffer size')
-    #                 self.status_update(f'Measurement buffer full: Processing previous measurements {q_size} remaining',bg_colour='yellow')
-    #                 time.sleep(0.1)
-    #                 if queue_measurement.qsize() < q_size: q_size = queue_measurement.qsize(); continue
-                    
-    #                 # Restart the continuous measurement
-    #                 func_store_Raman()
-    #                 func_stop_Raman()
-    #                 thread_continuous.join()
-    #                 flg_restart_Raman = True
-                    
-    #                 thread_continuous,queue_measurement_new,func_start_Raman,func_store_Raman,func_ignore_Raman,\
-    #                     func_stop_Raman = self.raman_controller.perform_ContinuousMeasurement_trigger()
-                        
-    #                 self.init_measurement_autosaver(
-    #                     mapping_unit=self.measurement_data_2D_unit,
-    #                     flg_isrunning=flg_isrunning_autosaver,
-    #                     q_measurement_old=queue_measurement,
-    #                     q_measurement_new=queue_measurement_new,
-    #                     mode='continuous',
-    #                     thread_autosaver=thread_autosaver,
-    #                 )
-    #                 queue_measurement = queue_measurement_new
-    #             if flg_restart_Raman: func_start_Raman()
-    #             func_ignore_Raman()
+            # Check the autosave queue size and wait if necessary to prevent overflow
+            q_size = q_mea_out.qsize()
+            if q_size > AppRamanEnum.CONTINUOUS_MEASUREMENT_BUFFER_SIZE.value:
+                while not q_mea_out.empty():
+                    print(f'Measurement buffer full:\nAdjust [APP - RAMAN MEASUREMENT CONTROLLER] "continuous_measurement_buffer_size"\nin the config.ini file to adjust the buffer size')
+                    time.sleep(0.1)
+                    print(f'Waiting for the measurement buffer to clear... Current size: {q_mea_out.qsize()}')
+                q_trig.put(EnumTrig.IGNORE)
                 
+            while not self._q_mea_acq.empty():
+                mea:MeaRaman = self._q_mea_acq.get()
+                q_mea_out.put(mea)
                 
-    #         # Go to the requested coordinates
-    #         thread_movement = threading.Thread(target=self.motion_controller.go_to_coordinates,kwargs=({
-    #             'coor_x_mm': float(coor[0]),
-    #             'coor_y_mm': float(coor[1]),
-    #             'coor_z_mm': float(coor[2]),
-    #             'override_controls': True,
-    #             }))
-    #         thread_movement.start()
-    #         thread_movement.join()
-            
-    #         # Check if the target is reached and retry the coordinate if not
-    #         if not self.motion_controller.isontarget_gotocoor() and not retry_flag:
-    #             retry_flag = True
-    #             print('Target coordinate not reached, retrying once')
-    #             continue
-    #         retry_flag = False
-            
-    #         # Status update
-    #         self._dataHub_map.update_tree()
-    #         time_elapsed = time.time()-time_start
-    #         self.status_update('Performing mapping line: {} of {}. Elapsed time: {} min {} sec. Queue size: {}'\
-    #             .format(int((i+1)/2),total_lines,math.floor(time_elapsed/60),math.floor(time_elapsed%60),
-    #                     queue_measurement.qsize()),bg_colour='yellow')
-            
-    #         i+=1
+            # Go to the requested coordinates
+            event_finish_goto.clear()
+            self._sig_gotocor.emit(
+                (float(coor[0]),float(coor[1]),float(coor[2])),
+                event_finish_goto
+            )
         
-    #     # Stop raman frame's continuous measurement
-    #     func_store_Raman()
-    #     func_stop_Raman()
-    #     thread_continuous.join(timeout=1)
+        # Stop raman frame's continuous measurement and store the final measurements
+        q_trig.put(EnumTrig.STORE)
+        q_trig.put(EnumTrig.FINISH)
+
+        self.emit_finish_signals(self.msg_mea_finished)
         
-    #     # Stop the measurement autosaver and wait for it to finish
-    #     self.motion_controller.enable_controls()
-    #     flg_isrunning_autosaver.clear()   # Stops the continuous measurement
-    #     thread_autosaver.join(timeout=1)     # Wait for the autosaver to finish
-        
-    #     self._frm_coorHub_treeview.delete_offload_mappingCoor(unit_name)  # Deletes the offloaded mapping coordinates
-    #     if i != len(mapping_coordinates_ends):
-    #         ans = messagebox.askyesno('Save mapping coordinates','The measurement was stopped abruptly.\nDo you want to save the mapping coordinates?')
-    #         if ans:
-    #             if self._coorHub.search_mappingCoor(unit_name) != None: unit_name += '_remaining_{}'.format(get_timestamp_us_str())
-    #             self._coorHub.append(MeaCoor_mm(unit_name,mapping_coordinates_ends[i+1:]))
-        
-    #     self._flg_meaCancelled = True if i < len(mapping_coordinates_ends) else False
-        
-    #     return thread_plot
+    @Slot(str)
+    def emit_finish_signals(self,msg:str):
+        """
+        Emits the measurement done signal with a message.
+
+        Args:
+            msg (str): The message to emit with the signal
+        """
+        self.sig_mea_done.emit()
+        self.sig_mea_done_msg.emit(msg)
 
 class WorkerPipelineManager(QObject):
     """
     Manages the signal and slot connections between workers
     """
-    
     def __init__(
         self,
         hilvlacq_worker:Hilvl_MeasurementAcq_Worker,
@@ -366,7 +388,7 @@ class WorkerPipelineManager(QObject):
         hilvlacq_worker._sig_append_queue_mea.connect(raman_worker.append_queue_observer_measurement)
         hilvlacq_worker._sig_remove_queue_mea.connect(raman_worker.remove_queue_observer_measurement)
         hilvlacq_worker._sig_acquire_discrete_mea.connect(raman_worker.acquire_single_measurement)
-        # hilvlacq_worker._sig_acquire_continuous_mea.connect()
+        hilvlacq_worker._sig_acquire_continuous_mea.connect(raman_worker.acquire_continuous_burst_measurement_trigger)
 
 class MappingMethods(Enum):
     DISCRETE = 'discrete'
@@ -381,9 +403,13 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         2. Mapping functionalities
         3. Raman spectroscopy save functions
     """
+
+    sig_set_autosaver = Signal(MeaRMap_Unit, queue.Queue)   # Signal to set the autosaver parameters
+    sig_start_autosaver = Signal()
     
     sig_stop_measurement = Signal() # Signal to trigger measurement collection
     sig_run_scan_discrete = Signal(AcquisitionParams,list,queue.Queue)
+    sig_run_scan_continuous = Signal(AcquisitionParams,list,queue.Queue)
     
     def __init__(self,
                  parent,
@@ -465,7 +491,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self._btn_discrete = wdg.btn_discrete
         self._btn_discrete.clicked.connect(lambda: self.initiate_mapping(MappingMethods.DISCRETE))
         self._btn_continuous = wdg.btn_continuous
-        # self._btn_continuous.clicked.connect(lambda: self.perform_continuousMapping_multi())
+        self._btn_continuous.clicked.connect(lambda: self.initiate_mapping(MappingMethods.CONTINUOUS))
         self._btn_stop = wdg.btn_stop
         self._btn_stop.clicked.connect(lambda: self.sig_stop_measurement.emit())
         
@@ -515,7 +541,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         """
         Initialises the workers and their connections
         """
-        self._thread_hilvlacq = QThread()
+    # >>> Worker setups <<<
         self._worker_hilvlacq = Hilvl_MeasurementAcq_Worker(self._dataHub_map.get_MappingHub())
         self._worker_manager = WorkerPipelineManager(
             hilvlacq_worker=self._worker_hilvlacq,
@@ -523,40 +549,50 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             motion_controller=self.motion_controller,
             motion_goto_worker=self.motion_controller.get_goto_worker()
         )
+        self._worker_autoMeaStorer = Hilvl_MeasurementStorer_Worker(
+            datastreamer_stage=self._stageHub,
+        )
         
+    # >>> Mapping acquisition worker setup <<<
         # Connection: Mapping acquisition signals
         self.sig_stop_measurement.connect(self._worker_hilvlacq.stop_measurement)
         self.sig_run_scan_discrete.connect(self._worker_hilvlacq.run_scan_discrete)
-        self._worker_hilvlacq.sig_mea_done_msg.connect(self.handle_mapping_completion)
+        self.sig_run_scan_continuous.connect(self._worker_hilvlacq.run_scan_continuous)
+        self._worker_hilvlacq.sig_mea_done_msg.connect(self._worker_autoMeaStorer.relay_finished_message)
         
         # Connection: Thread and worker management
+        self._thread_hilvlacq = QThread(self)
         self._worker_hilvlacq.moveToThread(self._thread_hilvlacq)
         self.destroyed.connect(self._thread_hilvlacq.quit)
         self.destroyed.connect(self._thread_hilvlacq.deleteLater)
         self.destroyed.connect(self._worker_hilvlacq.deleteLater)
         self._thread_hilvlacq.start()
         
-    def _init_autoMeaStorer_worker(self, mapping_unit:MeaRMap_Unit) -> queue.Queue:
-        self._q_storage = queue.Queue()
-        self._worker_autoMeaStorer = Hilvl_MeasurementStorer_Worker(
-            mapping_unit=mapping_unit, queue_measurement=self._q_storage
-        )
-        self._thread_autoMeaStorer = QThread()
-        self._worker_autoMeaStorer.moveToThread(self._thread_autoMeaStorer)
-        
-        # Signal to start the autosaver
-        self._thread_autoMeaStorer.started.connect(self._worker_autoMeaStorer._schedule_next_autosave)
-        
+    # >>> Autosaver worker setup <<<
         # Signal to stop the autosaver
         self._worker_hilvlacq.sig_mea_done.connect(self._worker_autoMeaStorer.stop_autosaver)
         
+        # Signal to start and set the autosaver
+        self.sig_start_autosaver.connect(self._worker_autoMeaStorer.start_autosaver)
+        self.sig_set_autosaver.connect(self._worker_autoMeaStorer.set_save_params)
+        
+        # Finish signal
+        self._worker_autoMeaStorer.sig_finished_relay_msg.connect(self.handle_mapping_completion)
+        
         # Signal to delete the thread and worker when finished
-        self._worker_autoMeaStorer.sig_finished.connect(self._thread_autoMeaStorer.quit)
-        self._worker_autoMeaStorer.sig_finished.connect(self._worker_autoMeaStorer.deleteLater)
-        self._worker_autoMeaStorer.sig_finished.connect(self._thread_autoMeaStorer.deleteLater)
+        self._thread_autoMeaStorer = QThread(self)
+        self._worker_autoMeaStorer.moveToThread(self._thread_autoMeaStorer)
+        self.destroyed.connect(self._thread_autoMeaStorer.quit)
+        self.destroyed.connect(self._worker_autoMeaStorer.deleteLater)
+        self.destroyed.connect(self._thread_autoMeaStorer.deleteLater)
         
         self._thread_autoMeaStorer.start()
-        return self._q_storage
+        
+    def _init_autoMeaStorer_worker(self, mapping_unit:MeaRMap_Unit) -> queue.Queue:
+        q_storage = queue.Queue()
+        self.sig_set_autosaver.emit(mapping_unit, q_storage)
+        self.sig_start_autosaver.emit()
+        return q_storage
     
     def _get_scan_options(self) -> tuple[str,str]:
         """
@@ -580,14 +616,15 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             raise ValueError("Invalid scan direction selected")
         
         return (scan_method, scan_direction)
-        
-    def _generate_metadata_dict(self, map_method:Literal['discrete', 'continuous']) -> dict:
+
+    def _generate_metadata_dict(self, map_method:MappingMethods) -> dict:
         """
         Generates extra metadata for the mapping measurement
         
         Returns:
             dict: The extra metadata
         """
+        assert map_method in MappingMethods, "Invalid mapping method"
         controller_ids = self.motion_controller.get_controller_identifiers()
         
         method,dir = self._get_scan_options()
@@ -596,7 +633,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             'camera_id': controller_ids[0],
             'xystage_id': controller_ids[1],
             'zstage_id': controller_ids[2],
-            'mapping_method': map_method,
+            'mapping_method': map_method.value,
             'scan_method': method,
             'scan_direction': dir,
             'scramble_random': self._widget.chk_randomise.isChecked(),
@@ -709,7 +746,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             mappingUnit_name (str|None): The mapping ID. If None, the user will be prompted to enter it. Defaults to None.
             
         Returns:
-            tuple: mapping coordinates, mapping speed, mapping ID
+            tuple: mapping coordinates, mapping speed (mm/sec), mapping ID
             
         NOTE:
             Assumes that the mapping coordinate will be followed as a pathway
@@ -792,8 +829,8 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.enable_widgets()
         self._btn_stop.setEnabled(False)
         self.statbar.showMessage('Ready')
-    
-    def _scramble_mapping_coordinates(self, list_mappingCoor:list, mode:Literal['discrete','continuous']) -> list:
+
+    def _scramble_mapping_coordinates(self, list_mappingCoor:list, mode:MappingMethods) -> list:
         """
         Scrambles the mapping coordinates based on the selected mode.
         
@@ -811,8 +848,9 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             The 'discrete' mode will scramble the coordinates randomly, while the 'continuous' mode will always group the
             start and end coordinates of the lines together.
         """
+        assert mode in MappingMethods, "Invalid mapping method. Check the MappingMethods enum."
         list_init = list_mappingCoor.copy()
-        if mode == 'continuous':
+        if mode == MappingMethods.CONTINUOUS:
             # Convert the coordinates to a list of two coordinates (assuming that the coordinates are in pairs)
             list_temp = list_init.copy()
             list_init.clear()
@@ -853,7 +891,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             list_final = list_init
             
         # Convert the coordinates back to the original format
-        if mode == 'continuous':
+        if mode == MappingMethods.CONTINUOUS:
             list_temp = list_final.copy()
             list_final.clear()
             while len(list_temp)>0:
@@ -886,11 +924,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         assert method in MappingMethods, "Invalid mapping method. Check the MappingMethods enum."
         self._last_mappingmethod = method
         
-        if method == MappingMethods.DISCRETE:
-            return self._perform_discreteMapping()
-        # elif method == MappingMethods.CONTINUOUS:
-        #     return self._perform_continuousMapping()
-        else: raise ValueError("Invalid mapping method. Use 'discrete' or 'continuous'.")
+        self._perform_mapping(method=method)
         
     @Slot(str)
     def handle_mapping_completion(self, msg:str):
@@ -917,11 +951,13 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             self.initiate_mapping(method=self._last_mappingmethod)
         else: raise ValueError("Invalid mapping completion message")
 
-    def _perform_discreteMapping(self):
+    def _perform_mapping(self, method:MappingMethods):
         """
         Performs discrete mapping based on the mapping coordinates stored in the list
         """
         def reset(): self.enable_widgets()
+        assert method in MappingMethods, "Invalid mapping method. Check the MappingMethods enum."
+        
         mapping_hub = self._dataHub_map.get_MappingHub()
         
         mapCoor = self._list_sel_mapCoor.pop(0)
@@ -929,6 +965,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             qw.QMessageBox.critical(self,'Error','Invalid mapping coordinates selected')
             reset()
             return
+        
         mappingUnit_name = mapCoor.mappingUnit_name
         mapping_coordinates = mapCoor
         
@@ -938,33 +975,53 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             reset()
             return
         
-        list_coor,_,unit_name = result
-        list_coor = self._convertCoor_byScanOptions(list_coor)
+        list_coor, mapping_speed_mmPerSec, unit_name = result
+        if method == MappingMethods.CONTINUOUS: ends_only = True
+        else: ends_only = False
+        list_coor = self._convertCoor_byScanOptions(list_coor, ends_only=ends_only)
         
         try:
             assert list_coor is not None and len(list_coor)>0, "No coordinates to perform mapping"
-            self._request_discreteMapping(mapping_coordinates=list_coor, unit_name=unit_name)
+            self._request_Mapping(mapping_coordinates=list_coor, unit_name=unit_name, method=method, mapping_speed_mmPerSec=mapping_speed_mmPerSec)
         except Exception as e:
             qw.QMessageBox.critical(self,'Error',f"Failed to perform mapping for '{mappingUnit_name}': {e}")
             reset()
             if not self._flg_meaCancelled: self._coorHub.remove_mappingCoor(mappingUnit_name)
         
-    def _request_discreteMapping(self, mapping_coordinates:list, unit_name:str):
+    def _request_Mapping(
+        self,
+        mapping_coordinates:list,
+        unit_name:str,
+        method:MappingMethods,
+        mapping_speed_mmPerSec:float,
+        ) -> None:
+        assert method in MappingMethods, "Invalid mapping method. Check the MappingMethods enum."
     # >>> Initialisations <<<
         # Generate the extra metadata for the mapping measurement
-        extra_metadata = self._generate_metadata_dict('discrete')
+        extra_metadata = self._generate_metadata_dict(method)
         
         # Initialise the mapping measurement data class
         mea_unit = MeaRMap_Unit(unit_name, extra_metadata=extra_metadata)
         self._dataHub_map.append_MappingUnit(mea_unit)
 
         # Scramble the mapping coordinates if requested
-        mapping_coordinates = self._scramble_mapping_coordinates(mapping_coordinates,'discrete')
+        mapping_coordinates = self._scramble_mapping_coordinates(mapping_coordinates, method)
         
         # Perform the mapping measurement itself
         q_autosave = self._init_autoMeaStorer_worker(mea_unit)
-        self.sig_run_scan_discrete.emit(
-            self.raman_controller.generate_acquisition_params(), mapping_coordinates, q_autosave)
+        if method == MappingMethods.DISCRETE:
+            print('Requesting discrete mapping...')
+            self.sig_run_scan_discrete.emit(
+                self.raman_controller.generate_acquisition_params(), mapping_coordinates, q_autosave)
+        else:
+            mapping_speed_rel = self.motion_controller.calculate_vel_relative(vel_xy_mmPerSec=mapping_speed_mmPerSec)
+            mapping_speed_rel *= AppRamanEnum.CONTINUOUS_SPEED_MODIFIER.value
+            self.sig_run_scan_continuous.emit(
+                self.raman_controller.generate_acquisition_params(),
+                mapping_coordinates,
+                mapping_speed_rel,
+                q_autosave,
+                )
 
     # @thread_assign
     # def perform_continuousMapping(self,mapping_coordinates:MeaCoor_mm):

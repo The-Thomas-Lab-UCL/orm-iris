@@ -116,41 +116,6 @@ class Save_worker(QObject):
         """
         self._mappinghub = mappingHub
 
-class Autosave_worker(QObject):
-    def __init__(self, mapping_hub:MeaRMap_Hub, savepath:str, interval_hours:float):
-        super().__init__()
-        self._sessionid = get_timestamp_us_str()
-        self._mapping_hub = mapping_hub
-        self._handler = MeaRMap_Handler()
-        self._savepath = savepath
-        self._interval_hours = interval_hours
-        self._is_running = True
-
-        self._autosave_thread = QThread()
-        self._autosave_thread.started.connect(self._autosave_loop)
-        self._autosave_thread.start()
-
-    def _autosave_loop(self):
-        while self._is_running:
-            try:
-                if not self._mapping_hub.check_measurement_exist(): raise AssertionError("No measurements in the Mapping Hub to autosave")
-                self._handler.save_MappingHub_database(
-                    mappingHub=self._mapping_hub,
-                    savedirpath=self._savepath,
-                    savename='autosave_' + self._sessionid,
-                )
-                print(f"Autosaved Mapping Hub to {self._savepath}/{self._sessionid}_autosave.db")
-            except AssertionError: pass
-            except Exception as e: print (f"Error in autosave thread: {e}")
-            finally:
-                QThread.sleep(int(self._interval_hours * 3600))
-
-    def stop(self):
-        self._is_running = False
-        self._autosave_thread.quit()
-        self._autosave_thread.wait()
-        
-
 class Wdg_DataHub_Mapping_Ui(qw.QWidget, Ui_DataHub_mapping):
     def __init__(self, parent: Any) -> None:
         super().__init__(parent)
@@ -224,7 +189,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
     # > Save/load worker and thread setup <
         self._save_worker = Save_worker(self._MappingHub)
-        self._thread_save = QThread()
+        self._thread_save = QThread(self)
         self._save_worker.moveToThread(self._thread_save)
         self.destroyed.connect(self._thread_save.quit)
         self.destroyed.connect(self._save_worker.deleteLater)

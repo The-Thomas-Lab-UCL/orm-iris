@@ -682,7 +682,7 @@ class Wdg_MotionController(qw.QGroupBox):
         self._worker_coor_report = Motion_AutoCoorReport_Worker(stageHub=self._stageHub)
         self._worker_coor_report.sig_coor.connect(self._lbl_coor.setText)
         
-        self._thread_coor_report = QThread()
+        self._thread_coor_report = QThread(self)
         self._worker_coor_report.moveToThread(self._thread_coor_report)
         
         self._thread_coor_report.started.connect(self._worker_coor_report.start)
@@ -692,7 +692,7 @@ class Wdg_MotionController(qw.QGroupBox):
         
         # For _worker_get_coordinates_closest_mm
         self._worker_getcoorclosest = Motion_GetCoordinatesClosest_mm(stageHub=self._stageHub)
-        self._thread_getcoorclosest = QThread()
+        self._thread_getcoorclosest = QThread(self)
         self._worker_getcoorclosest.moveToThread(self._thread_getcoorclosest)
         self._thread_getcoorclosest.finished.connect(self._worker_getcoorclosest.deleteLater)
         self._thread_getcoorclosest.finished.connect(self._thread_getcoorclosest.deleteLater)
@@ -706,7 +706,7 @@ class Wdg_MotionController(qw.QGroupBox):
         self._worker_gotocoor.sig_mvmt_started.connect(self._statbar.showMessage)
         self._sig_go_to_coordinates.connect(self._worker_gotocoor.work)
         
-        self._thread_gotocoor = QThread()
+        self._thread_gotocoor = QThread(self)
         self._worker_gotocoor.moveToThread(self._thread_gotocoor)
         self._thread_gotocoor.finished.connect(self._worker_gotocoor.deleteLater)
         self._thread_gotocoor.finished.connect(self._thread_gotocoor.deleteLater)
@@ -875,7 +875,7 @@ class Wdg_MotionController(qw.QGroupBox):
         # Store references to prevent premature destruction
         self._breathing_z_worker = Motion_MoveBreathingZ_Worker(self.ctrl_z)
         self._breathing_z_worker.signal_breathing_finished.connect(self.sig_breathing_stopped)
-        self._breathing_z_thread = QThread()
+        self._breathing_z_thread = QThread(self)
         self._breathing_z_worker.moveToThread(self._breathing_z_thread)
         self._breathing_z_thread.started.connect(self._breathing_z_worker.start)
         self._breathing_z_thread.finished.connect(self._breathing_z_worker.deleteLater)
@@ -1034,17 +1034,18 @@ class Wdg_MotionController(qw.QGroupBox):
             float: The velocity in percentage, relative to the device's maximum velocity
         """
         return self.ctrl_xy.calculate_vel_relative(vel_xy_mmPerSec)
-
-    def set_vel_relative(self,vel_xy:float|None=None,vel_z:float|None=None):
+    
+    @Slot(float,float,threading.Event)
+    def set_vel_relative(self,vel_xy:float=-1.0,vel_z:float=-1.0,event_finish:threading.Event|None=None):
         """
         Sets the velocity parameters for the motors
         
         Args:
-            vel_xy (float, optional): Velocity (percentage) for the xy-stage. Must be between 0[%] and 100[%]. Defaults to None.
-            vel_z (float, optional): Velocity (percentage) for the z-stage. Must be between 0[%] and 100[%]. Defaults to None.
+            vel_xy (float, optional): Velocity (percentage) for the xy-stage. Must be between 0[%] and 100[%]. If -1, uses the current velocity. Defaults to None.
+            vel_z (float, optional): Velocity (percentage) for the z-stage. Must be between 0[%] and 100[%]. If -1, uses the current velocity. Defaults to None.
         """
-        if isinstance(vel_xy,type(None)): vel_xy = self.ctrl_xy.get_vel_acc_relative()[1]
-        if isinstance(vel_z,type(None)): vel_z = self.ctrl_z.get_vel_acc_relative()[1]
+        if vel_xy <= 0.0 or vel_xy > 100.0: vel_xy = self.ctrl_xy.get_vel_acc_relative()[1]
+        if vel_z <= 0.0 or vel_z > 100.0: vel_z = self.ctrl_z.get_vel_acc_relative()[1]
         
         assert isinstance(vel_xy,(float,int)) and isinstance(vel_z,(float,int)), 'Invalid input type for the velocity parameters'
         
@@ -1053,6 +1054,8 @@ class Wdg_MotionController(qw.QGroupBox):
         
         speed_xy = self.ctrl_xy.get_vel_acc_relative()[1]
         speed_z = self.ctrl_z.get_vel_acc_relative()[1]
+        
+        if isinstance(event_finish,threading.Event): event_finish.set()
         
         self._update_set_vel_labels()
         
@@ -1203,7 +1206,7 @@ class Wdg_MotionController(qw.QGroupBox):
             self.sig_statbar_message.emit(None, None)
             
         if hasattr(self,'_thread_move') and self._thread_move.is_alive(): return
-            
+        
         self._thread_move = threading.Thread(target=_move)
         self._thread_move.start()
     
