@@ -457,7 +457,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
                 first valid mapping unit will be selected.
         """
         # Remove observer
-        try: self._current_mappingUnit.remove_observer(lambda: self._sig_request_update_plot.emit())
+        try: self._current_mappingUnit.remove_observer(self._sig_request_update_plot.emit)
         except Exception as e: print('_update_currentMappingUnit_observer',e)
         
         try:
@@ -471,6 +471,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
             if len(list_valid_names) > 0: self._current_mappingUnit = self._mappingHub.get_MappingUnit(unit_name=list_valid_names[0])
             else: self._current_mappingUnit = MeaRMap_Unit()
         finally:
+            print('Current mapping unit set to:',self._current_mappingUnit.get_unit_name())
             self._current_mappingUnit.add_observer(self._sig_request_update_plot.emit)
         
         self._sig_request_update_comboboxes.emit()

@@ -735,9 +735,13 @@ class MeaRMap_Unit():
     def remove_observer(self, observer: Callable) -> None:
         """
         Removes an observer from the list of observers.
+        
+        Raises:
+            ValueError: If the observer could not be removed.
         """
         try: self._list_observers.remove(observer)
-        except Exception as e: print(f"Error removing observer: {e}")
+        # except Exception as e: print(f"Error removing observer: {e}")
+        except Exception as e: raise ValueError(f"remove_observer: The observer could not be removed from the unit. Error: {e}")
 
     def _notify_observers(self) -> None:
         """
