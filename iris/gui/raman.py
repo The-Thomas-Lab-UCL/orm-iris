@@ -3,7 +3,7 @@
 A class that manages the motion controller aspect for the Ocean Direct Raman spectrometer
 """
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication, QMetaType
+from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication, QMetaType, QMutex, QMutexLocker, QWaitCondition
 
 import os
 import multiprocessing.pool as mpp
@@ -52,49 +52,6 @@ class Wdg_Raman(qw.QWidget, Ui_Raman):
         self.setLayout(vlayout)
         vlayout.addWidget(self.groupBox_plt)
         vlayout.addWidget(self.groupBox_params)
-
-
-
-class RamanMeasurement_Analysis_Worker(QObject):
-    """
-    A class defining the worker functions for Raman measurement analysis.
-    """
-    sig_start_autoplotter = Signal()
-    sig_plot_redrawn = Signal()
-    
-    def __init__(
-        self,
-        processor:mpp.Pool,
-        plotter:MeaRaman_Plotter,
-        queue_analysis:queue.Queue,
-        queue_return:queue.Queue) -> None:
-        
-        super().__init__()
-        self._processor = processor
-        self._plotter = plotter
-        self._q_analysis = queue_analysis
-        self._q_return = queue_return
-        
-        self._plt_isrunning = False
-        
-    @Slot(MeaRaman,bool)
-    def analyse_plot_rawlist2mea(self,measurement:MeaRaman, plot:bool) -> None:
-        """
-        Analyses the Raman measurement by averaging the raw list and plots the raw and averaged spectrum.
-        
-        Args:
-            measurement (MeaRaman): The Raman measurement to be analysed.
-            plot (bool): Whether to plot the analysed measurement.
-        """
-        rawlist = measurement.get_raw_list()
-        if len(rawlist) > 1:
-            result_analysis = self._processor.apply_async(func=MeaRaman.average, args=(rawlist,))
-            spectrum_avg = result_analysis.get()
-        else:
-            spectrum_avg = rawlist[0]
-        measurement.set_analysed(spectrum_analysed=spectrum_avg)
-        
-        self._q_return.put(measurement)
 
 class Spectrometer_Control_Workers(QObject):
     """
@@ -149,6 +106,38 @@ class Enum_ContinuousMeasurementTrigger(Enum):
     STORE = 'store'
     IGNORE = 'ignore'
 
+class Syncer_Raman(QObject):
+    """
+    A class to synchronise the Raman measurement acquisition with the stage movement.
+    """
+    def __init__(self):
+        super().__init__()
+        self.mutex = QMutex()
+        self.waitcondition = QWaitCondition()
+        self.ready = False
+        
+    def wait_ready(self):
+        with QMutexLocker(self.mutex):
+            while not self.ready:
+                self.waitcondition.wait(self.mutex)
+                
+    def notify_ready(self):
+        with QMutexLocker(self.mutex):
+            self.ready = True
+            self.waitcondition.wakeAll()
+            
+    def is_ready(self) -> bool:
+        with QMutexLocker(self.mutex):
+            return self.ready
+        
+    def set_ready(self):
+        with QMutexLocker(self.mutex):
+            self.ready = True
+            
+    def set_notready(self):
+        with QMutexLocker(self.mutex):
+            self.ready = False
+
 class RamanMeasurement_Worker(QObject):
     """
     A class defining the worker functions for Raman measurement acquisition.
@@ -162,9 +151,10 @@ class RamanMeasurement_Worker(QObject):
     mode_discrete = 0
     mode_continuous = 1
 
-    def __init__(self, ramanHub: DataStreamer_Raman) -> None:
+    def __init__(self, ramanHub: DataStreamer_Raman, syncer_acquisition: Syncer_Raman) -> None:
         super().__init__()
         self._ramanHub = ramanHub
+        self._syncer_acquisition = syncer_acquisition
         self._isacquiring = False
         self._timer_continuous = QTimer()
         
@@ -224,13 +214,12 @@ class RamanMeasurement_Worker(QObject):
         self._ramanHub.pause_auto_measurement()
         
     
-    @Slot(AcquisitionParams, queue.Queue, queue.Queue, threading.Event)
+    @Slot(AcquisitionParams, queue.Queue, queue.Queue)
     def acquire_continuous_burst_measurement_trigger(
         self,
         params:AcquisitionParams,
         q_trigger:queue.Queue[Enum_ContinuousMeasurementTrigger],
         q_return:queue.Queue[MeaRaman],
-        event_ready:threading.Event,
         ):
         """
         Acquires the spectrum in a continuous manner (one after another consecutively)
@@ -246,12 +235,14 @@ class RamanMeasurement_Worker(QObject):
             params (AcquisitionParams): The acquisition parameters that will be fixed to the acquired measurements.
             q_trigger (queue.Queue): The trigger queue to command the measurement actions.
             q_return (queue.Queue): The return queue where the acquired measurements are put.
-            event_ready (threading.Event): The event to signal when the process is ready for the next command,
-                triggered after receiving the START command and after the measurements are put in the return queue
-                after each STORE command.
+        
+        NOTE:
+            The event to signal when the process is ready for the next command is synced with the syncer_acquisition.
+            It is triggered after receiving the START command and after the measurements are put in the return queue
+            after each STORE command.
         """
         self._acquisition_params = params
-        self._ramanHub.resume_auto_measurement()
+        self._ramanHub.wait_MeasurementUpdate()
         
         trigger = q_trigger.get()
         if not trigger == Enum_ContinuousMeasurementTrigger.START:
@@ -262,10 +253,11 @@ class RamanMeasurement_Worker(QObject):
         
         EnumTrig = Enum_ContinuousMeasurementTrigger
         
-        event_ready.set()
+        self._syncer_acquisition.notify_ready()
         while self._isacquiring:
             # Wait for the trigger to start the next measurement or to stop
             trigger = q_trigger.get()
+            print(f'\nReceived trigger command: {trigger}')
             if trigger == EnumTrig.FINISH: break
             
             # Retrieve the measurements
@@ -273,11 +265,17 @@ class RamanMeasurement_Worker(QObject):
             list_timestamp_mea_int,list_spectrum,list_integration_time_ms=\
                 self._ramanHub.get_measurement(
                     timestamp_start=list_timestamp_trigger[-2],
-                    timestamp_end=list_timestamp_trigger[-1])
+                    timestamp_end=list_timestamp_trigger[-1],
+                    WaitForMeasurement=False,
+                    getNewOnly=True)
+            print(f'Acquired {len(list_spectrum)} spectra between {convert_timestamp_us_int_to_str(list_timestamp_trigger[-2])} and {convert_timestamp_us_int_to_str(list_timestamp_trigger[-1])}')
             list_timestamp_trigger.pop(0) # Remove the first element (not needed anymore)
             
-            if trigger == EnumTrig.IGNORE: continue
+            if trigger == EnumTrig.IGNORE:
+                self._syncer_acquisition.notify_ready()
+                continue
             
+            print('Processing acquired spectra...')
             list_measurement = []
             for ts_int,spectrum_raw,int_time_ms in zip(list_timestamp_mea_int,list_spectrum,list_integration_time_ms):
                 measurement = MeaRaman(
@@ -289,16 +287,23 @@ class RamanMeasurement_Worker(QObject):
                 measurement.set_raw_list(df_mea=spectrum_raw, timestamp_int=ts_int)
                 list_measurement.append(measurement)
             
+            print(f'Processing and returning {len(list_measurement)} measurements...')
             # Return the measurement result
             for mea in list_measurement:
+                print(f'Processing measurement at {convert_timestamp_us_int_to_str(mea.get_latest_timestamp())}...')
+                mea:MeaRaman
                 mea.calculate_analysed()
                 q_return.put(mea)
+                print(f'Return measurement queue size: {q_return.qsize()}')
+                self.sig_acq.emit()
                 self._notify_queue_observers(measurement=mea)
+                self._last_measurement = mea
                 
-            event_ready.set()
+            self._syncer_acquisition.notify_ready()
             
         self.sig_acq_done.emit()
         self._ramanHub.pause_auto_measurement()
+        self._syncer_acquisition.notify_ready()
         
     @Slot(AcquisitionParams)
     def _schedule_next_acquisition_cycle(self, params:AcquisitionParams):
@@ -433,9 +438,11 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._thread_controller.start()
         
     # >> Acquisition <<
+        self._syncer_acquisition = Syncer_Raman()
         self._thread_acquisition = QThread(self)
         self._worker_acquisition = RamanMeasurement_Worker(
-            ramanHub=self._ramanHub
+            ramanHub=self._ramanHub,
+            syncer_acquisition=self._syncer_acquisition
         )
         self._worker_acquisition.moveToThread(self._thread_acquisition)
         self.destroyed.connect(self._thread_acquisition.quit)
@@ -588,6 +595,15 @@ class Wdg_SpectrometerController(qw.QWidget):
     # >>> Finalise the setup <<<
         # Update the statusbar
         self._statbar.showMessage("Raman controller ready")
+    
+    def get_syncer_acquisition(self) -> Syncer_Raman:
+        """
+        Returns the acquisition syncer
+
+        Returns:
+            Syncer_Raman: The acquisition syncer
+        """
+        return self._syncer_acquisition
     
     def get_mea_worker(self) -> RamanMeasurement_Worker:
         """

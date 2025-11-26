@@ -5,7 +5,7 @@ import multiprocessing as mp
 import multiprocessing.pool as mpp
 
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication, QMetaType
+from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication, QMetaType, QMutex, QMutexLocker, QWaitCondition
 
 import queue
 from typing import Callable, Literal
@@ -27,7 +27,7 @@ if __name__ == '__main__':
 from iris.utils.general import *
 
 from iris.gui.motion_video import Wdg_MotionController, Motion_GoToCoor_Worker
-from iris.gui.raman import Wdg_SpectrometerController, RamanMeasurement_Worker, AcquisitionParams, Enum_ContinuousMeasurementTrigger as EnumTrig
+from iris.gui.raman import Wdg_SpectrometerController, RamanMeasurement_Worker, AcquisitionParams, Enum_ContinuousMeasurementTrigger as EnumTrig, Syncer_Raman
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 # from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
 from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates, Wdg_Hilvl_CoorGenerator
@@ -211,20 +211,22 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     _sig_append_queue_mea = Signal(queue.Queue, threading.Event)
     _sig_remove_queue_mea = Signal(queue.Queue)
     _sig_acquire_discrete_mea = Signal(AcquisitionParams)
-    _sig_acquire_continuous_mea = Signal(AcquisitionParams, queue.Queue, queue.Queue, threading.Event)
+    _sig_acquire_continuous_mea = Signal(AcquisitionParams, queue.Queue, queue.Queue)
     _sig_acquire_list_coors = Signal(list, threading.Event)
 
-    def __init__(self, mapping_hub:MeaRMap_Hub):
+    def __init__(self, mapping_hub:MeaRMap_Hub, syncer_raman:Syncer_Raman):
         """
         Worker to perform the measurement acquisition for Raman imaging. For the slots details, refer to the
         methods in RamanMeasurement_Worker class in raman.py.
 
         Args:
             mapping_hub (MeaRMap_Hub): The mapping measurement hub to store the measurement data
+            syncer_raman (Syncer_Raman): The synchronization object for Raman measurements
         """
         super().__init__()
         self.mapping_hub = mapping_hub
         self._isacquiring = True
+        self._syncer = syncer_raman
         
         self._q_mea_acq:queue.Queue = queue.Queue() # Queue for the acquisition to store the measurement data
         
@@ -283,13 +285,13 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         self._sig_remove_queue_mea.emit(self._q_mea_acq)
         self.emit_finish_signals(self.msg_mea_finished)
         return
-    
-    @Slot(AcquisitionParams, list, int, queue.Queue)
+
+    @Slot(AcquisitionParams, list, float, queue.Queue)
     def run_scan_continuous(
         self,
         params:AcquisitionParams,
         mapping_coordinates_ends:list,
-        mapping_speed_rel:int,
+        mapping_speed_rel:float,
         q_mea_out:queue.Queue):
         """
         Scans the mapping coordinates continuously based on the given scan coordinates.
@@ -300,17 +302,20 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             mapping_speed_rel (int): The relative speed to move between the coordinates
             q_mea_out (queue.Queue): The queue to store the measurement data
         """
+        print("Starting continuous mapping measurement...")
         # Prepare the events to synchronise the movement and measurement
         event_finish_setvel = threading.Event()
         event_finish_goto = threading.Event()
         
         # Prepare the measurement queue to save the measurement data into
         # the mapping unit (set up in the main thread)
+        while not self._q_mea_acq.empty(): self._q_mea_acq.get()   # Clear the acquisition queue
         event_ready = threading.Event()
         self._sig_append_queue_mea.emit(self._q_mea_acq, event_ready)
         q_trig = queue.Queue()  # Queue to send the measurement trigger commands
-        self._sig_acquire_continuous_mea.emit(params, q_trig, self._q_mea_acq, event_ready)
+        self._sig_acquire_continuous_mea.emit(params, q_trig, q_mea_out)
         
+        print('Acquisition started, moving to start position...')
         # >>> Perform the mapping measurement <<<
         for i, coor in enumerate(mapping_coordinates_ends):
             if not self._isacquiring:
@@ -319,17 +324,23 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             
             event_finish_setvel.clear()
             if i == 0:
-                event_ready.clear()
+                print('Moving to start position...')
+                self._syncer.set_notready()
                 q_trig.put(EnumTrig.START)
-                event_ready.wait()
-            elif i%2 == 1:
-                event_ready.clear()
-                q_trig.put(EnumTrig.STORE)
-                self._sig_setvelrel.emit(mapping_speed_rel, -1.0, event_finish_setvel)   # Set actual speed to move between x-coordinates
-                event_ready.wait()
-            else:
+                event_finish_setvel.set()
+                print('Reached start position.')
+            elif i%2 == 0:
+                print('Moving to next line end position (odd line)...')
+                self._syncer.set_notready()
                 q_trig.put(EnumTrig.IGNORE)
+                self._sig_setvelrel.emit(mapping_speed_rel, -1.0, event_finish_setvel)   # Set actual speed to move between x-coordinates
+                print('Reached line end position.')
+            else:
+                print('Moving to next line end position (even line)...')
+                q_trig.put(EnumTrig.STORE)
                 self._sig_setvelrel.emit(100.0, -1.0, event_finish_setvel) # Set actual speed to move between x-coordinates
+                print('Reached line end position.')
+            self._syncer.wait_ready()
             event_finish_setvel.wait()
             
             # Check the autosave queue size and wait if necessary to prevent overflow
@@ -351,11 +362,13 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 (float(coor[0]),float(coor[1]),float(coor[2])),
                 event_finish_goto
             )
+            event_finish_goto.wait()
         
         # Stop raman frame's continuous measurement and store the final measurements
         q_trig.put(EnumTrig.STORE)
         q_trig.put(EnumTrig.FINISH)
-
+        
+        self._sig_remove_queue_mea.emit(self._q_mea_acq)
         self.emit_finish_signals(self.msg_mea_finished)
         
     @Slot(str)
@@ -408,9 +421,9 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
     sig_start_autosaver = Signal()
     
     sig_stop_measurement = Signal() # Signal to trigger measurement collection
-    sig_run_scan_discrete = Signal(AcquisitionParams,list,queue.Queue)
-    sig_run_scan_continuous = Signal(AcquisitionParams,list,queue.Queue)
-    
+    sig_run_scan_discrete = Signal(AcquisitionParams, list, queue.Queue)
+    sig_run_scan_continuous = Signal(AcquisitionParams, list, float, queue.Queue)
+
     def __init__(self,
                  parent,
                  motion_controller:Wdg_MotionController,
@@ -542,7 +555,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         Initialises the workers and their connections
         """
     # >>> Worker setups <<<
-        self._worker_hilvlacq = Hilvl_MeasurementAcq_Worker(self._dataHub_map.get_MappingHub())
+        self._worker_hilvlacq = Hilvl_MeasurementAcq_Worker(self._dataHub_map.get_MappingHub(), self.raman_controller.get_syncer_acquisition())
         self._worker_manager = WorkerPipelineManager(
             hilvlacq_worker=self._worker_hilvlacq,
             raman_worker=self.raman_controller.get_mea_worker(),
@@ -1012,7 +1025,10 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         if method == MappingMethods.DISCRETE:
             print('Requesting discrete mapping...')
             self.sig_run_scan_discrete.emit(
-                self.raman_controller.generate_acquisition_params(), mapping_coordinates, q_autosave)
+                self.raman_controller.generate_acquisition_params(),
+                mapping_coordinates,
+                q_autosave
+                )
         else:
             mapping_speed_rel = self.motion_controller.calculate_vel_relative(vel_xy_mmPerSec=mapping_speed_mmPerSec)
             mapping_speed_rel *= AppRamanEnum.CONTINUOUS_SPEED_MODIFIER.value
