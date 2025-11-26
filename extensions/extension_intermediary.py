@@ -30,7 +30,7 @@ from iris.gui.hilvl_Brightfield import Frm_HighLvlController_Brightfield
 
 # Data containers/managers
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
-from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
+from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
 
 class Ext_DataIntermediary():
     """
@@ -51,8 +51,8 @@ class Ext_DataIntermediary():
         frm_highlvl_brightfield: Frm_HighLvlController_Brightfield,
         # Data containers/managers
         frm_datahub_mapping: Wdg_DataHub_Mapping,
-        frm_datahub_image: Frm_DataHub_Image,
-        frm_datahub_imgcal: Frm_DataHub_ImgCal,
+        frm_datahub_image: Wdg_DataHub_Image,
+        frm_datahub_imgcal: Wdg_DataHub_ImgCal,
         ) -> None:
         """
         Initialise the intermediary class with the required controllers and GUI components.
@@ -136,13 +136,13 @@ class Ext_DataIntermediary():
         """
         return self.frm_datahub_mapping
     
-    def get_datahub_image_gui(self) -> Frm_DataHub_Image:
+    def get_datahub_image_gui(self) -> Wdg_DataHub_Image:
         """
         Get the data hub image GUI.
         """
         return self.frm_datahub_image
     
-    def get_datahub_imgcal_gui(self) -> Frm_DataHub_ImgCal:
+    def get_datahub_imgcal_gui(self) -> Wdg_DataHub_ImgCal:
         """
         Get the data hub image calibration GUI.
         """

@@ -23,7 +23,7 @@ import multiprocessing.pool as mpp
 from PIL import Image
     
 # Import DataHubs
-from iris.gui.dataHub_MeaImg import Frm_DataHub_ImgCal
+from iris.gui.dataHub_MeaImg import Wdg_DataHub_ImgCal
 
 # Import measurements
 from iris.data.measurement_image import MeaImg_Unit, MeaImg_Hub, MeaImg_Handler
@@ -90,7 +90,7 @@ class Frm_HeatmapOverlay(Wdg_MappingMeasurement_Plotter):
         processor:mpp.Pool,
         mappingHub:MeaRMap_Hub,
         imghub_getter:Callable[[],MeaImg_Hub],
-        dataHub_imgcal:Frm_DataHub_ImgCal,
+        dataHub_imgcal:Wdg_DataHub_ImgCal,
         figsize_pxl:tuple=(440,400)):
         """
         Args:

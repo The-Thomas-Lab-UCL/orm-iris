@@ -29,11 +29,11 @@ from iris.utils.general import *
 from iris.gui.motion_video import Wdg_MotionController, Motion_GoToCoor_Worker
 from iris.gui.raman import Wdg_SpectrometerController, RamanMeasurement_Worker, AcquisitionParams, Enum_ContinuousMeasurementTrigger as EnumTrig, Syncer_Raman
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
-# from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
+from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
 from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates, Wdg_Hilvl_CoorGenerator
 
 from iris.gui.submodules.heatmap_plotter_MeaRMap import Wdg_MappingMeasurement_Plotter
-# from iris.gui.submodules.image_tiling import Frm_HiLvlTiling
+from iris.gui.submodules.image_tiling import Frm_HiLvlTiling
 
 from iris.data.measurement_RamanMap import MeaRMap_Unit, MeaRMap_Hub, MeaRMap_Handler
 from iris.data.measurement_Raman import MeaRaman,MeaRaman_Handler
@@ -42,7 +42,7 @@ from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam
 from iris.multiprocessing.dataStreamer_Raman import DataStreamer_Raman
 
-# from iris.gui.image_calibration.plotter_heatmap_overlay import Frm_HeatmapOverlay
+from iris.gui.image_calibration.plotter_heatmap_overlay import Frm_HeatmapOverlay
 
 from iris.gui import AppRamanEnum, AppPlotEnum
 

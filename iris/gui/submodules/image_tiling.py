@@ -23,7 +23,7 @@ if __name__ == '__main__':
 from iris.utils.general import *
 
 from iris.gui.motion_video import Wdg_MotionController
-from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
+from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
 from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates
 
 from iris.gui.submodules.meaCoor_generator.ssfrm_tilemthd1_rect_around import tiling_method_rectxy_scan_constz_around_a_point as TileMethod
@@ -49,8 +49,8 @@ class Frm_HiLvlTiling(tk.Frame):
         master,
         motion_controller:Wdg_MotionController,
         stageHub:DataStreamer_StageCam,
-        dataHub_img:Frm_DataHub_Image,
-        dataHub_imgcal:Frm_DataHub_ImgCal,
+        dataHub_img:Wdg_DataHub_Image,
+        dataHub_imgcal:Wdg_DataHub_ImgCal,
         coorHub:List_MeaCoor_Hub,
         processor:mpp.Pool
         ) -> None:
@@ -68,8 +68,8 @@ class Frm_HiLvlTiling(tk.Frame):
         """
         assert isinstance(motion_controller, Wdg_MotionController), 'motion_controller must be a Frm_MotionController object'
         assert isinstance(stageHub, DataStreamer_StageCam), 'stageHub must be a stage_measurement_hub object'
-        assert isinstance(dataHub_img, Frm_DataHub_Image), 'dataHub_img must be a Frm_DataHub_Image object'
-        assert isinstance(dataHub_imgcal, Frm_DataHub_ImgCal), 'dataHub_imgcal must be a Frm_DataHub_ImgCal object'
+        assert isinstance(dataHub_img, Wdg_DataHub_Image), 'dataHub_img must be a Frm_DataHub_Image object'
+        assert isinstance(dataHub_imgcal, Wdg_DataHub_ImgCal), 'dataHub_imgcal must be a Frm_DataHub_ImgCal object'
         assert isinstance(processor, mpp.Pool), 'processor must be a multiprocessing.pool.Pool object'
         
         super().__init__(master)

@@ -23,7 +23,7 @@ from iris.utils.general import *
 from iris.data.calibration_objective import ImgMea_Cal, ImgMea_Cal_Hub
 from iris.data.measurement_image import MeaImg_Unit, MeaImg_Handler
 from iris.gui.image_calibration.Canvas_ROIdefinition import ImageCalibration_canvas_calibration
-from iris.gui.dataHub_MeaImg import Frm_DataHub_Image
+from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image
 
 from iris.data import SaveParamsEnum
 from iris.gui import AppPlotEnum
@@ -33,7 +33,7 @@ class Rect_Image(tk.Frame):
         self,
         container_frame,
         motion_controller:Wdg_MotionController,
-        dataHub_img:Frm_DataHub_Image,
+        dataHub_img:Wdg_DataHub_Image,
         status_bar:tk.Label,
         *args, **kwargs
         ):
@@ -517,7 +517,7 @@ def test():
     motion_controller._init_workers()
     motion_controller.pack()
     
-    imghub = Frm_DataHub_Image(main=root)
+    imghub = Wdg_DataHub_Image(main=root)
     imghub.pack()
     
     mapping_method = Rect_Image(

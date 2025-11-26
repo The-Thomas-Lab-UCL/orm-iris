@@ -21,7 +21,7 @@ from iris.utils.general import *
 from iris.data.measurement_image import MeaImg_Unit, MeaImg_Handler
 from iris.data.calibration_objective import ImgMea_Cal
 
-from iris.gui.dataHub_MeaImg import Frm_DataHub_Image,Frm_DataHub_ImgCal
+from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image,Wdg_DataHub_ImgCal
 from iris.gui.image_calibration.Canvas_ROIdefinition import ImageCalibration_canvas_calibration
 
 from iris.data import SaveParamsEnum
@@ -39,8 +39,8 @@ class sFrm_CaptureAndCalibration(tk.Frame):
                  master,
                  top_level:tk.Toplevel,
                  processor:mpp.Pool,
-                 dataHub_img:Frm_DataHub_Image,
-                 dataHub_imgcal:Frm_DataHub_ImgCal,
+                 dataHub_img:Wdg_DataHub_Image,
+                 dataHub_imgcal:Wdg_DataHub_ImgCal,
                  getter_coor:Callable[[],tuple[float,float,float]],
                  getter_cameraImage:Callable[[],Image.Image],
                  update_statbar:Callable[['str','str',int],None]):

@@ -37,6 +37,7 @@ import uuid
 
 from iris.utils.general import *
 
+from typing import Callable
 
 from iris.data.calibration_objective import ImgMea_Cal, ImgMea_Cal_Hub
 
@@ -728,7 +729,7 @@ class MeaImg_Hub():
         """
         return list(self._dict_unit_IDName.values())
 
-    def get_summary_units(self) -> tuple[list,list]:
+    def get_summary_units(self) -> tuple[list,list,list,list]:
         """
         Returns the summary of the ImageMeasurement_Units
         
@@ -1004,7 +1005,6 @@ class MeaImg_Handler():
             self.save_ImageMeasurementUnit_database(unit,conn,savepath)
             
         conn.close()
-        return
         
     def save_ImageMeasurementUnit_database(\
         self,unit:MeaImg_Unit,conn:sql.Connection,conn_path:str):
