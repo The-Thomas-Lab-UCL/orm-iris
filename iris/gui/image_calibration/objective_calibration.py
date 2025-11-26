@@ -23,7 +23,7 @@ from iris.data.measurement_image import MeaImg_Unit, MeaImg_Handler
 from iris.data.calibration_objective import ImgMea_Cal
 
 from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image,Wdg_DataHub_ImgCal
-from iris.gui.image_calibration.Canvas_ROIdefinition import ImageCalibration_canvas_calibration
+from iris.gui.image_calibration.Canvas_ROIdefinition import Canvas_Image_Annotations
 
 from iris.data import SaveParamsEnum
 from iris.gui import AppPlotEnum
@@ -82,7 +82,7 @@ class Wdg_Calibration(qw.QWidget):
         
     # >>> Display widget <<<
         # Canvas to display the image and button to show current image
-        self._canvas_img = ImageCalibration_canvas_calibration(frm_disp)
+        self._canvas_img = Canvas_Image_Annotations(frm_disp)
         self._bool_lowResImg = tk.BooleanVar(value=False)
         chk_lowResImg = tk.Checkbutton(frm_disp, text='Show low resolution image (faster processing)', variable=self._bool_lowResImg)
         self._btn_showImage = tk.Button(frm_disp, text='Show image', command=self._show_stitched_images)

@@ -24,7 +24,7 @@ from iris.utils.general import *
 
 from iris.data.calibration_objective import ImgMea_Cal
 from iris.data.measurement_image import MeaImg_Unit, MeaImg_Handler
-from iris.gui.image_calibration.Canvas_ROIdefinition import ImageCalibration_canvas_calibration
+from iris.gui.image_calibration.Canvas_ROIdefinition import Canvas_Image_Annotations
 
 from iris.data import SaveParamsEnum
 from iris.gui import AppPlotEnum
@@ -55,7 +55,7 @@ class Rect_Video(tk.Frame):
         
     # >>> Video feed setup <<<
         # Frame
-        self._canvas_video = ImageCalibration_canvas_calibration(self.frm_video,size_pixel=video_feed_size)
+        self._canvas_video = Canvas_Image_Annotations(self.frm_video,size_pixel=video_feed_size)
         self._btn_update_video = tk.Button(self.frm_video,text='1. Start video feed',command=self._start_videoFeed)
         self._lbl_coor_click = tk.Label(self.frm_video,text='Selected coordinates: None',wraplength=video_feed_size[0],anchor='w',justify='left')
         lbl_vidinfo = tk.Label(self.frm_video,text="Left click to select coordinates\nRight click to remove all the selected coordinates\n'3. Define scan area' will select an area that includes all the selected points",

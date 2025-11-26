@@ -28,7 +28,7 @@ from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates
 
 from iris.gui.submodules.meaCoor_generator.ssfrm_tilemthd1_rect_around import tiling_method_rectxy_scan_constz_around_a_point as TileMethod
 
-from iris.gui.image_calibration.Canvas_ROIdefinition import ImageCalibration_canvas_calibration
+from iris.gui.image_calibration.Canvas_ROIdefinition import Canvas_Image_Annotations
 
 from iris.data.measurement_image import MeaImg_Unit
 from iris.data.calibration_objective import ImgMea_Cal
@@ -104,8 +104,8 @@ class Frm_HiLvlTiling(tk.Frame):
         self.grid_columnconfigure(1,weight=1)
         
     # >>> Image frame <<<
-        self._canvas_img = ImageCalibration_canvas_calibration(
-            main=frm_img,
+        self._canvas_img = Canvas_Image_Annotations(
+            parent=frm_img,
             size_pixel=AppPlotEnum.IMGCAL_IMG_SIZE.value,
             )
         self._bool_lowResImg = tk.BooleanVar(value=True)

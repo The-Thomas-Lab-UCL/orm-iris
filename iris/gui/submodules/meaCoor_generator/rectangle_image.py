@@ -22,7 +22,7 @@ from iris.utils.general import *
 
 from iris.data.calibration_objective import ImgMea_Cal, ImgMea_Cal_Hub
 from iris.data.measurement_image import MeaImg_Unit, MeaImg_Handler
-from iris.gui.image_calibration.Canvas_ROIdefinition import ImageCalibration_canvas_calibration
+from iris.gui.image_calibration.Canvas_ROIdefinition import Canvas_Image_Annotations
 from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image
 
 from iris.data import SaveParamsEnum
@@ -64,7 +64,7 @@ class Rect_Image(tk.Frame):
         self._list_imgunit_names = []
     
         # Frame
-        self._canvas_image = ImageCalibration_canvas_calibration(self.frm_image,size_pixel=video_feed_size)
+        self._canvas_image = Canvas_Image_Annotations(self.frm_image,size_pixel=video_feed_size)
         self._bool_lowResImg = tk.BooleanVar(value=True)
         chk_lowResImg = tk.Checkbutton(self.frm_image,text='Use low resolution image (faster processing)',variable=self._bool_lowResImg)
         self._combo_imageUnits = ttk.Combobox(self.frm_image,state='disabled')

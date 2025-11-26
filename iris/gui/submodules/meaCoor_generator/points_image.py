@@ -23,7 +23,7 @@ from iris.utils.general import *
 
 from iris.data.calibration_objective import ImgMea_Cal, ImgMea_Cal_Hub
 from iris.data.measurement_image import MeaImg_Unit, MeaImg_Handler
-from iris.gui.image_calibration.Canvas_ROIdefinition import ImageCalibration_canvas_calibration
+from iris.gui.image_calibration.Canvas_ROIdefinition import Canvas_Image_Annotations
 from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image
 
 from iris.gui.submodules.meaCoor_generator.rectangle_image import Rect_Image
