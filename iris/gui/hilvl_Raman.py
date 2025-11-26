@@ -48,10 +48,6 @@ from iris.gui import AppRamanEnum, AppPlotEnum
 
 from iris.resources.hilvl_Raman_ui import Ui_Hilvl_Raman
 
-# QMetaType().registerType()  # pyright: ignore[reportArgumentType] ; register custom type for signal-slot mechanism
-# QMetaType.registerType(MeaRMap_Hub)  # pyright: ignore[reportArgumentType] ; register custom type for signal-slot mechanism
-# QMetaType.registerType(MeaRMap_Unit) # pyright: ignore[reportArgumentType] ; register custom type for signal-slot mechanism
-
 class Hilvl_Raman_Design(Ui_Hilvl_Raman,qw.QWidget):
     def __init__(self,parent):
         super().__init__(parent)
@@ -431,8 +427,8 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
                  raman_controller:Wdg_SpectrometerController,
                  ramanHub:DataStreamer_Raman,
                  dataHub_map:Wdg_DataHub_Mapping,
-                #  dataHub_img:Frm_DataHub_Image,
-                #  dataHub_imgcal:Frm_DataHub_ImgCal,
+                 dataHub_img:Wdg_DataHub_Image,
+                 dataHub_imgcal:Wdg_DataHub_ImgCal,
                  coorHub:List_MeaCoor_Hub,
                  wdg_coorGen:Wdg_Hilvl_CoorGenerator,
                  processor:mpp.Pool):
@@ -460,8 +456,8 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self._stageHub = stageHub
         self._ramanHub = ramanHub
         self._dataHub_map = dataHub_map
-        # self._dataHub_img = dataHub_img
-        # self._dataHub_imgcal = dataHub_imgcal
+        self._dataHub_img = dataHub_img
+        self._dataHub_imgcal = dataHub_imgcal
         self._coorHub = coorHub
         self._wdg_coorGen = wdg_coorGen
         
@@ -1075,6 +1071,8 @@ def test_hilvl_Raman_app(processor:mpp.Pool|None=None):
         raman_controller=wdg_raman,
         ramanHub=wdg_raman._ramanHub,
         dataHub_map=dataHub,
+        dataHub_img=Wdg_DataHub_Image(wdg_main),
+        dataHub_imgcal=Wdg_DataHub_ImgCal(wdg_main),
         coorHub=wdg_hilvlcoorgen._coorHub,
         wdg_coorGen=wdg_hilvlcoorgen,
         processor=mpp.Pool())
