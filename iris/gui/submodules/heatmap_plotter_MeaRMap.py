@@ -82,7 +82,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         self._eve_combo_req = threading.Event()  # Event to request a combobox update
         self._current_mappingUnit:MeaRMap_Unit = MeaRMap_Unit()
         self._current_mappingUnit.add_observer(self._sig_request_update_plot.emit)
-
+        
     # >>> Plotter selection setup <<<
         self._init_plotter_options_widgets()
     
@@ -118,7 +118,6 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
             mappingUnit_name=self._current_mappingUnit.get_unit_name()
         ))
         
-        
     # > Set the connections <<
         # Plot update timer
         # self._sig_request_update_plot.connect(lambda: self.plot_heatmap())
@@ -138,6 +137,8 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         self.destroyed.connect(self._timer_combobox.stop)
         self._timer_combobox.start()
         
+    # > Reset button <
+        self._widget.btn_plotterreset.clicked.connect(lambda: self.reinitialise_plotter())
         
     def _init_plot_control_widgets(self):
         """
@@ -201,45 +202,13 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         
         self._setup_plotter_options()
         
-    @Slot(str)
-    def _setup_plotter_options(self, chosen_option:str|None = None):
+    def reinitialise_plotter(self):
         """
-        Set up the plotter options for the current mapping plot
+        Reinitialise the plotter to its default state
         """
-        if chosen_option is None: chosen_option = list(self._dict_plotter_opts.keys())[0]
-        self._func_current_plotter = self._dict_plotter_opts[chosen_option]
-        kwargs = self._dict_plotter_opts_kwargs[chosen_option]
+        print('Reinitialising plotter... (not yet implemented)')
+        self._update_comboboxes()
         
-        # Destroy the previous widgets
-        holder = self._widget.lyt_plot_params # Form layout
-        for widget in get_all_widgets_from_layout(holder):
-            widget.deleteLater()
-        QCoreApplication.processEvents()
-        
-        # Auto generate widgets for the plotter options
-        self._dict_plotter_kwargs_widgets.clear()
-        for i,key in enumerate(kwargs.keys()):
-            entry = qw.QLineEdit()
-            entry.editingFinished.connect(lambda: self._sig_request_update_plot.emit())
-            holder.addRow(f'{key}:',entry)
-            self._dict_plotter_kwargs_widgets[key] = entry
-
-        self._sig_request_update_plot.emit()
-
-    def _get_plotter_kwargs(self) -> dict:
-        """
-        Get the plotter options for the current mapping plot
-        
-        Returns:
-            dict: Plotter options for the current mapping plot
-        """
-        kwargs = {}
-        for key in self._dict_plotter_kwargs_widgets.keys():
-            entry = self._dict_plotter_kwargs_widgets[key]
-            try: kwargs[key] = float(entry.text())
-            except: kwargs[key] = entry.text()
-        return kwargs
-    
     # @thread_assign
     # def _reinitialise_auto_plot(self) -> threading.Thread: # pyright: ignore[reportReturnType]
     #     """
@@ -289,6 +258,45 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
     #     self._canvas_id_interaction = self._canvas_widget.mpl_connect('button_press_event',self._retrieve_click_idxcol)
         
     #     self.refresh_comboboxes()
+        
+    @Slot(str)
+    def _setup_plotter_options(self, chosen_option:str|None = None):
+        """
+        Set up the plotter options for the current mapping plot
+        """
+        if chosen_option is None: chosen_option = list(self._dict_plotter_opts.keys())[0]
+        self._func_current_plotter = self._dict_plotter_opts[chosen_option]
+        kwargs = self._dict_plotter_opts_kwargs[chosen_option]
+        
+        # Destroy the previous widgets
+        holder = self._widget.lyt_plot_params # Form layout
+        for widget in get_all_widgets_from_layout(holder):
+            widget.deleteLater()
+        QCoreApplication.processEvents()
+        
+        # Auto generate widgets for the plotter options
+        self._dict_plotter_kwargs_widgets.clear()
+        for i,key in enumerate(kwargs.keys()):
+            entry = qw.QLineEdit()
+            entry.editingFinished.connect(lambda: self._sig_request_update_plot.emit())
+            holder.addRow(f'{key}:',entry)
+            self._dict_plotter_kwargs_widgets[key] = entry
+
+        self._sig_request_update_plot.emit()
+
+    def _get_plotter_kwargs(self) -> dict:
+        """
+        Get the plotter options for the current mapping plot
+        
+        Returns:
+            dict: Plotter options for the current mapping plot
+        """
+        kwargs = {}
+        for key in self._dict_plotter_kwargs_widgets.keys():
+            entry = self._dict_plotter_kwargs_widgets[key]
+            try: kwargs[key] = float(entry.text())
+            except: kwargs[key] = entry.text()
+        return kwargs
     
     def _set_current_mappingUnit(self,mappingUnit:MeaRMap_Unit):
         """
@@ -377,12 +385,16 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         self._combo_plot_SpectralPosition.clear()
             
         # Check if there are any measurements in the mappingHub for the refresh. Returns if not
-        if not self._mappingHub.check_measurement_exist(): return
+        if not self._mappingHub.check_measurement_exist():
+            self._isupdating_comboboxes = False
+            return
         
         list_valid_names = [unit.get_unit_name() for unit in self._mappingHub.get_list_MappingUnit()\
             if unit.check_measurement_and_metadata_exist()]
         
-        if len(list_valid_names) == 0: return
+        if len(list_valid_names) == 0:
+            self._isupdating_comboboxes = False
+            return
         
         # Get the mappingUnit to be set
         list_names = self._mappingHub.get_list_MappingUnit_names()
@@ -471,7 +483,6 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
             if len(list_valid_names) > 0: self._current_mappingUnit = self._mappingHub.get_MappingUnit(unit_name=list_valid_names[0])
             else: self._current_mappingUnit = MeaRMap_Unit()
         finally:
-            print('Current mapping unit set to:',self._current_mappingUnit.get_unit_name())
             self._current_mappingUnit.add_observer(self._sig_request_update_plot.emit)
         
         self._sig_request_update_comboboxes.emit()

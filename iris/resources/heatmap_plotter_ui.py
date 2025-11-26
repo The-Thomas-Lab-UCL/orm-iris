@@ -118,27 +118,11 @@ class Ui_HeatmapPlotter(object):
 
         self.gridLayout_2 = QGridLayout()
         self.gridLayout_2.setObjectName(u"gridLayout_2")
-        self.ent_ymax = QLineEdit(HeatmapPlotter)
-        self.ent_ymax.setObjectName(u"ent_ymax")
+        self.label_4 = QLabel(HeatmapPlotter)
+        self.label_4.setObjectName(u"label_4")
+        self.label_4.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
 
-        self.gridLayout_2.addWidget(self.ent_ymax, 2, 3, 1, 1)
-
-        self.ent_cbar_min = QLineEdit(HeatmapPlotter)
-        self.ent_cbar_min.setObjectName(u"ent_cbar_min")
-
-        self.gridLayout_2.addWidget(self.ent_cbar_min, 0, 1, 1, 1)
-
-        self.label_7 = QLabel(HeatmapPlotter)
-        self.label_7.setObjectName(u"label_7")
-        self.label_7.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
-
-        self.gridLayout_2.addWidget(self.label_7, 2, 2, 1, 1)
-
-        self.label_5 = QLabel(HeatmapPlotter)
-        self.label_5.setObjectName(u"label_5")
-        self.label_5.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
-
-        self.gridLayout_2.addWidget(self.label_5, 0, 2, 1, 1)
+        self.gridLayout_2.addWidget(self.label_4, 2, 0, 1, 1)
 
         self.label_3 = QLabel(HeatmapPlotter)
         self.label_3.setObjectName(u"label_3")
@@ -146,31 +130,47 @@ class Ui_HeatmapPlotter(object):
 
         self.gridLayout_2.addWidget(self.label_3, 1, 0, 1, 1)
 
-        self.ent_cbar_max = QLineEdit(HeatmapPlotter)
-        self.ent_cbar_max.setObjectName(u"ent_cbar_max")
+        self.ent_cbar_min = QLineEdit(HeatmapPlotter)
+        self.ent_cbar_min.setObjectName(u"ent_cbar_min")
 
-        self.gridLayout_2.addWidget(self.ent_cbar_max, 0, 3, 1, 1)
+        self.gridLayout_2.addWidget(self.ent_cbar_min, 0, 1, 1, 1)
 
-        self.label_6 = QLabel(HeatmapPlotter)
-        self.label_6.setObjectName(u"label_6")
-        self.label_6.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+        self.chk_autocbar = QCheckBox(HeatmapPlotter)
+        self.chk_autocbar.setObjectName(u"chk_autocbar")
 
-        self.gridLayout_2.addWidget(self.label_6, 1, 2, 1, 1)
+        self.gridLayout_2.addWidget(self.chk_autocbar, 0, 4, 1, 1)
 
-        self.ent_xmax = QLineEdit(HeatmapPlotter)
-        self.ent_xmax.setObjectName(u"ent_xmax")
+        self.label_7 = QLabel(HeatmapPlotter)
+        self.label_7.setObjectName(u"label_7")
+        self.label_7.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
 
-        self.gridLayout_2.addWidget(self.ent_xmax, 1, 3, 1, 1)
+        self.gridLayout_2.addWidget(self.label_7, 2, 2, 1, 1)
 
         self.ent_xmin = QLineEdit(HeatmapPlotter)
         self.ent_xmin.setObjectName(u"ent_xmin")
 
         self.gridLayout_2.addWidget(self.ent_xmin, 1, 1, 1, 1)
 
-        self.ent_ymin = QLineEdit(HeatmapPlotter)
-        self.ent_ymin.setObjectName(u"ent_ymin")
+        self.ent_cbar_max = QLineEdit(HeatmapPlotter)
+        self.ent_cbar_max.setObjectName(u"ent_cbar_max")
 
-        self.gridLayout_2.addWidget(self.ent_ymin, 2, 1, 1, 1)
+        self.gridLayout_2.addWidget(self.ent_cbar_max, 0, 3, 1, 1)
+
+        self.ent_ymax = QLineEdit(HeatmapPlotter)
+        self.ent_ymax.setObjectName(u"ent_ymax")
+
+        self.gridLayout_2.addWidget(self.ent_ymax, 2, 3, 1, 1)
+
+        self.label_5 = QLabel(HeatmapPlotter)
+        self.label_5.setObjectName(u"label_5")
+        self.label_5.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+
+        self.gridLayout_2.addWidget(self.label_5, 0, 2, 1, 1)
+
+        self.ent_xmax = QLineEdit(HeatmapPlotter)
+        self.ent_xmax.setObjectName(u"ent_xmax")
+
+        self.gridLayout_2.addWidget(self.ent_xmax, 1, 3, 1, 1)
 
         self.label_2 = QLabel(HeatmapPlotter)
         self.label_2.setObjectName(u"label_2")
@@ -178,19 +178,24 @@ class Ui_HeatmapPlotter(object):
 
         self.gridLayout_2.addWidget(self.label_2, 0, 0, 1, 1)
 
-        self.label_4 = QLabel(HeatmapPlotter)
-        self.label_4.setObjectName(u"label_4")
-        self.label_4.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+        self.label_6 = QLabel(HeatmapPlotter)
+        self.label_6.setObjectName(u"label_6")
+        self.label_6.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
 
-        self.gridLayout_2.addWidget(self.label_4, 2, 0, 1, 1)
+        self.gridLayout_2.addWidget(self.label_6, 1, 2, 1, 1)
 
-        self.chk_autocbar = QCheckBox(HeatmapPlotter)
-        self.chk_autocbar.setObjectName(u"chk_autocbar")
+        self.ent_ymin = QLineEdit(HeatmapPlotter)
+        self.ent_ymin.setObjectName(u"ent_ymin")
 
-        self.gridLayout_2.addWidget(self.chk_autocbar, 0, 4, 1, 1)
+        self.gridLayout_2.addWidget(self.ent_ymin, 2, 1, 1, 1)
 
 
         self.main_layout.addLayout(self.gridLayout_2)
+
+        self.btn_plotterreset = QPushButton(HeatmapPlotter)
+        self.btn_plotterreset.setObjectName(u"btn_plotterreset")
+
+        self.main_layout.addWidget(self.btn_plotterreset)
 
 
         self.verticalLayout_2.addLayout(self.main_layout)
@@ -209,12 +214,13 @@ class Ui_HeatmapPlotter(object):
         self.lbl_specposunit.setText(QCoreApplication.translate("HeatmapPlotter", u"cm<sup>-1<sup>", None))
         self.btn_saveplot.setText(QCoreApplication.translate("HeatmapPlotter", u"Save plot", None))
         self.btn_savedata.setText(QCoreApplication.translate("HeatmapPlotter", u"Save plot data (.csv)", None))
+        self.label_4.setText(QCoreApplication.translate("HeatmapPlotter", u"Y-min (mm):", None))
+        self.label_3.setText(QCoreApplication.translate("HeatmapPlotter", u"X-min (mm):", None))
+        self.chk_autocbar.setText(QCoreApplication.translate("HeatmapPlotter", u"Auto", None))
         self.label_7.setText(QCoreApplication.translate("HeatmapPlotter", u"Y-max (mm):", None))
         self.label_5.setText(QCoreApplication.translate("HeatmapPlotter", u"Colourbar max:", None))
-        self.label_3.setText(QCoreApplication.translate("HeatmapPlotter", u"X-min (mm):", None))
-        self.label_6.setText(QCoreApplication.translate("HeatmapPlotter", u"X-max (mm):", None))
         self.label_2.setText(QCoreApplication.translate("HeatmapPlotter", u"Colourbar min:", None))
-        self.label_4.setText(QCoreApplication.translate("HeatmapPlotter", u"Y-min (mm):", None))
-        self.chk_autocbar.setText(QCoreApplication.translate("HeatmapPlotter", u"Auto", None))
+        self.label_6.setText(QCoreApplication.translate("HeatmapPlotter", u"X-max (mm):", None))
+        self.btn_plotterreset.setText(QCoreApplication.translate("HeatmapPlotter", u"Reset plotter (if not displaying correctly)", None))
     # retranslateUi
 

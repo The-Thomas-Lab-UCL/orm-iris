@@ -116,26 +116,10 @@
      </item>
      <item>
       <layout class="QGridLayout" name="gridLayout_2">
-       <item row="2" column="3">
-        <widget class="QLineEdit" name="ent_ymax"/>
-       </item>
-       <item row="0" column="1">
-        <widget class="QLineEdit" name="ent_cbar_min"/>
-       </item>
-       <item row="2" column="2">
-        <widget class="QLabel" name="label_7">
+       <item row="2" column="0">
+        <widget class="QLabel" name="label_4">
          <property name="text">
-          <string>Y-max (mm):</string>
-         </property>
-         <property name="alignment">
-          <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
-         </property>
-        </widget>
-       </item>
-       <item row="0" column="2">
-        <widget class="QLabel" name="label_5">
-         <property name="text">
-          <string>Colourbar max:</string>
+          <string>Y-min (mm):</string>
          </property>
          <property name="alignment">
           <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
@@ -152,13 +136,39 @@
          </property>
         </widget>
        </item>
+       <item row="0" column="1">
+        <widget class="QLineEdit" name="ent_cbar_min"/>
+       </item>
+       <item row="0" column="4">
+        <widget class="QCheckBox" name="chk_autocbar">
+         <property name="text">
+          <string>Auto</string>
+         </property>
+        </widget>
+       </item>
+       <item row="2" column="2">
+        <widget class="QLabel" name="label_7">
+         <property name="text">
+          <string>Y-max (mm):</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+         </property>
+        </widget>
+       </item>
+       <item row="1" column="1">
+        <widget class="QLineEdit" name="ent_xmin"/>
+       </item>
        <item row="0" column="3">
         <widget class="QLineEdit" name="ent_cbar_max"/>
        </item>
-       <item row="1" column="2">
-        <widget class="QLabel" name="label_6">
+       <item row="2" column="3">
+        <widget class="QLineEdit" name="ent_ymax"/>
+       </item>
+       <item row="0" column="2">
+        <widget class="QLabel" name="label_5">
          <property name="text">
-          <string>X-max (mm):</string>
+          <string>Colourbar max:</string>
          </property>
          <property name="alignment">
           <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
@@ -167,12 +177,6 @@
        </item>
        <item row="1" column="3">
         <widget class="QLineEdit" name="ent_xmax"/>
-       </item>
-       <item row="1" column="1">
-        <widget class="QLineEdit" name="ent_xmin"/>
-       </item>
-       <item row="2" column="1">
-        <widget class="QLineEdit" name="ent_ymin"/>
        </item>
        <item row="0" column="0">
         <widget class="QLabel" name="label_2">
@@ -184,24 +188,27 @@
          </property>
         </widget>
        </item>
-       <item row="2" column="0">
-        <widget class="QLabel" name="label_4">
+       <item row="1" column="2">
+        <widget class="QLabel" name="label_6">
          <property name="text">
-          <string>Y-min (mm):</string>
+          <string>X-max (mm):</string>
          </property>
          <property name="alignment">
           <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
          </property>
         </widget>
        </item>
-       <item row="0" column="4">
-        <widget class="QCheckBox" name="chk_autocbar">
-         <property name="text">
-          <string>Auto</string>
-         </property>
-        </widget>
+       <item row="2" column="1">
+        <widget class="QLineEdit" name="ent_ymin"/>
        </item>
       </layout>
+     </item>
+     <item>
+      <widget class="QPushButton" name="btn_plotterreset">
+       <property name="text">
+        <string>Reset plotter (if not displaying correctly)</string>
+       </property>
+      </widget>
      </item>
     </layout>
    </item>
