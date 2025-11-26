@@ -40,7 +40,7 @@ from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
 from iris.gui.hilvl_coorGen import Wdg_Hilvl_CoorGenerator
 
 from iris.gui.image_calibration.plotter_heatmap_overlay import Frm_HeatmapOverlay
-from iris.gui.image_calibration.capture_and_calibration import sFrm_CaptureAndCalibration
+from iris.gui.image_calibration.capture_and_calibration import Wdg_Calibration
 from iris.gui.submodules.image_tiling import Frm_HiLvlTiling
 from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam
 
@@ -124,9 +124,8 @@ class Frm_HighLvlController_Brightfield(tk.Frame):
         self._status_bar.grid(row=2, column=0, columnspan=2, sticky='ew')
         
     # >>> Capture and calibration widgets <<<
-        self._frm_CaptureAndCalibration = sFrm_CaptureAndCalibration(
+        self._frm_CaptureAndCalibration = Wdg_Calibration(
             master=frm_disp,
-            top_level=self,
             processor=self._processor,
             dataHub_img=self._dataHub_img,
             dataHub_imgcal=self._dataHub_imgcal,

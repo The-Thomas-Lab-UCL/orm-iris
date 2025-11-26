@@ -7,8 +7,10 @@ if __name__ == '__main__':
     SCRIPT_DIR = os.path.abspath(r'.\iris')
     sys.path.append(os.path.dirname(SCRIPT_DIR))
 
-import tkinter as tk
-from tkinter import messagebox
+
+import PySide6.QtWidgets as qw
+from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication, QMetaType, QMutex, QMutexLocker, QWaitCondition
+
 import numpy as np
 from PIL import Image
 
@@ -16,7 +18,6 @@ import multiprocessing.pool as mpp
 import threading
 
 from iris.utils.general import *
-
 
 from iris.data.measurement_image import MeaImg_Unit, MeaImg_Handler
 from iris.data.calibration_objective import ImgMea_Cal
@@ -27,7 +28,7 @@ from iris.gui.image_calibration.Canvas_ROIdefinition import ImageCalibration_can
 from iris.data import SaveParamsEnum
 from iris.gui import AppPlotEnum
 
-class sFrm_CaptureAndCalibration(tk.Frame):
+class Wdg_Calibration(qw.QWidget):
     """
     Sub-frame to form the calibration file of an ImageMeasurement object.
     I.e., to perform an objective calibration.
@@ -36,8 +37,7 @@ class sFrm_CaptureAndCalibration(tk.Frame):
         initialise_auto_updaters must be called after the object is created
     """
     def __init__(self,
-                 master,
-                 top_level:tk.Toplevel,
+                 master:qw.QWidget,
                  processor:mpp.Pool,
                  dataHub_img:Wdg_DataHub_Image,
                  dataHub_imgcal:Wdg_DataHub_ImgCal,
@@ -47,14 +47,12 @@ class sFrm_CaptureAndCalibration(tk.Frame):
         """
         Args:
             main (tk.Frame): Main frame to put the sub-frame in
-            top_level (tk.Toplevel): Top-level window to put the sub-frame in
             mea_img_getter (Callable): Callable to get the measurement image
             getter_coor (Callable): Callable to get the stage coordinate
             getter_cameraFrame (Callable): Callable to get the camera frame
             update_statbar (Callable[['str','str',int], None]): Callable to update the status bar
         """
         super().__init__(master)
-        self._window = top_level
         self._processor = processor
         self._getter_cameraImage = getter_cameraImage
         self._getter_coordinate = getter_coor
