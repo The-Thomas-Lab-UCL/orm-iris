@@ -198,6 +198,7 @@ class Canvas_Image_Annotations(QGraphicsView):
             self._scene.addRect(x1, y1, x2 - x1, y2 - y1, QPen(QColor('red')), QColor(255,0,0,int(255*alpha)))
         )
         
+    @Slot(bool)
     def stop_recordClicks(self,clear_annotations:bool=True) -> None:
         """
         Stops the recording:
@@ -213,6 +214,7 @@ class Canvas_Image_Annotations(QGraphicsView):
         if clear_annotations: self.clear_all_annotations()
         return
     
+    @Slot(bool)
     def start_recordClicks(self,reset:bool=True) -> list[tuple[float,float]]:
         """
         Starts recording the click coordinates
@@ -226,7 +228,7 @@ class Canvas_Image_Annotations(QGraphicsView):
         Note:
             !!! Returns the coordinates in the original image coordinate system !!!
         """
-        if reset: self._list_clickCoords = []
+        if reset: self._list_clickCoords.clear()
         self._flg_recordClicks.set()
         return self._list_clickCoords
         
@@ -258,6 +260,7 @@ class Canvas_Image_Annotations(QGraphicsView):
             self.annotate_canvas((x_ori,y_ori),scale=True)
             self.sig_click_recorded.emit((x_ori,y_ori))
         
+    @Slot(Image.Image)
     def set_image(self,img:Image.Image):
         """
         Sets the image to be displayed on the canvas

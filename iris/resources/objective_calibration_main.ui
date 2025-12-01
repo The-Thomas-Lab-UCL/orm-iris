@@ -13,17 +13,82 @@
   <property name="windowTitle">
    <string>Form</string>
   </property>
-  <widget class="QWidget" name="horizontalLayoutWidget">
-   <property name="geometry">
-    <rect>
-     <x>50</x>
-     <y>30</y>
-     <width>501</width>
-     <height>391</height>
-    </rect>
-   </property>
-   <layout class="QHBoxLayout" name="horizontalLayout"/>
-  </widget>
+  <layout class="QHBoxLayout" name="horizontalLayout_4">
+   <item>
+    <layout class="QHBoxLayout" name="main_layout">
+     <item>
+      <layout class="QVBoxLayout" name="verticalLayout">
+       <item>
+        <widget class="QWidget" name="wdg_holder_canvas" native="true">
+         <layout class="QHBoxLayout" name="holder_canvas"/>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="horizontalLayout_2">
+         <item>
+          <widget class="QCheckBox" name="chk_lres">
+           <property name="text">
+            <string>Show low-resolution image
+(faster processing)</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btn_showimage">
+           <property name="text">
+            <string>Show image</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btn_refresh">
+           <property name="text">
+            <string>Refresh live-feed</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="horizontalLayout_3">
+         <item>
+          <widget class="QPushButton" name="btn_capture">
+           <property name="text">
+            <string>Capture image</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btn_resetcapture">
+           <property name="text">
+            <string>Reset capture</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btn_savecaptured">
+           <property name="text">
+            <string>Save captured image
+to DataHub</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </item>
+     <item>
+      <layout class="QVBoxLayout" name="verticalLayout_2">
+       <item>
+        <widget class="QWidget" name="wdg_holder_calibration_controls" native="true">
+         <layout class="QVBoxLayout" name="holder_cal_finetune"/>
+        </widget>
+       </item>
+      </layout>
+     </item>
+    </layout>
+   </item>
+  </layout>
  </widget>
  <resources/>
  <connections/>
