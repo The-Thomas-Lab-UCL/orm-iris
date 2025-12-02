@@ -56,7 +56,6 @@ class Canvas_Image_Annotations(QGraphicsView):
         if event.button() == Qt.LeftButton: # pyright: ignore[reportAttributeAccessIssue] ; Qt.LeftButton exists
             scene_pos = self.mapToScene(event.position().toPoint())
             self._record_clickCoordinates(scene_pos.x(), scene_pos.y())
-            self.annotate_canvas((scene_pos.x()*self._img_scale,scene_pos.y()*self._img_scale),scale=True)
         elif event.button() == Qt.RightButton: # pyright: ignore[reportAttributeAccessIssue] ; Qt.RightButton exists
             self.clear_all_annotations()
         # print(f'Canvas mousePressEvent at ({event.position().x()}, {event.position().y()}), type: {event.button()}')
