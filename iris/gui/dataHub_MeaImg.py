@@ -470,9 +470,9 @@ class Wdg_DataHub_Image(qw.QWidget):
             qw.QMessageBox.warning(self, 'Error', str(e))
             retry = qw.QMessageBox.question(
                 self, 'Retry', 'Do you want to retry adding the ImageMeasurement_Unit?',
-                qw.QMessageBox.Yes | qw.QMessageBox.No
+                qw.QMessageBox.Yes | qw.QMessageBox.No # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes/No exists
             )
-            if retry == qw.QMessageBox.Yes:
+            if retry == qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes exists
                 self.append_ImageMeasurementUnit(unit, True)
         
     def remove_selected_ImageMeasurementUnit(self):
@@ -537,9 +537,9 @@ class Wdg_DataHub_Image(qw.QWidget):
             flg_save = qw.QMessageBox.question(
                 self, 'Save Image Hub',
                 'There are unsaved changes to the Image Data Hub. Do you want to save before closing?',
-                qw.QMessageBox.Yes | qw.QMessageBox.No | qw.QMessageBox.Cancel
+                qw.QMessageBox.Yes | qw.QMessageBox.No | qw.QMessageBox.Cancel # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes/No/Cancel exists
             )
-            if flg_save == qw.QMessageBox.Yes:
+            if flg_save == qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes exists
                 self.save_ImageMeasurementHub()
                 qw.QMessageBox.information(self, 'Info', 'The program will attempt to save the data in the background.')
             

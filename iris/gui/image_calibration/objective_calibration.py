@@ -69,7 +69,7 @@ class ImageProcessor_Worker(QObject):
         self.sig_img.emit(stitched_img)
 
 class Calibration_Worker(QObject):
-    
+    # Calibration signals
     event_operationDone = threading.Event()
     sig_set_image = Signal(Image.Image) # Signal to set the image on the canvas
     sig_start_record_clicks = Signal(bool)  # Signal to start recording clicks on the canvas
@@ -87,8 +87,8 @@ class Calibration_Worker(QObject):
     sig_save_cal = Signal(MeaImg_Unit)  # Signal to save the calibration file (stored in the MeaImg_Unit
     sig_set_imgUnit = Signal(MeaImg_Unit)   # Signal to set the image unit being stored in the main widget
     
-    msg_success = 'Calibration completed successfully'
-    msg_error = 'Error during calibration: '
+    msg_cal_success = 'Calibration completed successfully'
+    msg_cal_error = 'Error during calibration: '
     
     button_texts = (
         '1. Capture the first state',
@@ -110,6 +110,11 @@ class Calibration_Worker(QObject):
         f'7. Click on the features in the same order and click "{button_texts[6]}"',
         f'8. Move the stage around, confirm that the features are tracked correctly, and click "{button_texts[7]}"'
     )
+    
+    # Finetune calibration signals
+    event_operationDone_finetune = threading.Event()
+    sig_done_picking_points_finetune = Signal()
+    sig_finished_finetune = Signal()
     
     def __init__(
         self,
@@ -250,18 +255,25 @@ class Calibration_Worker(QObject):
         # > 7. Ask the user to save the calibration file
             self.sig_save_cal.emit(img_unit)
         
-        except Exception as e: self.sig_finished.emit(self.msg_error + str(e))
+        except Exception as e: self.sig_finished.emit(self.msg_cal_error + str(e))
         finally:
             self.sig_stop_record_clicks.emit(True)
             self.sig_pause_vid_anno.emit()
             self.sig_resume_vid_norm.emit()
-            self.sig_finished.emit(self.msg_success)
+            self.sig_finished.emit(self.msg_cal_success)
             
-    @Slot()
+    @Slot(MeaImg_Unit)
     def perform_calibration_finetune(self) -> None:
         """
         Performs a finetune calibration based on the current clicked coordinates on the canvas
         """
+        self.event_operationDone_finetune.wait()
+        self.event_operationDone_finetune.clear()
+        self.sig_done_picking_points_finetune.emit()
+        
+        self.event_operationDone_finetune.wait()
+        self.event_operationDone_finetune.clear()
+        self.sig_finished_finetune.emit()
     
 class Wdg_Calibration(qw.QWidget):
     """
@@ -273,7 +285,7 @@ class Wdg_Calibration(qw.QWidget):
     """
     sig_get_stitched_img = Signal(MeaImg_Unit,bool)
     sig_perform_calibration = Signal()
-    sig_perform_finetune_calibration = Signal(MeaImg_Unit, tuple, threading.Event, list)
+    sig_perform_finetune_calibration = Signal()
     
     def __init__(self,
                  parent:qw.QWidget,
@@ -421,12 +433,10 @@ class Wdg_Calibration(qw.QWidget):
         self._worker_cal.sig_finished.connect(self._handle_calibration_finished)
         self._worker_cal.sig_save_cal.connect(self._save_calibration_file)
         self._worker_cal.sig_set_imgUnit.connect(self._set_internal_meaImgUnit)
-    
-    def _init_signals_slots(self) -> None:
-        """
-        Initialises the signals and slots for the widget
-        """
-        self.sig_perform_finetune_calibration.connect(self._perform_finetune_calibration)
+        
+        # Finetune calibration connections
+        self._worker_cal.sig_finished_finetune.connect(self._finalise_finetune_calibration)
+        self.sig_perform_finetune_calibration.connect(self._worker_cal.perform_calibration_finetune)
     
     def _save_image(self):
         """
@@ -622,22 +632,24 @@ class Wdg_Calibration(qw.QWidget):
             img = self._getter_cameraImage()
             self._canvas_img.set_image(img)
             
-            flg_recordClicks = threading.Event()
             self._statbar.setStyleSheet("QStatusBar{background-color: %s;}" % 'yellow')
             self._statbar.showMessage('Click on the features to be tracked and click "Finish feature selection". Right-click to clear the current selections.')
             list_coors_pixel = self._canvas_img.start_recordClicks()
             
-            def perform_finetune_calibration_callback():
-                self.sig_perform_finetune_calibration.emit(
-                    meaImg, stage_coor, flg_recordClicks, list_coors_pixel
+            try: self._worker_cal.sig_done_picking_points_finetune.disconnect()
+            except Exception: pass
+            
+            self._worker_cal.sig_done_picking_points_finetune.connect(
+                lambda: self._perform_finetune_calibration(
+                    meaImg, stage_coor, list_coors_pixel # pyright: ignore[reportArgumentType] ; the error will be catched elsewhere, and is not critical here
                 )
-                self._wdg_cal_adj.config_finetune_calibration_button(
-                    callback=self._initialise_finetune_calibration,
-                    )
-                
+            )
+            
             self._wdg_cal_adj.config_finetune_calibration_button(
-                callback=perform_finetune_calibration_callback,
+                callback=self._worker_cal.event_operationDone_finetune.set,
                 text='Finish feature selection',enabled=True)
+            
+            self.sig_perform_finetune_calibration.emit()
             
         except Exception as e:
             qw.QMessageBox.warning(self,'Finetune calibration','Error initialising finetune calibration: {}'.format(e))
@@ -645,25 +657,6 @@ class Wdg_Calibration(qw.QWidget):
             self._reset_status_bar(after_sec=5)
             self._wdg_cal_adj.config_finetune_calibration_button(callback=self._initialise_finetune_calibration)
             
-    def _reset_status_bar(self, after_sec:float=0):
-        """
-        Resets the status bar after a delay
-        
-        Args:
-            after_sec (float): Delay in seconds before resetting the status bar
-        """
-        if after_sec <= 0:
-            self._statbar.clearMessage()
-            self._statbar.setStyleSheet("")
-        else:
-            timer = QTimer()
-            timer.setSingleShot(True)
-            timer.setInterval(int(after_sec*1000))
-            timer.timeout.connect(self._statbar.clearMessage)
-            timer.timeout.connect(lambda: self._statbar.setStyleSheet(""))
-            timer.start()
-            
-    @Slot(MeaImg_Unit, tuple, threading.Event, list)
     def _perform_finetune_calibration(self, meaImg: MeaImg_Unit, stage_coor: tuple[float, float, float],
             list_coors_pixel: list[tuple[float, float]]):
         """
@@ -674,39 +667,52 @@ class Wdg_Calibration(qw.QWidget):
             stage_coor (tuple[float, float, float]): Stage coordinate
             list_coors_pixel (list[tuple[float, float]]): List of pixel coordinates of the selected features
         """
-        list_coors_mm = [meaImg.convert_imgpt2stg(stage_coor,coor,False,low_res=self._chk_lowres.isChecked()) for coor in list_coors_pixel]
-        self._canvas_img.stop_recordClicks()
+        try:
+            list_coors_mm = [meaImg.convert_imgpt2stg(stage_coor,coor,False,low_res=self._chk_lowres.isChecked()) for coor in list_coors_pixel]
+            self._canvas_img.stop_recordClicks()
+            
+            self._statbar.setStyleSheet("QStatusBar{background-color: %s;}" % 'yellow')
+            self._statbar.showMessage('Finetune the calibration using the spinboxes and move the stage around to monitor the effect')
+            
+            # > Calibration finetuning by video feed <
+                # Enable the spinboxes and start the video feed
+            self._wdg_cal_adj.enable_finetuneCalibration_widgets(
+                callback=self._wdg_cal_adj.apply_temp_fineadjustment,
+                readonly=True)
+            
+            # > Set up the annotated video feed and the widgets to finalise the finetuning <
+            self._flg_video_pause.set()
+            self._flg_video_anno_pause.clear()
+            self._setup_annotated_video_feed(list_coors_mm)
+            
+            self._wdg_cal_adj.config_finetune_calibration_button(
+                callback=self._worker_cal.event_operationDone_finetune.set,text='End finetune calibration')
+        except Exception as e:
+            qw.QMessageBox.warning(self,'Error in finetune calibration',str(e))
+            self._statbar.setStyleSheet("QStatusBar{background-color: %s;}" % 'red')
+            self._statbar.showMessage(f'Error in finetuning: {e}')
+            self._reset_status_bar(after_sec=5)
+            self._wdg_cal_adj.config_finetune_calibration_button(callback=self._initialise_finetune_calibration)
         
-        self._statbar.setStyleSheet("QStatusBar{background-color: %s;}" % 'yellow')
-        self._statbar.showMessage('Finetune the calibration using the spinboxes and move the stage around to monitor the effect')
-        
-        # > Calibration finetuning by video feed <
-            # Enable the spinboxes and start the video feed
-        self._wdg_cal_adj.enable_finetuneCalibration_widgets(
-            callback=self._wdg_cal_adj.apply_temp_fineadjustment,
-            readonly=True)
-        
-        # > Set up the annotated video feed and the widgets to finalise the finetuning <
-        timer_video = QTimer()
-        timer_video.setInterval(1000//self._videoRefreshRate)
-        self._setup_annotated_video_feed(list_coors_mm)
-        timer_video.timeout.connect(lambda: self._show_annotated_video_feed())
-        
-        def finalise_finetune_calibration():
-            timer_video.stop()
-            try:
-                self._wdg_cal_adj.finalise_fineadjustment()
-                self._statbar.setStyleSheet("QStatusBar{background-color: %s;}" % 'green')
-                self._statbar.showMessage('Calibration finetuning finished: Please save the calibration file manually if required')
-                self._reset_status_bar(after_sec=5)
-            except Exception as e:
-                qw.QMessageBox.warning(self,'Erorr in finetune calibration',str(e))
-                self._statbar.setStyleSheet("QStatusBar{background-color: %s;}" % 'red')
-                self._statbar.showMessage(f'Error in finetuning: {e}')
-        
-        self._wdg_cal_adj.config_finetune_calibration_button(callback=finalise_finetune_calibration,text='End finetune calibration')
-        timer_video.start()
-    
+    @Slot()
+    def _finalise_finetune_calibration(self):
+        """
+        Finalise the calibration finetuning
+        """
+        self._flg_video_anno_pause.set()
+        self._resume_video_feed()
+        try:
+            self._wdg_cal_adj.finalise_fineadjustment()
+            self._statbar.setStyleSheet("QStatusBar{background-color: %s;}" % 'green')
+            self._statbar.showMessage('Calibration finetuning finished: Please save the calibration file manually if required')
+            self._reset_status_bar(after_sec=5)
+        except Exception as e:
+            qw.QMessageBox.warning(self,'Error in finetune calibration',str(e))
+            self._statbar.setStyleSheet("QStatusBar{background-color: %s;}" % 'red')
+            self._statbar.showMessage(f'Error in finetuning: {e}')
+        finally:
+            self._wdg_cal_adj.config_finetune_calibration_button(callback=self._initialise_finetune_calibration)
+            
     @Slot(str, str)
     def _calibration_button_setup_duringCalibration(self, msg:str, btn_text:str) -> None:
         """
@@ -756,7 +762,7 @@ class Wdg_Calibration(qw.QWidget):
         Args:
             message (str): Message to display on the status bar
         """
-        colour = 'green' if message.startswith(self._worker_cal.msg_success) else 'red'
+        colour = 'green' if message.startswith(self._worker_cal.msg_cal_success) else 'red'
         self._statbar.setStyleSheet("QStatusBar{background-color: %s;}" % colour)
         self._statbar.showMessage(message)
         self._reset_status_bar(after_sec=5)
@@ -783,6 +789,24 @@ class Wdg_Calibration(qw.QWidget):
             
         self._setup_annotated_video_feed(None)
         self.sig_perform_calibration.emit()
+    
+    def _reset_status_bar(self, after_sec:float=0):
+        """
+        Resets the status bar after a delay
+        
+        Args:
+            after_sec (float): Delay in seconds before resetting the status bar
+        """
+        if after_sec <= 0:
+            self._statbar.clearMessage()
+            self._statbar.setStyleSheet("")
+        else:
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.setInterval(int(after_sec*1000))
+            timer.timeout.connect(self._statbar.clearMessage)
+            timer.timeout.connect(lambda: self._statbar.setStyleSheet(""))
+            timer.start()
     
 
 class Wdg_Calibration_Finetuning(qw.QWidget):
@@ -973,7 +997,8 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
         """
         assert isinstance(text, str), 'Text must be a string'
         
-        self._btn_cal_finetune.clicked.disconnect()
+        try: self._btn_cal_finetune.clicked.disconnect()
+        except Exception: pass
         self._btn_cal_finetune.setEnabled(enabled)
         self._btn_cal_finetune.setText(text)
         self._btn_cal_finetune.clicked.connect(callback)
@@ -989,7 +1014,8 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
         """
         if not isinstance(text, str): raise ValueError('Text must be a string')
         
-        self._btn_calibrate.clicked.disconnect()
+        try: self._btn_calibrate.clicked.disconnect()
+        except Exception: pass
         self._btn_calibrate.setEnabled(enabled)
         self._btn_calibrate.setText(text)
         self._btn_calibrate.clicked.connect(callback)
@@ -1048,9 +1074,10 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
             self._btn_saveCalibrationFile.setText('Saving...')
             
             mea_img = self._getter_measurement_image()
-            result = self._processor.apply_async(func=self._handler_img.save_calibration_json_from_ImgMea, kwds={
-                'measurement':mea_img})
-            self._lastDirPath,self._cal_filename = result.get()
+            assert isinstance(mea_img, MeaImg_Unit), 'Measurement image not initialised'
+            
+            result = self._handler_img.save_calibration_json_from_ImgMea(mea_img)
+            self._lastDirPath,self._cal_filename = result
             self._lbl_calibration.setText('Objective: {}'.format(self._cal_filename))
         
         except Exception as e: print('_save_calibration_file >> Error saving objective file:',e)
