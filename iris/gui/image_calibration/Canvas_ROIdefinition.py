@@ -23,9 +23,6 @@ class Canvas_Image_Annotations(QGraphicsView):
     A canvas to show a picture and record click button events
     """
     
-    sig_click_recorded = Signal(tuple[float,float])
-    sig_annot_cleared = Signal()
-    
     def __init__(self, parent:qw.QWidget, size_pixel=AppPlotEnum.IMGCAL_IMG_SIZE.value):
         self.size_pixel:tuple[int,int] = size_pixel   # Size of the canvas (width,height)
         super().__init__(parent)
@@ -74,7 +71,6 @@ class Canvas_Image_Annotations(QGraphicsView):
             self._scene.removeItem(item)
         self._annotations.clear()
         self._list_clickCoords.clear()
-        self.sig_annot_cleared.emit()
         
     def annotate_canvas_multi(self,coor_list:list[tuple[float,float]],scale:bool=True,
                               flg_removePreviousAnnotations:bool=True):
@@ -258,7 +254,6 @@ class Canvas_Image_Annotations(QGraphicsView):
             y_ori = y_scene * self._img_scale
             self._list_clickCoords.append((x_ori, y_ori))
             self.annotate_canvas((x_ori,y_ori),scale=True)
-            self.sig_click_recorded.emit((x_ori,y_ori))
         
     @Slot(Image.Image)
     def set_image(self,img:Image.Image):

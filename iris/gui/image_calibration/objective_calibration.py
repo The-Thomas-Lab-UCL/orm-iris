@@ -11,7 +11,7 @@ if __name__ == '__main__':
 import PySide6.QtWidgets as qw
 from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem
 from PySide6.QtGui import QMouseEvent, QPixmap, QPen, QColor, QFont, QPainter
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication, QMetaType, QMutex, QMutexLocker, QWaitCondition, QPointF, QSize, Qt
+from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication, QPointF, QSize, Qt
 from PIL import Image, ImageQt
 
 import numpy as np
@@ -74,6 +74,7 @@ class Calibration_Worker(QObject):
     sig_set_image = Signal(Image.Image) # Signal to set the image on the canvas
     sig_start_record_clicks = Signal(bool)  # Signal to start recording clicks on the canvas
     sig_stop_record_clicks = Signal(bool)   # Signal to stop recording clicks on the canvas
+    sig_set_record_clicks_mm = Signal(list)  # Signal to set the recorded clicks in mm coordinates
     
     sig_pause_vid_norm = Signal()   # Signal to pause the video feed (normal, unannotated)
     sig_resume_vid_norm = Signal()  # Signal to resume the video feed (normal, unannotated)
@@ -83,7 +84,8 @@ class Calibration_Worker(QObject):
     
     sig_set_btnCal = Signal(str,str)    # Signal to set up the calibration button
     sig_finished = Signal(str)          # Signal to indicate the calibration process is finished
-    sig_save_cal = Signal(MeaImg_Unit)  # Signal to save the calibration file (stored in the MeaImg_Unit)
+    sig_save_cal = Signal(MeaImg_Unit)  # Signal to save the calibration file (stored in the MeaImg_Unit
+    sig_set_imgUnit = Signal(MeaImg_Unit)   # Signal to set the image unit being stored in the main widget
     
     msg_success = 'Calibration completed successfully'
     msg_error = 'Error during calibration: '
@@ -111,8 +113,9 @@ class Calibration_Worker(QObject):
     
     def __init__(
         self,
-        getter_coor:Callable[[],tuple[float,float,float]],
-        getter_cameraImage:Callable[[],Image.Image],
+        getter_coor:Callable[[],tuple[float|None,float|None,float|None]],
+        getter_cameraImage:Callable[[],Image.Image|None],
+        canvas:Canvas_Image_Annotations,
         ):
         """
         Worker to perform the objective calibration
@@ -120,13 +123,15 @@ class Calibration_Worker(QObject):
         Args:
             getter_coor (Callable[[],tuple[float,float,float]]): Getter function to get the stage coordinate
             getter_cameraImage (Callable[[],Image.Image]): Getter function to get the camera image
+            canvas (Canvas_Image_Annotations): Canvas to display the image and record clicks
         """
         super().__init__()
         self._getter_coor = getter_coor
         self._getter_img = getter_cameraImage
+        self._canvas = canvas
         
-    @Slot(list)
-    def perform_calibration(self, list_tracking_coors:list) -> None:
+    @Slot()
+    def perform_calibration(self) -> None:
         """
         Main function to perform the calibration setup, to be used in a separate thread, communicating with the main thread using events for GUI interaction.
         
@@ -134,91 +139,109 @@ class Calibration_Worker(QObject):
             list_tracking_coors (list): List to store the tracking coordinates to be used throughout the entire calibration process
         """
         try:
-            def capture_state(message:str,button_text:str) -> tuple[float,float,float]:
+            def capture_state(message:str,button_text:str) -> tuple[float|None,float|None,float|None]:
+                # print('Capture state: waiting for the user to click the button')
                 self.event_operationDone.clear()
                 self.sig_set_btnCal.emit(message,button_text)
+                self.sig_resume_vid_anno.emit()
+                self._canvas.clear_all_annotations()
                 
                 # Wait for the user to finish the 
                 self.event_operationDone.wait()
-                self.sig_pause_vid_norm.emit()
+                self.sig_pause_vid_anno.emit()
                 img_ori = self._getter_img()
                 self.sig_set_image.emit(img_ori)
                 
                 stage_coor = self._getter_coor()
                 
+                # print('Captured state at stage coordinates:',stage_coor)
+                
                 return stage_coor
 
             def feature_selection(message:str,button_text:str,limit1:bool=False) -> list[tuple[float,float]]:
+                # print('Feature selection: waiting for the user to click the button')
                 self.event_operationDone.clear()
                 self.sig_set_btnCal.emit(message,button_text)
                 self.sig_start_record_clicks.emit(True)
+                self.sig_pause_vid_anno.emit()
                 
                 self.event_operationDone.wait()
-                list_ret = list_tracking_coors.copy()
+                list_ret = self._canvas.get_clickCoordinates().copy()
                 self.sig_stop_record_clicks.emit(True)
                 if len(list_ret) == 0:
                     raise ValueError('At least one feature must be selected')
                 if limit1 and len(list_ret) != 1:
                     raise ValueError('Only laser spot must be selected')
                 
+                # print('Selected features at image pixel coordinates:',list_ret)
                 return list_ret
             
             lines = self.lines
             button_texts = self.button_texts
             
         # > 1. Capture initial state <
+            # print('\nCalibration step 1: Capture initial state')
             v1s = capture_state(lines[0],button_texts[0])
             v1s = np.array(v1s[:2])
             v1s_track = v1s.copy()
             
         # > 2. Select the laser spot <
+            # print('\nCalibration step 2: Select laser spot')
             vlc = feature_selection(lines[1],button_texts[1],True)[-1]
             vlc = np.array(vlc)
             
         # > 3. Select the first tracking features <
+            # print('\nCalibration step 3: Select first tracking features')
             list_coor_pixel = feature_selection(lines[2],button_texts[2])
             list_coor_pixel_v1 = list_coor_pixel.copy()
             v1c = np.mean(list_coor_pixel,axis=0)
             
         # > 4. Capture second state <
+            # print('\nCalibration step 4: Capture second state')
             v2s = capture_state(lines[3],button_texts[3])
             v2s = np.array(v2s[:2])
             y_diff = v2s[1] - v1s[1]
             if not y_diff < 10e-3: raise ValueError('The stage must be moved horizontally') # 10e-3 [mm] is the threshold
             
         # > 5. Select the tracking features <
+            # print('\nCalibration step 5: Select second tracking features')
             num_features = len(list_coor_pixel)
             list_coor_pixel = feature_selection(lines[4],button_texts[4])
             v2c = np.mean(list_coor_pixel,axis=0)
             if len(list_coor_pixel) != num_features: raise ValueError('The number of selected features must be the same')
             
         # > 6. Capture third state <
+            # print('\nCalibration step 6: Capture third state')
             v3s = capture_state(lines[5],button_texts[5])
             v3s = np.array(v3s[:2])
             x_diff = v3s[0] - v2s[0]
             if not x_diff < 10e-3: raise ValueError('The stage must be moved vertically') # 10e-3 [mm] is the threshold
         
         # > 7. Select the tracking features <
+            # print('\nCalibration step 7: Select third tracking features')
             list_coor_pixel = feature_selection(lines[6],button_texts[6])
             v3c = np.mean(list_coor_pixel,axis=0)
             v3c = np.array(v3c[:2])
             if len(list_coor_pixel) != num_features: raise ValueError('The number of selected features must be the same')
             
-            # Set the calibration obj
+            # Set the calibration object
             cal = ImgMea_Cal('calibration')
             cal.set_calibration_vector(v1s,v2s,v3s,v1c,v2c,v3c,vlc)
             
             # Save the calibration parameters (corrects for the image coordinate to the stage coordinate inversion)
-            img_unit = MeaImg_Unit(unit_name='Calibration',calibration=cal)
+            img_unit = MeaImg_Unit(unit_name=f'Calibration {get_timestamp_us_str()}',calibration=cal)
             
         # > 8. Show the live feature tracking and complete the calibration
+            # print('\nCalibration step 8: Show live feature tracking and complete the calibration')
             self.event_operationDone.clear()
             self.sig_set_btnCal.emit(lines[7],button_texts[7])
             
             # Add the initial tracked features to the list, adjusted for the real coordinates by 
             # adding the initial stage coordinates
-            list_tracking_coors.extend([cal.convert_imgpt2stg(coor_img_pixel=np.array(coor_img),\
-                coor_stage_mm=v1s_track) for coor_img in list_coor_pixel_v1])
+            list_tracking_coors_mm = [cal.convert_imgpt2stg(coor_img_pixel=np.array(coor_img),\
+                coor_stage_mm=v1s_track) for coor_img in list_coor_pixel_v1]
+            self.sig_set_imgUnit.emit(img_unit)
+            self.sig_set_record_clicks_mm.emit(list_tracking_coors_mm)
             self.sig_resume_vid_anno.emit()
             
             # Wait for the user to finish the calibration
@@ -232,7 +255,14 @@ class Calibration_Worker(QObject):
             self.sig_stop_record_clicks.emit(True)
             self.sig_pause_vid_anno.emit()
             self.sig_resume_vid_norm.emit()
-
+            self.sig_finished.emit(self.msg_success)
+            
+    @Slot()
+    def perform_calibration_finetune(self) -> None:
+        """
+        Performs a finetune calibration based on the current clicked coordinates on the canvas
+        """
+    
 class Wdg_Calibration(qw.QWidget):
     """
     Sub-frame to form the calibration file of an ImageMeasurement object.
@@ -242,7 +272,7 @@ class Wdg_Calibration(qw.QWidget):
         initialise_auto_updaters must be called after the object is created
     """
     sig_get_stitched_img = Signal(MeaImg_Unit,bool)
-    sig_perform_calibration = Signal(list)
+    sig_perform_calibration = Signal()
     sig_perform_finetune_calibration = Signal(MeaImg_Unit, tuple, threading.Event, list)
     
     def __init__(self,
@@ -250,8 +280,8 @@ class Wdg_Calibration(qw.QWidget):
                  processor:mpp.Pool,
                  dataHub_img:Wdg_DataHub_Image,
                  dataHub_imgcal:Wdg_DataHub_ImgCal,
-                 getter_coor:Callable[[],tuple[float,float,float]],
-                 getter_cameraImage:Callable[[],Image.Image],):
+                 getter_coor:Callable[[],tuple[float|None,float|None,float|None]],
+                 getter_cameraImage:Callable[[],Image.Image|None],):
         """
         Args:
             parent (qw.QWidget): Main frame to put the sub-frame in
@@ -317,11 +347,11 @@ class Wdg_Calibration(qw.QWidget):
     # >>> Calibration adjustment <<<
         # Sub-frame for calibration adjustment
         self._wdg_cal_adj=Wdg_Calibration_Finetuning(
-            parent=wdg.wdg_holder_calibration_controls,
+            parent=self,
             processor=self._processor,
             imgUnit_getter=lambda:self._meaImgUnit
             )
-        qw.QVBoxLayout(wdg.wdg_holder_calibration_controls).addWidget(self._wdg_cal_adj)
+        wdg.lyt_holder_calibration_controls.addWidget(self._wdg_cal_adj)
         
         self._wdg_cal_adj.config_finetune_calibration_button(callback=self._initialise_finetune_calibration)
         self._wdg_cal_adj.config_calibrate_button(callback=self._start_calibration)
@@ -336,6 +366,18 @@ class Wdg_Calibration(qw.QWidget):
         self._timer_videofeed.timeout.connect(lambda: self._show_camera_feed())
         self.destroyed.connect(self._timer_videofeed.stop)
         self._timer_videofeed.start()
+        
+    # Thread for an annotated video feed during calibration
+        self._flg_video_anno_pause = threading.Event()
+        self._anno_vid_custom_coors = False
+        self._anno_vid_list_coors_mm = []
+        self._anno_vid_annotate = False
+        
+        self._timer_videofeed_anno = QTimer()
+        self._timer_videofeed_anno.setInterval(1000//self._videoRefreshRate)
+        self._timer_videofeed_anno.timeout.connect(lambda: self._show_annotated_video_feed())
+        self.destroyed.connect(self._timer_videofeed_anno.stop)
+        self._timer_videofeed_anno.start()
         
         self._init_worker()
     
@@ -356,7 +398,8 @@ class Wdg_Calibration(qw.QWidget):
         self._thread_worker_cal = QThread()
         self._worker_cal = Calibration_Worker(
             getter_coor=self._getter_coordinate,
-            getter_cameraImage=self._getter_cameraImage
+            getter_cameraImage=self._getter_cameraImage,
+            canvas=self._canvas_img,
         )
         self._worker_cal.moveToThread(self._thread_worker_cal)
         self._thread_worker_cal.start()
@@ -366,13 +409,18 @@ class Wdg_Calibration(qw.QWidget):
         self._worker_cal.sig_set_image.connect(self._canvas_img.set_image)
         self._worker_cal.sig_start_record_clicks.connect(self._canvas_img.start_recordClicks)
         self._worker_cal.sig_stop_record_clicks.connect(self._canvas_img.stop_recordClicks)
+        self._worker_cal.sig_set_record_clicks_mm.connect(self._setup_annotated_video_feed)
         
         self._worker_cal.sig_pause_vid_norm.connect(self._pause_video_feed)
         self._worker_cal.sig_resume_vid_norm.connect(self._resume_video_feed)
         
+        self._worker_cal.sig_pause_vid_anno.connect(self._flg_video_anno_pause.set)
+        self._worker_cal.sig_resume_vid_anno.connect(self._flg_video_anno_pause.clear)
+        
         self._worker_cal.sig_set_btnCal.connect(self._calibration_button_setup_duringCalibration)
         self._worker_cal.sig_finished.connect(self._handle_calibration_finished)
         self._worker_cal.sig_save_cal.connect(self._save_calibration_file)
+        self._worker_cal.sig_set_imgUnit.connect(self._set_internal_meaImgUnit)
     
     def _init_signals_slots(self) -> None:
         """
@@ -425,19 +473,25 @@ class Wdg_Calibration(qw.QWidget):
             style = "QStatusBar{background-color: %s;}" % 'yellow'
             self._statbar.setStyleSheet(style)
             self._statbar.showMessage('Capturing image...')
-            img:Image.Image = self._getter_cameraImage()
+            img:Image.Image|None = self._getter_cameraImage()
             coor = self._getter_coordinate()
             
+            # Validate the inputs
+            if img is None: raise ValueError('No image captured from the camera')
+            if not all([isinstance(c,float) for c in coor]): raise ValueError('Stage coordinates are not valid')
+            
+            # Save the image to the measurement image
             meaImg = self._meaImgUnit
             cal = self._getter_calibration()
             meaImg.set_calibration_ImageMeasurement_Calibration(cal)
             
             timestamp = get_timestamp_us_str()
+            
             meaImg.add_measurement(
                 timestamp=timestamp,
-                x_coor=coor[0],
-                y_coor=coor[1],
-                z_coor=coor[2],
+                x_coor=coor[0], # pyright: ignore[reportArgumentType] ; the check is done above to ensure coor is float
+                y_coor=coor[1], # pyright: ignore[reportArgumentType] ; the check is done above to ensure coor is float
+                z_coor=coor[2], # pyright: ignore[reportArgumentType] ; the check is done above to ensure coor is float
                 image=img
             )
             
@@ -484,34 +538,48 @@ class Wdg_Calibration(qw.QWidget):
         
         self._resume_video_feed()
     
-    def _show_annotated_camera_feed(self,event_pause:threading.Event,coor_list_mm:list=[],
-                                flg_alwaysAnnotate:bool=False):
+    @Slot(list)
+    def _setup_annotated_video_feed(self, list_coors_mm:list[tuple[float,float]]|None):
         """
-        Displays the video feed on the canvas
+        Sets up the annotated video feed for calibration. If list_coors_mm is None,
+        the annotated video feed will use the clicked coordinates on the canvas.
+        (Refer to _show_annotated_video_feed for more details)
         
         Args:
-            event_process (threading.Event): Event to process the video feed
-            event_pause (threading.Event): Event to pause the video feed
-            coor_list_mm (list): List of coordinates to be annotated on the canvas. Default is []
-            flg_alwaysAnnotate (bool): Always annotate the coordinates. Default is False
+            list_coors_mm (list): List of coordinates to be annotated on the canvas
         """
-        assert isinstance(coor_list_mm, (type, list)), 'Coordinates must be a list'
-        assert isinstance(event_pause, threading.Event), 'Event pause must be a threading.Event object'
-                
-        stage_coor = None
-        if event_pause.is_set(): return
+        if list_coors_mm is None:
+            self._anno_vid_custom_coors = False
+            self._anno_vid_list_coors_mm = []
+            self._anno_vid_annotate = False
+        else:
+            self._anno_vid_custom_coors = True
+            self._anno_vid_list_coors_mm = list_coors_mm
+            self._anno_vid_annotate = True
+    
+    def _show_annotated_video_feed(self):
+        """
+        Displays the video feed on the canvas with annotations. For specific coordinates to be annotated,
+        use _setup_annotated_video_feed to specify them up, which will be stored in the _anno_vid_list_coors_mm.
+        """
+        if self._flg_video_anno_pause.is_set(): return
         
         img_ori = self._getter_cameraImage()
         self._canvas_img.set_image(img_ori)
         
+        if self._anno_vid_custom_coors: coor_list_mm = self._anno_vid_list_coors_mm
+        else: coor_list_mm = self._canvas_img.get_clickCoordinates().copy()
+        
         if len(coor_list_mm) <= 0: return
         
         try:
-            if stage_coor == self._getter_coordinate() and not flg_alwaysAnnotate: return
+            if not self._anno_vid_annotate: return
             stage_coor = self._getter_coordinate()
             low_res = self._chk_lowres.isChecked()
             
-            list_coor_pixel = [self._meaImgUnit.convert_stg2imgpt(coor_stage_mm=stage_coor,coor_point_mm=coor,\
+            assert all([isinstance(c,float) for c in stage_coor]), 'Stage coordinates are not valid'
+            
+            list_coor_pixel = [self._meaImgUnit.convert_stg2imgpt(coor_stage_mm=stage_coor,coor_point_mm=coor, # pyright: ignore[reportArgumentType]
                 correct_rot=False,low_res=low_res) for coor in coor_list_mm]
             list_coor_pixel = [(float(coor[0]),float(coor[1])) for coor in list_coor_pixel]
             
@@ -559,15 +627,20 @@ class Wdg_Calibration(qw.QWidget):
             self._statbar.showMessage('Click on the features to be tracked and click "Finish feature selection". Right-click to clear the current selections.')
             list_coors_pixel = self._canvas_img.start_recordClicks()
             
-            self._wdg_cal_adj.config_finetune_calibration_button(
-                callback=lambda: self.sig_perform_finetune_calibration.emit(
+            def perform_finetune_calibration_callback():
+                self.sig_perform_finetune_calibration.emit(
                     meaImg, stage_coor, flg_recordClicks, list_coors_pixel
-                ),
+                )
+                self._wdg_cal_adj.config_finetune_calibration_button(
+                    callback=self._initialise_finetune_calibration,
+                    )
+                
+            self._wdg_cal_adj.config_finetune_calibration_button(
+                callback=perform_finetune_calibration_callback,
                 text='Finish feature selection',enabled=True)
             
         except Exception as e:
             qw.QMessageBox.warning(self,'Finetune calibration','Error initialising finetune calibration: {}'.format(e))
-        finally:
             self._resume_video_feed()
             self._reset_status_bar(after_sec=5)
             self._wdg_cal_adj.config_finetune_calibration_button(callback=self._initialise_finetune_calibration)
@@ -616,15 +689,20 @@ class Wdg_Calibration(qw.QWidget):
         # > Set up the annotated video feed and the widgets to finalise the finetuning <
         timer_video = QTimer()
         timer_video.setInterval(1000//self._videoRefreshRate)
-        timer_video.timeout.connect(lambda: self._show_annotated_camera_feed(
-            threading.Event(),list_coors_mm,flg_alwaysAnnotate=True))
+        self._setup_annotated_video_feed(list_coors_mm)
+        timer_video.timeout.connect(lambda: self._show_annotated_video_feed())
         
         def finalise_finetune_calibration():
             timer_video.stop()
-            self._wdg_cal_adj.finalise_fineadjustment()
-            self._statbar.setStyleSheet("QStatusBar{background-color: %s;}" % 'green')
-            self._statbar.showMessage('Calibration finetuning finished: Please save the calibration file manually if required')
-            self._reset_status_bar(after_sec=5)
+            try:
+                self._wdg_cal_adj.finalise_fineadjustment()
+                self._statbar.setStyleSheet("QStatusBar{background-color: %s;}" % 'green')
+                self._statbar.showMessage('Calibration finetuning finished: Please save the calibration file manually if required')
+                self._reset_status_bar(after_sec=5)
+            except Exception as e:
+                qw.QMessageBox.warning(self,'Erorr in finetune calibration',str(e))
+                self._statbar.setStyleSheet("QStatusBar{background-color: %s;}" % 'red')
+                self._statbar.showMessage(f'Error in finetuning: {e}')
         
         self._wdg_cal_adj.config_finetune_calibration_button(callback=finalise_finetune_calibration,text='End finetune calibration')
         timer_video.start()
@@ -660,6 +738,16 @@ class Wdg_Calibration(qw.QWidget):
         MeaImg_Handler().save_calibration_json_from_ImgMea(meaImg)
         qw.QMessageBox.information(self,'Calibration saved','Calibration file saved successfully')
     
+    @Slot()
+    def _set_internal_meaImgUnit(self, imgunit:MeaImg_Unit):
+        """
+        Sets the MeaIng_Unit being stored internally (e.g., for the pixel -> mm coordinate conversion)
+
+        Args:
+            imgunit (MeaImg_Unit): The image unit to be stored
+        """
+        self._meaImgUnit = imgunit
+    
     @Slot(str)
     def _handle_calibration_finished(self, message:str) -> None:
         """
@@ -684,26 +772,24 @@ class Wdg_Calibration(qw.QWidget):
         """
         self._pause_video_feed()
         
-        event_videoFeed_pause = threading.Event()
-        list_tracking_coors = self._canvas_img.get_clickCoordinates()
-        
         timer_vid_anno = QTimer()
         timer_vid_anno.setInterval(1000//self._videoRefreshRate)
-        timer_vid_anno.timeout.connect(lambda: self._show_annotated_camera_feed(event_videoFeed_pause,list_tracking_coors))
+        timer_vid_anno.timeout.connect(lambda: self._show_annotated_video_feed())
         timer_vid_anno.start()
         
         if self._showHints:
             message = "\n".join(self._worker_cal.lines)
             qw.QMessageBox.information(self,'Calibration procedure',message)
             
-        self.sig_perform_calibration.emit(list_tracking_coors)
+        self._setup_annotated_video_feed(None)
+        self.sig_perform_calibration.emit()
     
 
 class Wdg_Calibration_Finetuning(qw.QWidget):
     """
     Sub-frame for calibration adjustment to be used in the ROI_definition_controller
     """
-    def __init__(self, parent, processor:mpp.Pool, imgUnit_getter:Callable[[],MeaImg_Unit],
+    def __init__(self, parent, processor:mpp.Pool, imgUnit_getter:Callable[[],MeaImg_Unit|None],
         getter_flipx:Callable[[],bool]=lambda:False, getter_flipy:Callable[[],bool]=lambda:False):
         """
         Args:
@@ -737,11 +823,11 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
         self._cal_final:ImgMea_Cal|None = None
     
         # Calibration parameters
-        self._cal_sclx = tk.DoubleVar(value=0)
-        self._cal_scly = tk.DoubleVar(value=0)
-        self._cal_offsetx = tk.DoubleVar(value=0)
-        self._cal_offsety = tk.DoubleVar(value=0)
-        self._cal_rot_deg = tk.DoubleVar(value=0)
+        self._cal_sclx = wdg.spin_scalex
+        self._cal_scly = wdg.spin_scaley
+        self._cal_offsetx = wdg.spin_offsetx
+        self._cal_offsety = wdg.spin_offsety
+        self._cal_rot_deg = wdg.spin_rotdeg
         
         # Buttons for auto calibration
         self._btn_calibrate = wdg.btn_calibrate
@@ -768,7 +854,9 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
         Initialises the calibration parameters in the measurement image using
         the calibration parameters stored in the image
         """
-        self._cal_ori = deepcopy(self._getter_measurement_image().get_ImageMeasurement_Calibration())
+        img_unit = self._getter_measurement_image()
+        assert img_unit is not None, 'Measurement image not initialised'
+        self._cal_ori = deepcopy(img_unit.get_ImageMeasurement_Calibration())
         self._cal_temp = deepcopy(self._cal_ori)
         
         assert isinstance(self._cal_ori, ImgMea_Cal), 'Calibration object not initialised'
@@ -795,6 +883,7 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
         
         if apply:
             meaImg = self._getter_measurement_image()
+            if not isinstance(meaImg, MeaImg_Unit): raise ValueError('Measurement image not initialised')
             meaImg.set_calibration_ImageMeasurement_Calibration(self._cal_temp)
         
         self._cal_final = deepcopy(self._cal_temp)
@@ -841,7 +930,9 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
         )
         
         # Update the calibration parameters in the measurement image
-        self._getter_measurement_image().set_calibration_ImageMeasurement_Calibration(self._cal_temp)
+        img_unit = self._getter_measurement_image()
+        if not isinstance(img_unit, MeaImg_Unit): raise ValueError('Measurement image not initialised')
+        img_unit.set_calibration_ImageMeasurement_Calibration(self._cal_temp)
     
     def _disable_finetuneCalibration_widgets(self) -> None:
         """
@@ -910,15 +1001,16 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
         Returns:
             tuple[float,float,float,float,float]: Calibration parameters in the order (scl_x,scl_y,offset_x,offset_y,rot_deg)
         """
-        return self._cal_sclx.get(),self._cal_scly.get(),self._cal_offsetx.get(),self._cal_offsety.get(),self._cal_rot_deg.get()
+        
+        return self._cal_sclx.value(),self._cal_scly.value(),self._cal_offsetx.value(),self._cal_offsety.value(),self._cal_rot_deg.value()
     
     def reset_calibrationSpinbox_values(self) -> None:
         """Resets the calibration parameters"""
-        self._cal_sclx.set(0.0)
-        self._cal_scly.set(0.0)
-        self._cal_offsetx.set(0.0)
-        self._cal_offsety.set(0.0)
-        self._cal_rot_deg.set(0.0)
+        self._cal_sclx.setValue(0.0)
+        self._cal_scly.setValue(0.0)
+        self._cal_offsetx.setValue(0.0)
+        self._cal_offsety.setValue(0.0)
+        self._cal_rot_deg.setValue(0.0)
         
     def _load_calibration_file(self):
         """
@@ -933,6 +1025,7 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
             img_cal = self._handler_img.load_calibration_json()
             if img_cal is None: raise ValueError('No calibration file loaded')
             
+            if not isinstance(mea_img, MeaImg_Unit): raise ValueError('Measurement image not initialised')
             mea_img.set_calibration_ImageMeasurement_Calibration(img_cal)
             
             self._cal_filename = img_cal.id

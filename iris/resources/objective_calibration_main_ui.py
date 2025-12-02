@@ -79,17 +79,10 @@ class Ui_calibration_main(object):
 
         self.main_layout.addLayout(self.verticalLayout)
 
-        self.verticalLayout_2 = QVBoxLayout()
-        self.verticalLayout_2.setObjectName(u"verticalLayout_2")
-        self.wdg_holder_calibration_controls = QWidget(calibration_main)
-        self.wdg_holder_calibration_controls.setObjectName(u"wdg_holder_calibration_controls")
-        self.holder_cal_finetune = QVBoxLayout(self.wdg_holder_calibration_controls)
-        self.holder_cal_finetune.setObjectName(u"holder_cal_finetune")
+        self.lyt_holder_calibration_controls = QVBoxLayout()
+        self.lyt_holder_calibration_controls.setObjectName(u"lyt_holder_calibration_controls")
 
-        self.verticalLayout_2.addWidget(self.wdg_holder_calibration_controls)
-
-
-        self.main_layout.addLayout(self.verticalLayout_2)
+        self.main_layout.addLayout(self.lyt_holder_calibration_controls)
 
 
         self.horizontalLayout_4.addLayout(self.main_layout)

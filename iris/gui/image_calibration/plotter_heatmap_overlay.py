@@ -6,9 +6,11 @@ if __name__ == '__main__':
     SCRIPT_DIR = os.path.abspath(r'.\iris')
     sys.path.append(os.path.dirname(SCRIPT_DIR))
 
-import tkinter as tk
-from tkinter import ttk
-from tkinter import messagebox, simpledialog
+import PySide6.QtWidgets as qw
+from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem
+from PySide6.QtGui import QMouseEvent, QPixmap, QPen, QColor, QFont, QPainter
+from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication, QPointF, QSize, Qt
+
 
 import matplotlib
 from matplotlib.axes import Axes
@@ -34,7 +36,7 @@ from iris.data.measurement_RamanMap import MeaRMap_Hub,MeaRMap_Unit,MeaRMap_Plot
 from iris.gui.submodules.heatmap_plotter_MeaRMap import Wdg_MappingMeasurement_Plotter
 
 # Import extensions
-from iris.gui.image_calibration.capture_and_calibration import sFrm_CalibrationAdjustment
+from iris.gui.image_calibration.objective_calibration import Wdg_Calibration_Finetuning
 
 # Import enums
 from iris.gui import AppPlotEnum
@@ -124,7 +126,6 @@ class Frm_HeatmapOverlay(Wdg_MappingMeasurement_Plotter):
         super().__init__(
             parent=frm_corePlotter,
             mappingHub=self._mappingHub,
-            figsize_pxl=figsize_pxl
             )
         
         # # Parameters to store the measurements
@@ -137,8 +138,8 @@ class Frm_HeatmapOverlay(Wdg_MappingMeasurement_Plotter):
         self._plotter = MappingPlotter_ImageOverlay()
         
     # >>> Calibration fine-tuning widgets <<<
-        self._frm_calAdjust = sFrm_CalibrationAdjustment(
-            main=frm_calAdjust,
+        self._frm_calAdjust = Wdg_Calibration_Finetuning(
+            parent=frm_calAdjust,
             processor=self._processor,
             imgUnit_getter=self._get_ImageUnit
             )

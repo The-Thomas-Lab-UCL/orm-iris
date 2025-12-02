@@ -78,13 +78,7 @@ to DataHub</string>
       </layout>
      </item>
      <item>
-      <layout class="QVBoxLayout" name="verticalLayout_2">
-       <item>
-        <widget class="QWidget" name="wdg_holder_calibration_controls" native="true">
-         <layout class="QVBoxLayout" name="holder_cal_finetune"/>
-        </widget>
-       </item>
-      </layout>
+      <layout class="QVBoxLayout" name="lyt_holder_calibration_controls"/>
      </item>
     </layout>
    </item>
