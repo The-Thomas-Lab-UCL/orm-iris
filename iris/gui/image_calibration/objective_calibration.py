@@ -54,7 +54,7 @@ class ImageProcessor_Worker(QObject):
         super().__init__()
     
     @Slot(MeaImg_Unit,bool)
-    def get_stitched_images(self,meaImg:MeaImg_Unit,low_res:bool) -> None:
+    def get_stitched_image(self,meaImg:MeaImg_Unit,low_res:bool) -> None:
         """
         Gets the stitched image from the measurement image
         
@@ -403,7 +403,7 @@ class Wdg_Calibration(qw.QWidget):
         self._worker_img.moveToThread(self._thread_worker_img)
         self._thread_worker_img.start()
         
-        self.sig_get_stitched_img.connect(self._worker_img.get_stitched_images)
+        self.sig_get_stitched_img.connect(self._worker_img.get_stitched_image)
         self._worker_img.sig_img.connect(lambda img:self._canvas_img.set_image(img))
         
         # Calibration worker
@@ -844,7 +844,7 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
         # Calibration objects
         self._cal_ori:ImgMea_Cal|None = None
         self._cal_temp:ImgMea_Cal|None = None
-        self._cal_final:ImgMea_Cal|None = None
+        self._cal_last:ImgMea_Cal|None = None
     
         # Calibration parameters
         self._cal_sclx = wdg.spin_scalex
@@ -886,14 +886,14 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
         assert isinstance(self._cal_ori, ImgMea_Cal), 'Calibration object not initialised'
         assert self._cal_ori.check_calibration_set() == True, 'Calibration parameters not set'
         
-    def get_final_calibration(self) -> ImgMea_Cal|None:
+    def get_last_calibration(self) -> ImgMea_Cal|None:
         """
-        Returns the final calibration object
+        Returns the last created calibration object
         
         Returns:
-            ImageMeasurement_Calibration|None: Final calibration object or None if not initialised
+            ImageMeasurement_Calibration|None: Last calibration object or None if not initialised
         """
-        return self._cal_final
+        return self._cal_last
         
     def finalise_fineadjustment(self,apply:bool=False) -> None:
         """
@@ -910,7 +910,7 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
             if not isinstance(meaImg, MeaImg_Unit): raise ValueError('Measurement image not initialised')
             meaImg.set_calibration_ImageMeasurement_Calibration(self._cal_temp)
         
-        self._cal_final = deepcopy(self._cal_temp)
+        self._cal_last = deepcopy(self._cal_temp)
         self._cal_temp = None
         self._cal_ori = None
         

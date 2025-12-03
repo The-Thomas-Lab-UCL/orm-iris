@@ -42,7 +42,7 @@ from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam
 from iris.multiprocessing.dataStreamer_Raman import DataStreamer_Raman
 
-from iris.gui.image_calibration.plotter_heatmap_overlay import Frm_HeatmapOverlay
+from iris.gui.image_calibration.plotter_heatmap_overlay import Wdg_HeatmapOverlay
 
 from iris.gui import AppRamanEnum, AppPlotEnum
 

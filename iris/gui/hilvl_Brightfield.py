@@ -40,7 +40,7 @@ from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
 from iris.gui.hilvl_coorGen import Wdg_Hilvl_CoorGenerator
 
-from iris.gui.image_calibration.plotter_heatmap_overlay import Frm_HeatmapOverlay
+from iris.gui.image_calibration.plotter_heatmap_overlay import Wdg_HeatmapOverlay
 from iris.gui.image_calibration.objective_calibration import Wdg_Calibration
 from iris.gui.submodules.image_tiling import Wdg_HiLvlTiling
 from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam
@@ -124,19 +124,17 @@ class Wdg_HighLvlController_Brightfield(qw.QWidget):
         )
         wdg.lyt_holder_objSetup.addWidget(self._wdg_Calibration)
         
-    # # >> Overlay frame <<
-    #     # Heatmap plotter widgets setup
-    #     self._frm_heatmapOverlay = Frm_HeatmapOverlay(
-    #         master=tfrm_overlay,
-    #         processor=self._processor,
-    #         mappingHub=self._dataHub_map.get_MappingHub(),
-    #         imghub_getter=self._dataHub_img.get_ImageMeasurement_Hub,
-    #         dataHub_imgcal=self._dataHub_imgcal,
-    #         figsize_pxl=AppPlotEnum.IMGCAL_IMG_SIZE.value
-    #     )
-        
-    #     # Pack the widgets
-    #     self._frm_heatmapOverlay.grid(row=0, column=0)
+    # >> Overlay frame <<
+        # Heatmap plotter widgets setup
+        self._wdg_heatmapOverlay = Wdg_HeatmapOverlay(
+            parent=self,
+            processor=self._processor,
+            mappingHub=self._dataHub_map.get_MappingHub(),
+            imghub_getter=self._dataHub_img.get_ImageMeasurement_Hub,
+            dataHub_imgcal=self._dataHub_imgcal,
+            figsize_pxl=AppPlotEnum.IMGCAL_IMG_SIZE.value
+        )
+        wdg.lyt_heatmapOverlay.addWidget(self._wdg_heatmapOverlay)
         
     # >> Tiling frame <<
         tiling = Wdg_HiLvlTiling(

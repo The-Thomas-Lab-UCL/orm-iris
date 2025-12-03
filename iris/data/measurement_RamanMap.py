@@ -2192,7 +2192,7 @@ class MeaRMap_Plotter:
         self._ax.scatter(x_val, y_val, c=intensity, cmap=AppPlotEnum.PLT_COLOUR_MAP.value, s=point_size, linewidths=0, marker='s')
         
         # Add colourbar and labels
-        self._cbar:Colorbar = self._fig.colorbar(self._ax.collections[0], ax=self._ax)
+        self._cbar = self._fig.colorbar(self._ax.collections[0], ax=self._ax)
         self._ax.set_title(title)
         self._ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
         self._ax.set_ylabel(AppPlotEnum.PLT_LBL_Y_AXIS.value)

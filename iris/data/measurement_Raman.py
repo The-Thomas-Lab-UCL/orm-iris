@@ -211,7 +211,7 @@ class MeaRaman():
         """
         return self._dict_metadata['laser_power_milliwatt'],self._dict_metadata['laser_wavelength_nm']
         
-    def get_laserMetadata_key(self) -> tuple[str]:
+    def get_laserMetadata_key(self) -> tuple[str,str]:
         """
         Returns the keys of the laser metadata
         

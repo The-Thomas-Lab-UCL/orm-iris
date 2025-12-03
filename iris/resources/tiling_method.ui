@@ -35,6 +35,9 @@
           <property name="text">
            <string>Use low-resolution image (faster processing)</string>
           </property>
+          <property name="checked">
+           <bool>true</bool>
+          </property>
          </widget>
         </item>
         <item>

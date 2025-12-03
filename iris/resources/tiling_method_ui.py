@@ -40,6 +40,7 @@ class Ui_tiling_method(object):
 
         self.chk_lres = QCheckBox(self.verticalLayoutWidget)
         self.chk_lres.setObjectName(u"chk_lres")
+        self.chk_lres.setChecked(True)
 
         self.verticalLayout_2.addWidget(self.chk_lres)
 

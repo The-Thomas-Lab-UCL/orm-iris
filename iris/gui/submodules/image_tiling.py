@@ -175,7 +175,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
     A high level controller to take images, tile them into a single image, and save them 
     as an ImageMeasurement_Unit obj
     """
-    sig_req_plot_imgunit = Signal()
+    sig_req_plot_imgunit = Signal(MeaImg_Unit,bool)
     sig_req_takeImage = Signal()
     sig_update_combobox = Signal()
     
@@ -238,7 +238,6 @@ class Wdg_HiLvlTiling(qw.QWidget):
         
     # >>> Image control frame <<<
         self._list_imgunit_names = []
-        self._img_shown:Image.Image|None = None
         self._combo_imgunits = wdg.combo_img
         
         self._combo_imgunits.currentIndexChanged.connect(self._plot_imgunit_combobox)
@@ -298,10 +297,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
             if not(imgUnit.check_measurement_exist() and imgUnit.check_calibration_exist()):
                 raise ValueError('No image or calibration found')
             
-            self.sig_req_plot_imgunit.emit()
-            
-            self._img_shown = imgUnit.get_image_all_stitched(low_res=self._chk_lres.isChecked())[0]
-            self._canvas_img.set_image(self._img_shown)
+            self.sig_req_plot_imgunit.emit(imgUnit, self._chk_lres.isChecked())
         except Exception as e:
             qw.QMessageBox.warning(self,'Error in _plot_imgunit',str(e))
         finally:
@@ -333,7 +329,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
             self._combo_imgunits.setCurrentText(current_name)
         else:
             self._combo_imgunits.setCurrentIndex(0)
-            self.sig_req_plot_imgunit.emit()
+            self.sig_req_plot_imgunit.emit(hub.get_ImageMeasurementUnit(list_ids[0]), self._chk_lres.isChecked())
         
         self._combo_imgunits.setEnabled(True)
         self._combo_imgunits.blockSignals(False)

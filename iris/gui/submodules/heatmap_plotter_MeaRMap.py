@@ -32,7 +32,7 @@ class HeatmapPlotter_Design(Ui_HeatmapPlotter, qw.QWidget):
         self.setupUi(self)
         self.setLayout(self.main_layout)
 
-class Wdg_MappingMeasurement_Plotter(qw.QFrame):
+class Wdg_MappingMeasurement_Plotter(qw.QWidget):
     
     sig_plotclicked = Signal(tuple)  # Signal emitted when the plot is clicked, sends (mappingUnit_ID, (x_mm, y_mm))
     
@@ -43,15 +43,17 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         self,
         parent,
         mappingHub:MeaRMap_Hub,
+        layout:qw.QLayout|None = None,
         ):
         """
         Initialise the plot_mapping_measurements class
         
         Args:
-            parent (tk.Widget): Parent widget.
+            parent (qw.QWidget): Parent widget.
             mappingHub (MappingMeasurement_Hub): Mapping measurement hub to be used for plotting.
             callback_click (Callable[[tuple[str,tuple[float,float]]], None]|None): Callback function to be called on click events,
                 it will call the function with the measurement ID and the coordinates of the click.
+            layout (qw.QLayout|None): Optional layout to set for this widget.
         """
         assert isinstance(mappingHub,MeaRMap_Hub),'mappingHub must be an instance of MappingMeasurement_Hub'
         
@@ -60,7 +62,9 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         
     # >>> Main widget setup <<<
         self._widget = HeatmapPlotter_Design(self)
-        self._main_layout = qw.QVBoxLayout(self)
+        if layout is None:
+            layout = qw.QVBoxLayout(self)
+        self._main_layout = layout
         self._main_layout.addWidget(self._widget)
         wdg = self._widget
         
@@ -368,9 +372,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
         self._combo_plot_SpectralPosition.blockSignals(True)
         
         if set_unit_name is None: set_unit_name = self._combo_plot_mappingUnitName.currentText()
-        if set_wavelength is None:
-            try: set_wavelength = float(self.get_current_wavelength())
-            except: set_wavelength = None
+        set_wavelength = self.get_current_wavelength()
         
         # Clear the comboboxes
         
@@ -619,7 +621,8 @@ class Wdg_MappingMeasurement_Plotter(qw.QFrame):
             clicked_measurementId = self._current_mappingUnit.get_measurementId_from_coor(coor=(coorx,coory))
             ramanMea = self._current_mappingUnit.get_RamanMeasurement(clicked_measurementId)
             try:
-                wavelength = float(self.get_current_wavelength())
+                wavelength = self.get_current_wavelength()
+                if wavelength is None: raise ValueError('Wavelength is None')
                 intensity = ramanMea.get_intensity(wavelength=wavelength)
                 intensity_str = f"{intensity:.1f}"
             except Exception as e:

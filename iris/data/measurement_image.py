@@ -586,17 +586,17 @@ class MeaImg_Unit():
         
         return x_pixel, y_pixel
         
-    def convert_stg2mea(self, coor_stage_mm:tuple[float,float,float])\
-        -> tuple[float,float,float]:
+    def convert_stg2mea(self, coor_stage_mm:tuple[float,float,float]|tuple[float,float])\
+        -> tuple[float,float,float]|tuple[float,float]:
         """
         Calculates the measurement coordinates from the stage coordinates based on the laser coordinates
         stored in the calibration parameters
         
         Args:
-            stage_coor (tuple[float,float,float]): Stage coordinates (X,Y,Z) in mm
+            stage_coor (tuple[float,float,float]|tuple[float,float]): Stage coordinates (X,Y,Z) in mm or (X,Y) in mm
         
         Returns:
-            tuple[float,float,float]: Measurement coordinates (X,Y,Z) in mm
+            tuple[float,float,float]|tuple[float,float]: Measurement coordinates (X,Y,Z) in mm or (X,Y) in mm
         """
         if not isinstance(self._calibration, ImgMea_Cal): raise ValueError('Calibration is not set')
         
