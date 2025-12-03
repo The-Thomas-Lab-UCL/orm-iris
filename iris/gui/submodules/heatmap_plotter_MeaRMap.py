@@ -2,22 +2,17 @@
 A class to control the plot for SERS mapping measurements. To be used inside the high level controller module.
 """
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication
+from PySide6.QtCore import Signal, Slot, QTimer, QCoreApplication
 
 import matplotlib
 import matplotlib.backend_bases
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-import matplotlib.pyplot as plt
-from matplotlib.axes import Axes
-from matplotlib.colorbar import Colorbar
-from matplotlib.figure import Figure
 matplotlib.use('Agg')   # Force matplotlib to use the backend to prevent memory leak
 
-import numpy as np
 
 import threading
 import queue
-from typing import Any, Callable, Literal
+from typing import Any
 
 if __name__ == '__main__':
     import sys
@@ -28,8 +23,6 @@ if __name__ == '__main__':
 from iris.utils.general import *
 from iris.data.measurement_RamanMap import MeaRMap_Hub,MeaRMap_Unit, MeaRMap_Plotter
 
-from iris.gui import AppPlotEnum
-from iris import DataAnalysisConfigEnum as DAEnum
 
 from iris.resources.heatmap_plotter_ui import Ui_HeatmapPlotter
 

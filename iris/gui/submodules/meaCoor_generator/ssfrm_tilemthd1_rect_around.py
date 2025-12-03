@@ -1,7 +1,9 @@
-import tkinter as tk
-from tkinter import messagebox
+import PySide6.QtWidgets as qw
+from PySide6.QtCore import Signal, Slot, QObject, QThread
+
 from typing import Callable
-from PIL import Image
+
+
 import numpy as np
 from math import ceil
 from scipy.interpolate import griddata
@@ -15,81 +17,94 @@ if __name__ == '__main__':
 from iris.gui.motion_video import Wdg_MotionController
 from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates
 
-from iris.data.calibration_objective import ImgMea_Cal
+from iris.data.calibration_objective import ImgMea_Cal, generate_dummy_calibrationHub
 from iris.data.measurement_coordinates import List_MeaCoor_Hub, MeaCoor_mm
 
 from iris.utils.general import *
 
+from iris.resources.tiling_method_control_ui import Ui_tiling_method_control
+
+class TilingMethodControl_Design(Ui_tiling_method_control, qw.QWidget):
+    def __init__(self,parent):
+        super().__init__(parent)
+        self.setupUi(self)
+        self.setLayout(self.main_layout)
+
 OVERLAP = 0.00   # Overlap between each tile (ratio to the image size)
 
-class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
-    """A basic class that manage a mapping method
+class worker_zcoor_getter(QObject):
+    """
+    A worker class to get the current Z coordinate in a separate thread
+    """
+    sig_return_zcoor = Signal(float)  # Signal to return the Z coordinate
+    
+    def __init__(self, motion_controller:Wdg_MotionController):
+        super().__init__()
+        self._motion_controller = motion_controller
+        
+    @Slot()
+    def get_current_zcoor(self):
+        """Gets the current Z coordinate from the motion controller and emits it
+        """
+        try:
+            z_mm = self._motion_controller.get_coordinates_closest_mm()[2]
+            self.sig_return_zcoor.emit(z_mm)
+        except Exception as e:
+            print('worker_zcoor_getter >> Error getting current Z coordinate:',e)
+
+class tiling_method_rectxy_scan_constz_around_a_point(qw.QWidget):
+    """
+    A basic class that manage a mapping method
 
     Args:
         tk (tkinter): tkinter library
     """
+    sig_store_currZ = Signal()  # Signal to store the current Z coordinate
+    
     def __init__(
         self,
-        master:tk.Tk|tk.Frame,
+        parent:qw.QWidget,
         motion_controller:Wdg_MotionController,
-        coorHub:List_MeaCoor_Hub,
+        tree_coor:Wdg_Treeview_MappingCoordinates,
         getter_cal:Callable[[],ImgMea_Cal],
         *args, **kwargs) -> None:
         # Place itself in the given master frame (container)
-        super().__init__(master)
+        super().__init__(parent)
         
         # Sets up the other controllers
         self._motion_controller = motion_controller
-        self._getter_img = self._motion_controller.get_current_image    # Function to get the current image
         self._getter_imgCal = getter_cal    # Function to get the image calibration
-        self._coorHub = coorHub
+        
+    # >>> Main widget setup <<<
+        self._widget = TilingMethodControl_Design(self)
+        lyt = qw.QVBoxLayout(self)
+        lyt.addWidget(self._widget)
+        self.setLayout(lyt)
+        wdg = self._widget
         
     # >>> Top level frames <<<
-        self._frm_tv_mapCoor = Wdg_Treeview_MappingCoordinates(parent=self,mappingCoorHub=coorHub)
-        frm_control = tk.Frame(self)
-        
-        row=0; col=0
-        self._frm_tv_mapCoor.grid(row=row,column=0,sticky='nsew');row+=1
-        frm_control.grid(row=row,column=0,sticky='nsew')
-        
-        [self.grid_rowconfigure(i,weight=1) for i in range(row+1)]  # Make the rows expandable
-        [self.grid_columnconfigure(i,weight=1) for i in range(col+1)]  # Make the columns expandable
+        self._frm_tv_mapCoor = tree_coor
         
     # >>> Widgets <<<
         # Make the widgets to store the coordinates
-        self._bool_overrideZ = tk.BooleanVar(value=False)
-        chk_overrideZ = tk.Checkbutton(frm_control,text='Override Z-coordinate for the tiling',variable=self._bool_overrideZ)
-        lbl_coorz = tk.Label(frm_control,text='Z-coordinate override for the tiling [μm]:')
-        self._str_coorz_override = tk.StringVar(value='')
-        self._entry_coorz = tk.Entry(frm_control, state='disabled', textvariable=self._str_coorz_override)
-        btn_coorz_set = tk.Button(frm_control,text='Set current-Z coordinate',command=self._set_z_override)
-        chk_overrideZ.bind('<Button-1>', lambda e: self._entry_coorz.config(state='normal' if not self._bool_overrideZ.get() else 'disabled'))
+        self._chk_overrideZ = wdg.chk_ZOverride
+        self._entry_coorz = wdg.ent_zcoor
+        btn_coorz_set = wdg.btn_currZCoor
+        btn_coorz_set.clicked.connect(self.sig_store_currZ.emit)
         
-        self._lbl_crop = tk.Label(frm_control,text='Cropping factors (X,Y) [a.u.]:')
-        self._entry_cropx = tk.Entry(frm_control)
-        self._entry_cropy = tk.Entry(frm_control)
-        self._entry_cropx.insert(0,'0.0')  # Default cropping factor x
-        self._entry_cropy.insert(0,'0.0')  # Default cropping factor y
+        self._spin_cropx = wdg.spin_cropx
+        self._spin_cropy = wdg.spin_cropy
         
-        # Pack the widgets
-        chk_overrideZ.grid(row=0,column=0,columnspan=2,sticky='w')
-        lbl_coorz.grid(row=1,column=0,columnspan=2,sticky='w')
-        self._entry_coorz.grid(row=2,column=0)
-        btn_coorz_set.grid(row=2,column=1,sticky='w')
+    # >>> Signals <<<
+        self._worker = worker_zcoor_getter(self._motion_controller)
+        self._thread = QThread()
+        self._worker.moveToThread(self._thread)
+        self._thread.start()
+        self.destroyed.connect(self._thread.quit)
+        self._thread.finished.connect(self._worker.deleteLater)
         
-        self._lbl_crop.grid(row=3,column=0,columnspan=2,sticky='w')
-        self._entry_cropx.grid(row=4,column=0)
-        self._entry_cropy.grid(row=4,column=1)
-
-        [self.grid_rowconfigure(i,weight=1) for i in range(5)]  # Make the rows expandable
-        [self.grid_columnconfigure(i,weight=1) for i in range(2)]  # Make the columns expandable
-        
-    def _set_z_override(self):
-        try:
-            z = str(float(self._motion_controller.get_coordinates_closest_mm()[2]*1e3))
-            self._str_coorz_override.set(z)
-        except Exception as e:
-            messagebox.showerror('Error',f'Invalid Z-coordinate: {e}')
+        self.sig_store_currZ.connect(self._worker.get_current_zcoor)
+        self._worker.sig_return_zcoor.connect(lambda z: self._entry_coorz.setText(str(float(z*1e3))))
         
     def get_tiling_coordinates_mm_and_cropFactors_rel(self) -> tuple[list[MeaCoor_mm],float,float]|None:
         """
@@ -102,7 +117,7 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
         list_meaCoor_mm = self._generate_tiling_coordinates()
         
         if list_meaCoor_mm is None:
-            messagebox.showerror('Error','No mapping coordinates generated. Please generate the coordinates first.')
+            qw.QMessageBox.warning(self,'Error','No mapping coordinates generated. Please generate the coordinates first.')
             return None
         else:
             cropx_reduction, cropy_reduction = self._get_crop_factors()
@@ -122,18 +137,18 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
     
     def _get_crop_factors(self) -> tuple[float,float]:
         """
-        Gets the cropping factors for the x and y direction.
+        Gets the cropping factors for the x and y direction. (Between 0 and 1)
         
         Returns:
             tuple: The cropping factors for the x and y direction
         """
         try:
-            cropx_reduction = float(self._entry_cropx.get())
-            cropy_reduction = float(self._entry_cropy.get())
+            cropx_reduction = self._spin_cropx.value()/100
+            cropy_reduction = self._spin_cropy.value()/100
             assert 0 <= cropx_reduction < 1 and 0 <= cropy_reduction < 1, 'Cropping factors must be between 0 and 1'
             return (cropx_reduction,cropy_reduction)
         except Exception as e:
-            messagebox.showerror('Error',f'{e}\nUsing the default cropping factors (0.0, 0.0) instead')
+            qw.QMessageBox.warning(self,'Error',f'{e}\nUsing the default cropping factors (0.0, 0.0) instead')
             return (0.0,0.0)
     
     def _generate_tiling_coordinates(self) -> list[MeaCoor_mm]|None:
@@ -145,31 +160,33 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
             list[MeaCoor_mm]|None: The mapping coordinates (list of (x,y,z) tuples) or None if an error occurs
         """
         list_meaCoor_mm = self._frm_tv_mapCoor.get_selected_mappingCoor()
-        if len(list_meaCoor_mm) < 1: messagebox.showerror('Error','Please select at least one mapping coordinate'); return
+        if len(list_meaCoor_mm) < 1:
+            qw.QMessageBox.warning(self,'Error','Please select at least one mapping coordinate')
+            return
         
         cropx_reduction, cropy_reduction = self._get_crop_factors()
         
-        image = self._getter_img()
-        if not isinstance(image,Image.Image):
-            messagebox.showerror('Error','No image set. Please set the image first.')
+        image_size = self._motion_controller.get_image_shape()
+        if image_size is None:
+            qw.QMessageBox.warning(self,'Error','No image received from the motion controller')
             return
         
         cal = self._getter_imgCal()
         if not isinstance(cal,ImgMea_Cal):
-            messagebox.showerror('Error','No objective calibration selected. Please set the objective calibration first.')
+            qw.QMessageBox.warning(self,'Error','No objective calibration selected. Please set the objective calibration first.')
             return
         
         # Define the grid boundaries
-        list_ret_MeaCoor_mm = [self._calculate_tiling_coordinates(meaCoor_mm, cropx_reduction, cropy_reduction, image, cal) for meaCoor_mm in list_meaCoor_mm]
+        list_ret_MeaCoor_mm = [self._calculate_tiling_coordinates(meaCoor_mm, cropx_reduction, cropy_reduction, image_size, cal) for meaCoor_mm in list_meaCoor_mm]
         list_ret_MeaCoor_mm = [meaCoor_mm for meaCoor_mm in list_ret_MeaCoor_mm if len(meaCoor_mm.mapping_coordinates) > 0]
         if len(list_ret_MeaCoor_mm) == 0:
-            messagebox.showerror('Error','No valid mapping coordinates generated. Please check the input parameters.')
+            qw.QMessageBox.warning(self,'Error','No valid mapping coordinates generated. Please check the input parameters.')
             return None
         
         return list_ret_MeaCoor_mm
 
     def _calculate_tiling_coordinates(self, meaCoor_mm: MeaCoor_mm, cropx_reduction: float,
-        cropy_reduction: float, image: Image.Image, cal: ImgMea_Cal) -> MeaCoor_mm:
+        cropy_reduction: float, image_size: tuple[int, int], cal: ImgMea_Cal) -> MeaCoor_mm:
         """
         Calculates the tiling coordinates based on the input parameters.
 
@@ -177,7 +194,7 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
             meaCoor_mm (MeaCoor_mm): The mapping coordinates to tile.
             cropx_reduction (float): The cropping factor for the x direction.
             cropy_reduction (float): The cropping factor for the y direction.
-            image (Image.Image): An example image to be used for the size calculation. (Typically this would be\
+            image_size (tuple[int, int]): The size of an example image to be used for the size calculation. (Typically this would be\
                 an image from the video camera)
             cal (ImgMea_Cal): The objective calibration object.
 
@@ -191,10 +208,10 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
         y_max = max([coor[1] for coor in list_coor_mm])
         list_coor_xy_mm = [(coor[0], coor[1]) for coor in list_coor_mm]
         list_coor_z_mm = [coor[2] for coor in list_coor_mm]
-                        
+        
         # Calculate the resolution required
         x_scale, y_scale = self._get_xy_scales_mmPerPixel()
-        img_size_x, img_size_y = image.size
+        img_size_x, img_size_y = image_size
         x_size_mm = img_size_x * x_scale
         y_size_mm = img_size_y * y_scale
         
@@ -229,12 +246,12 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
             fill_value=np.nan
         )
         
-        if self._bool_overrideZ.get():
+        if self._chk_overrideZ.isChecked():
             try:
-                z_override = float(self._entry_coorz.get()) * 1e-3
+                z_override = float(self._entry_coorz.text()) * 1e-3
                 list_z_mm = [z_override for _ in list_z_mm]
             except Exception as e:
-                messagebox.showerror('Error',f'Invalid Z-coordinate override: {e}\nUsing the interpolated Z-coordinates instead.')
+                qw.QMessageBox.warning(self,'Error',f'Invalid Z-coordinate override: {e}\nUsing the interpolated Z-coordinates instead.')
         
         list_xyz_mm = [(x, y, z) for (x, y), z in zip(list_xy_mm, list_z_mm) if not np.isnan(z)]
         ret_mapCoor_mm = MeaCoor_mm(
@@ -244,17 +261,36 @@ class tiling_method_rectxy_scan_constz_around_a_point(tk.Frame):
         return ret_mapCoor_mm
             
 def test_rect2():
-    root = tk.Tk()
-    root.title('Test')
+    import sys
+    from iris.gui.motion_video import generate_dummy_motion_controller
     
-    status_bar = tk.Label(root,text='Ready',bd=1,relief=tk.SUNKEN,anchor=tk.W)
-    status_bar.pack(side=tk.BOTTOM,fill=tk.X)
-    motion_controller = Wdg_MotionController(root,True)
+    app = qw.QApplication([])
+    window = qw.QMainWindow()
+    wdg_main = qw.QWidget()
+    window.setCentralWidget(wdg_main)
+    lyt = qw.QHBoxLayout()
+    wdg_main.setLayout(lyt)
     
-    mapping_method = tiling_method_rectxy_scan_constz_around_a_point(root,motion_controller,status_bar)
-    mapping_method.pack()
+    motion_controller = generate_dummy_motion_controller(wdg_main)
+    coorhub = List_MeaCoor_Hub()
+    calhub = generate_dummy_calibrationHub()
     
-    root.mainloop()
+    tree = Wdg_Treeview_MappingCoordinates(wdg_main,coorhub)
+    coorhub.generate_dummy_data()
+    
+    wdg = tiling_method_rectxy_scan_constz_around_a_point(
+        parent=wdg_main,
+        motion_controller=motion_controller,
+        tree_coor=tree,
+        getter_cal=lambda: calhub.get_calibration(calhub.get_calibration_ids()[0])
+    )
+    
+    lyt.addWidget(motion_controller)
+    lyt.addWidget(tree)
+    lyt.addWidget(wdg)
+    
+    window.show()
+    sys.exit(app.exec())
     
 if __name__ == '__main__':
     test_rect2()

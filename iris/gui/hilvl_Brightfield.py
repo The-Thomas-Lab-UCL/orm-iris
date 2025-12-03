@@ -42,7 +42,7 @@ from iris.gui.hilvl_coorGen import Wdg_Hilvl_CoorGenerator
 
 from iris.gui.image_calibration.plotter_heatmap_overlay import Frm_HeatmapOverlay
 from iris.gui.image_calibration.objective_calibration import Wdg_Calibration
-from iris.gui.submodules.image_tiling import Frm_HiLvlTiling
+from iris.gui.submodules.image_tiling import Wdg_HiLvlTiling
 from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam
 
 from iris.data.measurement_coordinates import List_MeaCoor_Hub, MeaCoor_mm
@@ -138,21 +138,17 @@ class Wdg_HighLvlController_Brightfield(qw.QWidget):
     #     # Pack the widgets
     #     self._frm_heatmapOverlay.grid(row=0, column=0)
         
-    # # >> Tiling frame <<
-    #     tiling = Frm_HiLvlTiling(
-    #         master=tfrm_tiling,
-    #         motion_controller=self._motion_ctrl,
-    #         stageHub=self._stageHub,
-    #         dataHub_img=self._dataHub_img,
-    #         dataHub_imgcal=self._dataHub_imgcal,
-    #         coorHub=self._coorHub,
-    #         processor=self._processor
-    #     )
-        
-    #     tiling.grid(row=0,column=0,sticky='nsew')
-        
-    #     tfrm_tiling.rowconfigure(0,weight=1)
-    #     tfrm_tiling.columnconfigure(0,weight=1)
+    # >> Tiling frame <<
+        tiling = Wdg_HiLvlTiling(
+            parent=self,
+            motion_controller=self._motion_ctrl,
+            stageHub=self._stageHub,
+            dataHub_img=self._dataHub_img,
+            dataHub_imgcal=self._dataHub_imgcal,
+            coorHub=self._coorHub,
+            processor=self._processor
+        )
+        wdg.lyt_tiling.addWidget(tiling)
         
 
     
@@ -206,6 +202,7 @@ def test_hilvl_Brightfield_app(processor:mpp.Pool|None=None):
     layout.addWidget(wdg_hilvlcoorgen)
     layout.addWidget(dataHub)
     
+    wdg_hilvlcoorgen._coorHub.generate_dummy_data()
     
     main_window.show()
     

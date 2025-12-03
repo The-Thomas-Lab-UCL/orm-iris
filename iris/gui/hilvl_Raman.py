@@ -33,7 +33,7 @@ from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
 from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates, Wdg_Hilvl_CoorGenerator
 
 from iris.gui.submodules.heatmap_plotter_MeaRMap import Wdg_MappingMeasurement_Plotter
-from iris.gui.submodules.image_tiling import Frm_HiLvlTiling
+from iris.gui.submodules.image_tiling import Wdg_HiLvlTiling
 
 from iris.data.measurement_RamanMap import MeaRMap_Unit, MeaRMap_Hub, MeaRMap_Handler
 from iris.data.measurement_Raman import MeaRaman,MeaRaman_Handler

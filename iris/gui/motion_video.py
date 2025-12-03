@@ -143,12 +143,13 @@ class Motion_MoveBreathingZ_Worker(QObject):
     def __init__(self, ctrl_z: 'Controller_Z', parent=None):
         super().__init__(parent)
         self.ctrl_z = ctrl_z
-        self._breathing_timer = QTimer(self)
-        self._breathing_timer.timeout.connect(self._do_breathing_step)
-        self._breathing_state = 0 # Use a state machine to track the motion
+        self._breathing_timer: QTimer|None = None
         
     @Slot()
     def start(self):
+        self._breathing_timer = QTimer(self)
+        self._breathing_timer.timeout.connect(self._do_breathing_step)
+        self._breathing_state = 0 # Use a state machine to track the motion
         self._breathing_timer.start(10) # 50ms interval
         
     @Slot()
@@ -167,7 +168,8 @@ class Motion_MoveBreathingZ_Worker(QObject):
 
     @Slot()
     def stop(self):
-        self._breathing_timer.stop()
+        if self._breathing_timer is not None:
+            self._breathing_timer.stop()
         self.signal_breathing_finished.emit()
 
 class Motion_AutoCoorReport_Worker(QObject):
@@ -177,12 +179,13 @@ class Motion_AutoCoorReport_Worker(QObject):
     def __init__(self, stageHub:DataStreamer_StageCam, parent=None):
         super().__init__(parent)
         self._stageHub = stageHub
-        self._timer = QTimer(self)
-        self._timer.setInterval(100)
-        self._timer.timeout.connect(self._emit_coor)
+        self._timer: QTimer|None = None
         
     @Slot()
     def start(self):
+        self._timer = QTimer(self)
+        self._timer.setInterval(100)
+        self._timer.timeout.connect(self._emit_coor)
         self._timer.start()
         
     def _emit_coor(self):
@@ -1249,6 +1252,17 @@ class Wdg_MotionController(qw.QGroupBox):
             self._flg_isNewFrmReady.wait()
         return self._currentImage
     
+    def get_image_shape(self) -> tuple[int,int]|None:
+        """
+        Returns the shape of the current image in (width, height)
+
+        Returns:
+            tuple[int,int]|None: The shape of the current image in (width, height) or None if no image is available
+        """
+        if isinstance(self._currentImage,Image.Image):
+            return self._currentImage.size
+        return None
+    
     def _overlay_scalebar(self,img:Image.Image) -> Image.Image:
         """
         Overlays a scalebar on the image based on the image calibration file
@@ -1361,7 +1375,6 @@ class Wdg_MotionController(qw.QGroupBox):
             message (str, optional): The update message. Defualts to None
             bg_colour (str, optional): Background colour. Defaults to 'default'.
         """
-        print(f'Status bar update: {message}, bg_colour: {bg_colour}')
         if not message: message = 'Motion controller ready'
         
         try:
@@ -1369,7 +1382,6 @@ class Wdg_MotionController(qw.QGroupBox):
             self._statbar.setStyleSheet(f"background-color: {bg_colour}") if bg_colour is not None else self._statbar.setStyleSheet("")
         except Exception as e:
             print(f'Status bar update failed: {e}')
-        
         
     def terminate(self):
         """

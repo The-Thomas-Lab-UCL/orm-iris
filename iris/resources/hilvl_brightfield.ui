@@ -19,17 +19,15 @@
      <item>
       <widget class="QTabWidget" name="tabWidget">
        <property name="currentIndex">
-        <number>2</number>
+        <number>0</number>
        </property>
-       <widget class="QWidget" name="tab_captureDisplay">
+       <widget class="QWidget" name="tab_tiling">
         <attribute name="title">
-         <string>Image capture and display</string>
+         <string>Image tiling</string>
         </attribute>
         <layout class="QHBoxLayout" name="horizontalLayout">
          <item>
-          <widget class="QWidget" name="wdg_holder_capDisp" native="true">
-           <layout class="QVBoxLayout" name="lyt_holder_imgCapDisp"/>
-          </widget>
+          <layout class="QVBoxLayout" name="lyt_tiling"/>
          </item>
         </layout>
        </widget>
@@ -39,9 +37,7 @@
         </attribute>
         <layout class="QVBoxLayout" name="verticalLayout_5">
          <item>
-          <widget class="QWidget" name="wdg_holder_heatmapOverlay" native="true">
-           <layout class="QVBoxLayout" name="lyt_holder_heatmapOverlay"/>
-          </widget>
+          <layout class="QVBoxLayout" name="lyt_heatmapOverlay"/>
          </item>
         </layout>
        </widget>

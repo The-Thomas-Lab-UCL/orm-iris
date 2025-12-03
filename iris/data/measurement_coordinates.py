@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pickle
 from typing import Callable, Self
 import pandas as pd
+from random import random
 
 if __name__ == '__main__':
     SCRIPT_DIR = os.path.abspath(r'.\iris')
@@ -291,6 +292,8 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         """
         for i in range(num_units):
             mappingUnit_name = f"Unit_{i+1}"
-            mapping_coordinates = [(float(x), float(y), float(z)) for x, y, z in zip(range(num_coords), range(num_coords), range(num_coords))]
+            # Randomise the coordinates between 0 and 1 multiplied by a factor
+            multiplier = 10000
+            mapping_coordinates = [(float(random()*multiplier), float(random()*multiplier), float(random()*multiplier)) for _ in range(num_coords)]
             mapCoor = MeaCoor_mm(mappingUnit_name=mappingUnit_name, mapping_coordinates=mapping_coordinates)
             self.append(mapCoor)

@@ -3,14 +3,14 @@
 A class that manages the motion controller aspect for the Ocean Direct Raman spectrometer
 """
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication, QMetaType, QMutex, QMutexLocker, QWaitCondition
+from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QMutex, QMutexLocker, QWaitCondition
 
 import os
 import multiprocessing.pool as mpp
 
 import threading
 import queue
-from typing import Callable, Any, TypedDict
+from typing import Any, TypedDict
 from enum import Enum
 
 import time
@@ -156,7 +156,6 @@ class RamanMeasurement_Worker(QObject):
         self._ramanHub = ramanHub
         self._syncer_acquisition = syncer_acquisition
         self._isacquiring = False
-        self._timer_continuous = QTimer()
         
         self._acquisition_params:AcquisitionParams|None = None
         self._list_queue_observer:list[queue.Queue] = []    

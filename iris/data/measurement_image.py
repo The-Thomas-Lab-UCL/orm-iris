@@ -703,6 +703,8 @@ class MeaImg_Hub():
         self._dict_unit_NameID = {}         # Dictionary to store the unit name and ID relation (name:ID)
         self._dict_unit_IDName = {}         # Dictionary to store the unit ID and name relation (ID:name)
         
+        self._list_observer = []          # List of observers for the hub
+        
     def check_measurement_exist(self) -> bool:
         """
         Checks if the measurements are stored
@@ -784,6 +786,8 @@ class MeaImg_Hub():
         self._dict_unit_NameID[unitName] = unitId
         self._dict_unit_IDName[unitId] = unitName
         
+        self.notify_observers()
+        
     def reset_ImageMeasurementUnits(self) -> None:
         """
         Resets the ImageMeasurement_Units in the hub
@@ -792,6 +796,8 @@ class MeaImg_Hub():
         self._dict_ImageUnits['image_unit'].clear()
         self._dict_unit_NameID.clear()
         self._dict_unit_IDName.clear()
+        
+        self.notify_observers()
         
     def remove_ImageMeasurementUnit(self,unit_id:str) -> None:
         """
@@ -810,6 +816,8 @@ class MeaImg_Hub():
         self._dict_unit_NameID.pop(unit_name)
         self._dict_unit_IDName.pop(unit_id)
         
+        self.notify_observers()
+        
     def get_ImageMeasurementUnit(self,unit_id:str) -> MeaImg_Unit:
         """
         Returns an ImageMeasurement_Unit from the hub
@@ -824,6 +832,35 @@ class MeaImg_Hub():
         
         idx = self._dict_ImageUnits['unit_id'].index(unit_id)
         return self._dict_ImageUnits['image_unit'][idx]
+    
+    def add_observer(self,observer:Callable) -> None:
+        """
+        Adds an observer to the hub
+
+        Args:
+            observer (Callable): Observer function to be added
+        """
+        if not isinstance(observer, Callable): raise ValueError('Observer must be a callable function')
+        self._list_observer.append(observer)
+        
+    def remove_observer(self,observer:Callable) -> None:
+        """
+        Removes an observer from the hub
+
+        Args:
+            observer (Callable): Observer function to be removed
+        """
+        if not isinstance(observer, Callable): raise ValueError('Observer must be a callable function')
+        if not observer in self._list_observer: raise ValueError('Observer does not exist in the list')
+        self._list_observer.remove(observer)
+        
+    def notify_observers(self) -> None:
+        """
+        Notifies all observers of an event
+        """
+        for observer in self._list_observer:
+            try: observer()
+            except Exception as e: print(f'Observer notification error: {e}')
     
     def test_generate_dummy(self):
         """

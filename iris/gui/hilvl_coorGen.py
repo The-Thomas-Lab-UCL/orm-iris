@@ -207,7 +207,7 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
     
     _sig_update_tree = Signal() # Emitted when the treeview needs to be updated.
     
-    def __init__(self,parent,mappingCoorHub:List_MeaCoor_Hub):
+    def __init__(self,parent:qw.QWidget,mappingCoorHub:List_MeaCoor_Hub):
         """
         Initialises the treeview for the mapping coordinates.
         
