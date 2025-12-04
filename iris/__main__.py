@@ -302,6 +302,7 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         """
         Turns on all the auto-updaters once all the widgets are initialised
         """
+        print('>>>>> IRIS: PERFORMING FINAL INITIALISATIONS <<<<<')
         self._motion._init_workers()
         self._raman.initialise_spectrometer_n_analyser()
         # [extension.initialise() for extension in self._list_extensions_toplevel]
@@ -310,6 +311,7 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         
         self._hilvl_coorGen.initialise()
         self._hilvl_raman.initialise()
+        print('>>>>> IRIS: INITIALISATIONS COMPLETE <<<<<')
         
     # def _set_extensions(self):
     #     """

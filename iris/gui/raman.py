@@ -537,14 +537,14 @@ class Wdg_SpectrometerController(qw.QWidget):
         ### for single measurement integration time
         self._spin_inttime = widget.spin_inttime_ms
         
-        self._spin_inttime.returnPressed.connect(lambda: self._request_integration_time(
+        self._spin_inttime.editingFinished.connect(lambda: self._request_integration_time(
             new_value_ms=int(self._spin_inttime.value())))
         
         ### for single measurement number of accumulation
         self._lbl_sngl_acq = widget.lbl_accum
         self._spin_sngl_acq = widget.spin_accum
         
-        self._spin_sngl_acq.returnPressed.connect(lambda: self.set_accumulation(
+        self._spin_sngl_acq.editingFinished.connect(lambda: self.set_accumulation(
             new_value=int(self._spin_sngl_acq.value())))
         
         if main: self.initialise_spectrometer_n_analyser()

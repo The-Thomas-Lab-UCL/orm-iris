@@ -3,7 +3,7 @@ import os
 import multiprocessing.pool as mpp
 
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer
+from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, Qt as qc
 
 import queue
 from enum import Enum
@@ -252,11 +252,15 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 
                 # Go to the requested coordinates
                 event_finish = threading.Event()
+                # print('Moving to coordinates:',coor)
+                # print('Emitting _sig_gotocor signal...')
                 self._sig_gotocor.emit(
                     (float(coor[0]),float(coor[1]),float(coor[2])),
                     event_finish
                 )
+                # print('Waiting for movement to complete...')
                 event_finish.wait(10)
+                # print('Movement wait finished. Event set:', event_finish.is_set())
                 
                 # Trigger the acquisition and wait for the return queue to be filled
                 self._sig_acquire_discrete_mea.emit(params)
@@ -380,12 +384,28 @@ class WorkerPipelineManager(QObject):
         raman_worker: RamanMeasurement_Worker,
         motion_controller: Wdg_MotionController,
         motion_goto_worker:Motion_GoToCoor_Worker,
+        parent=None
         ):
         """
         Initialises the signal-slot connections for the controller.
         """
-        hilvlacq_worker._sig_gotocor.connect(motion_goto_worker.work)
-        hilvlacq_worker._sig_setvelrel.connect(motion_controller.set_vel_relative)
+        super().__init__(parent)
+        
+        # Store references to prevent garbage collection
+        self._hilvlacq_worker = hilvlacq_worker
+        self._raman_worker = raman_worker
+        self._motion_controller = motion_controller
+        self._motion_goto_worker = motion_goto_worker
+        
+        # Use Qt.QueuedConnection to ensure proper cross-thread signal delivery
+        hilvlacq_worker._sig_gotocor.connect(
+            motion_goto_worker.work, 
+            qc.Qt.ConnectionType.QueuedConnection
+        )
+        hilvlacq_worker._sig_setvelrel.connect(
+            motion_controller.set_vel_relative,
+            qc.Qt.ConnectionType.QueuedConnection
+        )
         hilvlacq_worker._sig_append_queue_mea.connect(raman_worker.append_queue_observer_measurement)
         hilvlacq_worker._sig_remove_queue_mea.connect(raman_worker.remove_queue_observer_measurement)
         hilvlacq_worker._sig_acquire_discrete_mea.connect(raman_worker.acquire_single_measurement)
@@ -530,8 +550,50 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         """
         Initialises the controller, loading the last mapping coordinates from the temporary folder.
         """
-        pass
+        # Ensure motion controller workers are initialized before connecting
+        if hasattr(self.motion_controller, '_init_workers'):
+            self.motion_controller._init_workers()
         
+        # Re-initialize worker connections now that all workers are ready
+        self._reinit_worker_connections()
+        
+    def _reinit_worker_connections(self):
+        """
+        Re-initializes the worker connections after all workers are ready.
+        This is needed when running from the main app where worker initialization 
+        happens after the high-level controller is created.
+        """
+        # Create worker manager if it doesn't exist yet
+        if not hasattr(self, '_worker_manager') or self._worker_manager is None:
+            try:
+                motion_goto_worker = self.motion_controller.get_goto_worker()
+                self._worker_manager = WorkerPipelineManager(
+                    hilvlacq_worker=self._worker_hilvlacq,
+                    raman_worker=self.raman_controller.get_mea_worker(),
+                    motion_controller=self.motion_controller,
+                    motion_goto_worker=motion_goto_worker
+                )
+                self._worker_manager.setParent(self)
+            except AttributeError as e:
+                print(f"Warning: Could not initialize worker connections: {e}")
+                return
+        else:
+            # Disconnect old connections first
+            try:
+                self._worker_hilvlacq._sig_gotocor.disconnect()
+                self._worker_hilvlacq._sig_setvelrel.disconnect()
+            except Exception:
+                pass  # Connections might not exist yet
+            
+            # Re-establish connections with proper thread handling
+            self._worker_hilvlacq._sig_gotocor.connect(
+                self.motion_controller.get_goto_worker().work,
+                qc.Qt.ConnectionType.QueuedConnection
+            )
+            self._worker_hilvlacq._sig_setvelrel.connect(
+                self.motion_controller.set_vel_relative,
+                qc.Qt.ConnectionType.QueuedConnection
+            )
     def terminate(self):
         """
         Terminates the controller, saving the mapping coordinates to the temporary folder.
@@ -544,12 +606,23 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         """
     # >>> Worker setups <<<
         self._worker_hilvlacq = Hilvl_MeasurementAcq_Worker(self._dataHub_map.get_MappingHub(), self.raman_controller.get_syncer_acquisition())
-        self._worker_manager = WorkerPipelineManager(
-            hilvlacq_worker=self._worker_hilvlacq,
-            raman_worker=self.raman_controller.get_mea_worker(),
-            motion_controller=self.motion_controller,
-            motion_goto_worker=self.motion_controller.get_goto_worker()
-        )
+        
+        # Try to get the goto worker, but be defensive about timing
+        try:
+            motion_goto_worker = self.motion_controller.get_goto_worker()
+        except AttributeError:
+            # Workers not initialized yet, will be connected later in initialise()
+            motion_goto_worker = None
+            
+        if motion_goto_worker is not None:
+            self._worker_manager = WorkerPipelineManager(
+                hilvlacq_worker=self._worker_hilvlacq,
+                raman_worker=self.raman_controller.get_mea_worker(),
+                motion_controller=self.motion_controller,
+                motion_goto_worker=motion_goto_worker
+            )
+            # Set the parent to prevent garbage collection
+            self._worker_manager.setParent(self)
         self._worker_autoMeaStorer = Hilvl_MeasurementStorer_Worker(
             datastreamer_stage=self._stageHub,
         )

@@ -315,6 +315,8 @@ class Motion_GoToCoor_Worker(QObject):
             coors_mm (tuple[float,float,float]): Target coordinates in mm (x,y,z). Use None to skip moving that axis.
             event_finished (threading.Event): An event to signal when the movement is finished.
         """
+        # print('Motion_GoToCoor_Worker.work() called with coordinates (mm):',coors_mm)
+        # print('Thread ID:', threading.current_thread().ident)
         # If None is provided, assign the current coordinates (i.e., do not move)
         coor_x_mm, coor_y_mm, coor_z_mm = coors_mm
         if any([coor_x_mm is None,coor_y_mm is None,coor_z_mm is None]):
@@ -477,8 +479,7 @@ class Wdg_MotionController(qw.QGroupBox):
         self.sig_statbar_message.emit('Initialising the motion controllers','yellow')
         self._motion_controller_initialisation()
         self._init_workers()
-        
-        if main: self.video_initialise()
+        self.video_initialise()
 
     def _init_stageparam_widgets(self, widget:StageControl):
         """
