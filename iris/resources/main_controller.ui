@@ -20,7 +20,7 @@
       <item>
        <layout class="QVBoxLayout" name="verticalLayout_3">
         <item>
-         <layout class="QVBoxLayout" name="lytCalHub"/>
+         <layout class="QVBoxLayout" name="lytObjCalHub"/>
         </item>
         <item>
          <layout class="QVBoxLayout" name="lytMotionVideo"/>
@@ -73,7 +73,14 @@
            </attribute>
            <layout class="QVBoxLayout" name="verticalLayout_11">
             <item>
-             <layout class="QVBoxLayout" name="lytDataHubs"/>
+             <layout class="QVBoxLayout" name="verticalLayout7">
+              <item>
+               <layout class="QVBoxLayout" name="lytDataHubMap"/>
+              </item>
+              <item>
+               <layout class="QVBoxLayout" name="lytDataHubImg"/>
+              </item>
+             </layout>
             </item>
            </layout>
           </widget>

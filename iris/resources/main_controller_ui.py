@@ -32,10 +32,10 @@ class Ui_main_controller(object):
         self.main_layout.setObjectName(u"main_layout")
         self.verticalLayout_3 = QVBoxLayout()
         self.verticalLayout_3.setObjectName(u"verticalLayout_3")
-        self.lytCalHub = QVBoxLayout()
-        self.lytCalHub.setObjectName(u"lytCalHub")
+        self.lytObjCalHub = QVBoxLayout()
+        self.lytObjCalHub.setObjectName(u"lytObjCalHub")
 
-        self.verticalLayout_3.addLayout(self.lytCalHub)
+        self.verticalLayout_3.addLayout(self.lytObjCalHub)
 
         self.lytMotionVideo = QVBoxLayout()
         self.lytMotionVideo.setObjectName(u"lytMotionVideo")
@@ -88,10 +88,20 @@ class Ui_main_controller(object):
         self.tab_2.setObjectName(u"tab_2")
         self.verticalLayout_11 = QVBoxLayout(self.tab_2)
         self.verticalLayout_11.setObjectName(u"verticalLayout_11")
-        self.lytDataHubs = QVBoxLayout()
-        self.lytDataHubs.setObjectName(u"lytDataHubs")
+        self.verticalLayout7 = QVBoxLayout()
+        self.verticalLayout7.setObjectName(u"verticalLayout7")
+        self.lytDataHubMap = QVBoxLayout()
+        self.lytDataHubMap.setObjectName(u"lytDataHubMap")
 
-        self.verticalLayout_11.addLayout(self.lytDataHubs)
+        self.verticalLayout7.addLayout(self.lytDataHubMap)
+
+        self.lytDataHubImg = QVBoxLayout()
+        self.lytDataHubImg.setObjectName(u"lytDataHubImg")
+
+        self.verticalLayout7.addLayout(self.lytDataHubImg)
+
+
+        self.verticalLayout_11.addLayout(self.verticalLayout7)
 
         self.tabWidget.addTab(self.tab_2, "")
 

@@ -528,6 +528,32 @@ class Wdg_SpectrometerCalibrationGenerator(Ui_spectrometerCalibrator, qw.QWidget
             
             self._tree.addTopLevelItem(item)        
     
+class MainWindow_SpectrometerCalibrationGenerator(qw.QMainWindow):
+    """
+    Main window for the spectrometer calibration generator
+    """
+    def __init__(self, pipe_update: Connection):
+        super().__init__()
+        self.setWindowTitle('Spectrometer Calibration Generator')
+        self._wdg = Wdg_SpectrometerCalibrationGenerator(self, pipe_update)
+        self.setCentralWidget(self._wdg)
+        
+    def get_WdgCalibrator(self) -> Wdg_SpectrometerCalibrationGenerator:
+        """
+        Gets the calibrator widget
+        
+        Returns:
+            Wdg_SpectrometerCalibrationGenerator: The calibrator widget
+        """
+        return self._wdg
+        
+    @Slot()
+    def closeEvent(self, event):
+        """
+        Overrides the close event to hide the window instead of closing it
+        """
+        self.hide()
+        event.ignore()
     
 def test():
     app = qw.QApplication([])

@@ -476,8 +476,9 @@ class Wdg_MotionController(qw.QGroupBox):
         self.sig_statbar_message.connect(self.status_update)
         self.sig_statbar_message.emit('Initialising the motion controllers','yellow')
         self._motion_controller_initialisation()
+        self._init_workers()
         
-        if main: self._init_workers()
+        if main: self.video_initialise()
 
     def _init_stageparam_widgets(self, widget:StageControl):
         """
@@ -680,7 +681,6 @@ class Wdg_MotionController(qw.QGroupBox):
         Initialises the auto-updaters to be used post widget initialisations
         (ALL THREADS) to prevent the main thread from being blocked
         """
-        self.video_initialise()
         # For the coordinate status bar
         self._worker_coor_report = Motion_AutoCoorReport_Worker(stageHub=self._stageHub)
         self._worker_coor_report.sig_coor.connect(self._lbl_coor.setText)
