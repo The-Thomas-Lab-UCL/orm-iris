@@ -54,7 +54,7 @@ if __name__ == '__main__':
 
 
 from iris.utils.general import *
-from iris.calibration.calibration_generator import CalibrationParams, SpectrometerCalibrator, Frm_SpectrometerCalibrationGenerator
+from iris.calibration.calibration_generator import CalibrationParams, SpectrometerCalibrator, Wdg_SpectrometerCalibrationGenerator
 from iris.data.measurement_Raman import MeaRaman, MeaRaman_Plotter
 from iris.multiprocessing.basemanager import MyManager,get_my_manager, SyncManager
 
@@ -523,7 +523,7 @@ def test_initialise_cal_hub():
     
     # Calibrator setup
     app = tk.Tk()
-    calibrator_gui = Frm_SpectrometerCalibrationGenerator(app,pipe_front)
+    calibrator_gui = Wdg_SpectrometerCalibrationGenerator(app,pipe_front)
     calibrator_gui.pack()
     
     return hub,app

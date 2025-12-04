@@ -8,23 +8,21 @@ import os
 import multiprocessing as mp
 import multiprocessing.pool as mpp
 
-import tkinter as tk
-from tkinter import ttk
-from tkinter import messagebox
+import PySide6.QtWidgets as qw
 
 from iris.gui.motion_video import Wdg_MotionController
 from iris.gui.raman import Wdg_SpectrometerController
 from iris.gui.hilvl_Raman import Wdg_HighLvlController_Raman
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
-from iris.gui.hilvl_Brightfield import Frm_HighLvlController_Brightfield
+from iris.gui.hilvl_Brightfield import Wdg_HighLvlController_Brightfield
 from iris.gui.hilvl_coorGen import Wdg_Hilvl_CoorGenerator, List_MeaCoor_Hub
 
 from iris.gui.shortcut_handler import ShortcutHandler
 
 from iris.data.measurement_coordinates import List_MeaCoor_Hub
 
-from iris.calibration.calibration_generator import Frm_SpectrometerCalibrationGenerator
+from iris.calibration.calibration_generator import Wdg_SpectrometerCalibrationGenerator
 
 from iris.multiprocessing.basemanager import MyManager
 from iris.multiprocessing.dataStreamer_Raman import DataStreamer_Raman,initialise_manager_raman,initialise_proxy_raman
@@ -41,16 +39,19 @@ from iris import LibraryConfigEnum
 from iris.controllers import ControllerConfigEnum
 from iris.gui import ShortcutsEnum
 
-### Extension imports ###
-try:
-    from extensions.extension_template import Extension_TopLevel
-    from extensions.extension_intermediary import Ext_DataIntermediary
-    from extensions.optics_calibration_aid.ext_opticsCalibrationAid import Ext_OpticsCalibrationAid
-    flg_import_extension = True
-except Exception as e:
-    flg_import_extension = False
+# Import the UI
+from iris.resources.main_controller_ui import Ui_main_controller
 
-class controller_app(tk.Tk):
+# ### Extension imports ###
+# try:
+#     from extensions.extension_template import Extension_TopLevel
+#     from extensions.extension_intermediary import Ext_DataIntermediary
+#     from extensions.optics_calibration_aid.Ext_OpticsCalibrationAid import Ext_OpticsCalibrationAid
+#     flg_import_extension = True
+# except Exception as e:
+#     flg_import_extension = False
+
+class controller_app(Ui_main_controller,qw.QMainWindow):
     """
     Import the tkinter app class
     
@@ -68,32 +69,10 @@ class controller_app(tk.Tk):
         # Set the app windows name and inherit all the properties
         screenName = 'ORM-IRIS: Open-source Raman microscope controller'
         super().__init__()
-        self.title(screenName)
+        self.setupUi(self)
+        self.setWindowTitle(screenName)
         
     # > Main setups <
-        # > Major layout setup
-        frm_imgcal = tk.Frame(self)
-        frm_motion_video = tk.Frame(self)
-        frm_raman = tk.Frame(self)
-        notebook = ttk.Notebook(self)
-        sfrm_dataHub = tk.Frame(notebook)
-        
-        frm_imgcal.grid(row=0,column=0,sticky='new')
-        frm_motion_video.grid(row=1,column=0,sticky='nsew')
-        frm_raman.grid(row=0,column=1,rowspan=2,sticky='nsew')
-        notebook.grid(row=0,column=2,rowspan=2,sticky='nsew')
-        
-        # Grid configurations
-        self.grid_rowconfigure(0,weight=1)
-        self.grid_rowconfigure(1,weight=1)
-        self.grid_columnconfigure(0,weight=1)
-        self.grid_columnconfigure(1,weight=1)
-        self.grid_columnconfigure(2,weight=1)
-        
-        # Grid sub-configurations
-        frm_imgcal.grid_rowconfigure(0,weight=1)
-        frm_imgcal.grid_columnconfigure(0,weight=1)
-        
         # > Hub setups
         self._processor = processor
         self._ramanHub = raman_hub
@@ -101,25 +80,16 @@ class controller_app(tk.Tk):
         self._coorHub = List_MeaCoor_Hub()
         
         # Data hub setups
-        self._dataHub_map = Wdg_DataHub_Mapping(sfrm_dataHub,autosave=True)
-        self._dataHub_img = Wdg_DataHub_Image(sfrm_dataHub)
-        self._dataHub_imgcal = Wdg_DataHub_ImgCal(frm_imgcal)
-        
-        self._dataHub_map.grid(row=0,column=0,sticky='nsew')
-        self._dataHub_img.grid(row=1,column=0,sticky='nsew')
-        self._dataHub_imgcal.grid(row=0,column=0,sticky='nsew')
-        
-        sfrm_dataHub.grid_rowconfigure(0,weight=1)
-        sfrm_dataHub.grid_rowconfigure(1,weight=1)
-        sfrm_dataHub.grid_columnconfigure(0,weight=1)
+        self._dataHub_map = Wdg_DataHub_Mapping(self,autosave=True)
+        self._dataHub_img = Wdg_DataHub_Image(self)
+        self._dataHub_imgcal = Wdg_DataHub_ImgCal(self)
         
         # > Menu bar setup
-        self._menubar = tk.Menu(self)
-        self.config(menu=self._menubar)
+        self._menubar = self.menubar
         
         # Initialise the app subframes
         self._motion = Wdg_MotionController(
-            parent=frm_motion_video,
+            parent=self,
             xy_controller=xy_controller,
             z_controller=z_controller,
             stageHub=stage_hub,
@@ -127,22 +97,23 @@ class controller_app(tk.Tk):
             flg_issimulation=ControllerConfigEnum.SIMULATION_MODE.value)
         
         self._raman = Wdg_SpectrometerController(
-            parent=frm_raman,
+            parent=self,
             processor=self._processor,
             controller=raman_controller,
             ramanHub=raman_hub,
             dataHub=self._dataHub_map)
         
         self._hilvl_coorGen = Wdg_Hilvl_CoorGenerator(
-            parent=notebook,
+            parent=self,
             coorHub=self._coorHub,
             motion_controller=self._motion,
             dataHub_map=self._dataHub_map,
             dataHub_img=self._dataHub_img,
             dataHub_imgcal=self._dataHub_imgcal)
+        self.lytCoorGen.addWidget(self._hilvl_coorGen)
         
         self._hilvl_raman = Wdg_HighLvlController_Raman(
-            parent=notebook,
+            parent=self,
             motion_controller=self._motion,
             stageHub=stage_hub,
             raman_controller=self._raman,
@@ -153,9 +124,10 @@ class controller_app(tk.Tk):
             coorHub=self._coorHub,
             wdg_coorGen=self._hilvl_coorGen,
             processor=self._processor)
+        self.lytRaman.addWidget(self._hilvl_raman)
         
-        self._hilvl_brightfield = Frm_HighLvlController_Brightfield(
-            parent=notebook,
+        self._hilvl_brightfield = Wdg_HighLvlController_Brightfield(
+            parent=self,
             processor=self._processor,
             dataHub_map=self._dataHub_map,
             dataHub_img=self._dataHub_img,
@@ -163,45 +135,28 @@ class controller_app(tk.Tk):
             motion_controller=self._motion,
             stageHub=self._stageHub,
             coorHub=self._coorHub)
+        self.lytBrightfield.addWidget(self._hilvl_brightfield)
         
-        ## Pack the subframes
-        self._motion.grid(row=0,column=0,sticky='nsew')
-        self._raman.grid(row=0,column=0,sticky='nsew')
-        
-        notebook.add(self._hilvl_coorGen,text='Coordinate generator')
-        notebook.add(self._hilvl_raman,text='Raman imaging')
-        notebook.add(self._hilvl_brightfield,text='Brightfield imaging')
-        notebook.add(sfrm_dataHub,text='Data Hubs')
-        
-        # Grid configurations
-        self._motion.grid_rowconfigure(0,weight=1)
-        self._motion.grid_columnconfigure(0,weight=1)
-        frm_motion_video.grid_rowconfigure(0,weight=1)
-        frm_motion_video.grid_columnconfigure(0,weight=1)
-        
-        frm_raman.grid_rowconfigure(0,weight=1)
-        frm_raman.grid_columnconfigure(0,weight=1)
-        
-    # >> Set up the data manager <<
-        if flg_import_extension:
-            self._extension_intermediary = Ext_DataIntermediary(
-                raman_controller=raman_controller,
-                camera_controller=self._stageHub.get_camera_controller(),
-                xy_controller=xy_controller,
-                z_controller=z_controller,
-                frm_motion_controller=self._motion,
-                frm_raman_controller=self._raman,
-                frm_highlvl_raman=self._hilvl_raman,
-                frm_highlvl_brightfield=self._hilvl_brightfield,
-                frm_datahub_mapping=self._dataHub_map,
-                frm_datahub_image=self._dataHub_img,
-                frm_datahub_imgcal=self._dataHub_imgcal,
-                )
+    # # >> Set up the data manager <<
+    #     if flg_import_extension:
+    #         self._extension_intermediary = Ext_DataIntermediary(
+    #             raman_controller=raman_controller,
+    #             camera_controller=self._stageHub.get_camera_controller(),
+    #             xy_controller=xy_controller,
+    #             z_controller=z_controller,
+    #             frm_motion_controller=self._motion,
+    #             frm_raman_controller=self._raman,
+    #             frm_highlvl_raman=self._hilvl_raman,
+    #             frm_highlvl_brightfield=self._hilvl_brightfield,
+    #             frm_datahub_mapping=self._dataHub_map,
+    #             frm_datahub_image=self._dataHub_img,
+    #             frm_datahub_imgcal=self._dataHub_imgcal,
+    #             )
         
     # >> Set up the calibration generator <<
         self.toplevel_calibrator = tk.Toplevel(self)
         self.toplevel_calibrator.title('Spectrometer calibration')
-        self.frm_calibrator = Frm_SpectrometerCalibrationGenerator(
+        self.frm_calibrator = Wdg_SpectrometerCalibrationGenerator(
             parent=self.toplevel_calibrator,
             pipe_update=self._ramanHub.get_calibrator_pipe())
         self.frm_calibrator.pack() 

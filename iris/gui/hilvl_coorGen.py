@@ -31,7 +31,7 @@ from iris.utils.general import *
 from iris.gui import AppRamanEnum
 
 from iris.gui.motion_video import Wdg_MotionController
-# from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
+from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 
 from iris.data.measurement_image import ImgMea_Cal_Hub, MeaImg_Hub
@@ -379,7 +379,7 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         def reset():
             nonlocal self
         
-        if autosave: list_selection = self._tree.findItems('*', qw.Qt.MatchWildcard | qw.Qt.MatchRecursive)
+        if autosave: list_selection = self._tree.findItems('*', qw.Qt.MatchWildcard | qw.Qt.MatchRecursive) # pyright: ignore[reportAttributeAccessIssue] ; MatchWildcard and MatchRecursive attributes exists
         else: list_selection = self._tree.selectedItems()
         
         if len(list_selection) == 0:
@@ -542,23 +542,23 @@ class Wdg_Hilvl_CoorGenerator(qw.QWidget):
     A class to generate coordinates for the mapping measurement and image tiling.
     """
     def __init__(self,
-                 parent,
+                 parent:qw.QWidget,
                  coorHub:List_MeaCoor_Hub,
                  motion_controller:Wdg_MotionController,
                  dataHub_map:Wdg_DataHub_Mapping,
-                #  dataHub_img:Frm_DataHub_Image,
-                #  dataHub_imgcal:Frm_DataHub_ImgCal
+                 dataHub_img:Wdg_DataHub_Image,
+                 dataHub_imgcal:Wdg_DataHub_ImgCal,
                  ):
         """
         Initialises the coordinate generator frame.
         
         Args:
-            master (tk.Tk | tk.Frame): The parent frame or window.
-            coorHub (MappingCoordinatesHub): The hub for the mapping coordinates.
-            motion_controller (Frm_MotionController): The motion controller to use.
-            dataHub_map (Frm_DataHub_Mapping): The mapping data hub to use.
-            dataHub_img (Frm_DataHub_Image): The image measurement data hub to use.
-            dataHub_imgcal (Frm_DataHub_ImgCal): The image calibration data hub to use.
+            parent (qw.QWidget): The parent widget.
+            coorHub (List_MeaCoor_Hub): The hub for the mapping coordinates.
+            motion_controller (Wdg_MotionController): The motion controller to use.
+            dataHub_map (Wdg_DataHub_Mapping): The mapping data hub to use.
+            dataHub_img (Wdg_DataHub_Image): The image measurement data hub to use.
+            dataHub_imgcal (Wdg_DataHub_ImgCal): The image calibration data hub to use.
         """
     # >>> Initial setup <<<
         super().__init__(parent)
@@ -566,8 +566,8 @@ class Wdg_Hilvl_CoorGenerator(qw.QWidget):
         self._coorHub = coorHub
         self._motion_controller = motion_controller
         self._dataHub_map = dataHub_map
-        # self._dataHub_img = dataHub_img
-        # self._dataHub_imgcal = dataHub_imgcal
+        self._dataHub_img = dataHub_img
+        self._dataHub_imgcal = dataHub_imgcal
         
     # >>> Main widget/layout setup <<<
         self._widget = Hilvl_CoorGen_UiDesign(self)
@@ -689,8 +689,8 @@ class Wdg_Hilvl_CoorGenerator(qw.QWidget):
             if mappingUnit_name == '' or not isinstance(mappingUnit_name,str)\
                 or mappingUnit_name in list_mappingUnit_names or self._coorHub.search_mappingCoor(mappingUnit_name) is not None:
                 retry = qw.QMessageBox.question(self, 'Error',"Invalid 'mappingUnit name'. The name cannot be empty or already exist. Please try again.",
-                    qw.QMessageBox.Retry | qw.QMessageBox.Cancel)
-                if retry == qw.QMessageBox.Cancel: return
+                    qw.QMessageBox.Retry | qw.QMessageBox.Cancel) # pyright: ignore[reportAttributeAccessIssue] ; Retry and Cancel attributes exists
+                if retry == qw.QMessageBox.Cancel: return # pyright: ignore[reportAttributeAccessIssue] ; Retry and Cancel attributes exists
             else: break
         
         mappingCoor = MeaCoor_mm(mappingUnit_name,mapping_coordinates)
@@ -724,8 +724,8 @@ class Wdg_Hilvl_CoorGenerator(qw.QWidget):
             list_new_mappingUnit_names = [mappingUnit_name+f'_{zcoor}' for zcoor in list_zcoor]
             if any([not check_mappingUnit_name(name) for name in list_new_mappingUnit_names]) or mappingUnit_name == '':
                 retry = qw.QMessageBox.question(self, 'Error',"Invalid 'mappingUnit name'. The name cannot be empty or already exist. Please try again.",
-                    qw.QMessageBox.Retry | qw.QMessageBox.Cancel)
-                if retry == qw.QMessageBox.Cancel: return
+                    qw.QMessageBox.Retry | qw.QMessageBox.Cancel) # pyright: ignore[reportAttributeAccessIssue] ; Retry and Cancel attributes exists
+                if retry == qw.QMessageBox.Cancel: return # pyright: ignore[reportAttributeAccessIssue] ; Retry and Cancel attributes exists
             else: break
         
         list_mappingCoor = [
@@ -751,8 +751,8 @@ def generate_dummy_wdg_hilvlCoorGenerator(
     parent:qw.QWidget,
     motion_controller:Wdg_MotionController|None=None,
     datahub_map:Wdg_DataHub_Mapping|None=None,
-    # datahub_img:MeaImg_Hub|None=None,
-    # datahub_imgcal:ImgMea_Cal_Hub|None=None
+    datahub_img:Wdg_DataHub_Image|None=None,
+    datahub_imgcal:Wdg_DataHub_ImgCal|None=None
     ) -> Wdg_Hilvl_CoorGenerator:
     """
     Generates a dummy coordinate generator frame for testing purposes.
@@ -775,16 +775,16 @@ def generate_dummy_wdg_hilvlCoorGenerator(
     coorHub = List_MeaCoor_Hub()
     motion_controller = generate_dummy_motion_controller(parent) if motion_controller is None else motion_controller
     dataHub_map = generate_dummy_frmMappingHub(parent) if datahub_map is None else datahub_map
-    # dataHub_img = generate_dummy_frmImageHub(parent) if datahub_img is None else datahub_img
-    # dataHub_imgcal = generate_dummy_frmImgCalHub(parent) if datahub_imgcal is None else datahub_imgcal
+    dataHub_img = generate_dummy_frmImageHub(parent) if datahub_img is None else datahub_img
+    dataHub_imgcal = generate_dummy_frmImgCalHub(parent) if datahub_imgcal is None else datahub_imgcal
     
     return Wdg_Hilvl_CoorGenerator(
         parent=parent,
         coorHub=coorHub,
         motion_controller=motion_controller,
         dataHub_map=dataHub_map,
-        # dataHub_img=dataHub_img,
-        # dataHub_imgcal=dataHub_imgcal,
+        dataHub_img=dataHub_img,
+        dataHub_imgcal=dataHub_imgcal,
     )
     
 def test_wdg_Hilvl_CoorGenerator():
