@@ -855,6 +855,7 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
         
         # Buttons for auto calibration
         self._btn_calibrate = wdg.btn_calibrate
+        self._btn_calibrate.clicked.connect(lambda: None)
         self._btn_loadCalibrationFile = wdg.btn_loadcal
         self._btn_saveCalibrationFile = wdg.btn_savecal
         
@@ -867,6 +868,7 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
     # Manual calibration process related
         # Widgets for manual calibration
         self._btn_cal_finetune = wdg.btn_perform_finetune
+        self._btn_cal_finetune.clicked.connect(lambda: None)
         self._spin_sclx = wdg.spin_scalex
         self._spin_scly = wdg.spin_scaley
         self._spin_offsetx = wdg.spin_offsetx
@@ -998,7 +1000,7 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
         assert isinstance(text, str), 'Text must be a string'
         
         try: self._btn_cal_finetune.clicked.disconnect()
-        except Exception: pass
+        except RuntimeWarning: pass
         self._btn_cal_finetune.setEnabled(enabled)
         self._btn_cal_finetune.setText(text)
         self._btn_cal_finetune.clicked.connect(callback)
@@ -1015,7 +1017,7 @@ class Wdg_Calibration_Finetuning(qw.QWidget):
         if not isinstance(text, str): raise ValueError('Text must be a string')
         
         try: self._btn_calibrate.clicked.disconnect()
-        except Exception: pass
+        except RuntimeWarning: pass
         self._btn_calibrate.setEnabled(enabled)
         self._btn_calibrate.setText(text)
         self._btn_calibrate.clicked.connect(callback)

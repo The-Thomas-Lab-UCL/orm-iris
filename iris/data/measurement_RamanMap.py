@@ -2102,7 +2102,8 @@ class MeaRMap_Plotter:
         # Do the calculation first for a lower figure off time
         # (i.e., when the ax is cleared and not yet reassigned)
         try: x_val, y_val, intensity = self._retrieve_heatmap_data(mapping_unit, wavelength)
-        except ValueError as e: print(f'Error in plot_heatmap_interp: {e}'); return
+        except ValueError as e: pass; return
+        except Exception as e: print(f'Error in plot_heatmap_interp: {e}'); return
         
         if isinstance(self._cbar,Colorbar):
             self._cbar.remove()

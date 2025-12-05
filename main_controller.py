@@ -205,8 +205,6 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
     #         menu_extensions.add_command(label='Show "{}"'.format(ext.title()),command=ext.deiconify)
     #     self._menubar.add_cascade(label='Extensions',menu=menu_extensions)
         
-        # self.initialise_after_visible()
-        
     # # >> Set up the controllers menubar <<
     #     menu_controllers = tk.Menu(self._menubar,tearoff=0)
     #     menu_controllers.add_command(label='Set camera exposure time',command=self._motion.set_camera_exposure)
@@ -266,23 +264,6 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         except: qw.QMessageBox.warning(self, 'Error', 'The input must be a number')
         else: self._stageHub.set_measurement_offset_ms(offset_ms); qw.QMessageBox.information(self, 'Success', f'The offset has been set to {offset_ms} ms')
         
-    def initialise_after_visible(self):
-        """
-        PySide equivalent of waiting for visibility before performing setup.
-        """
-        # If the widget is already visible, proceed immediately.
-        if self.isVisible():
-            self.initialisations()
-            return
-
-        # Otherwise, set up a short timer to check again.
-        self._visibility_timer = QTimer(self)
-        self._visibility_timer.setSingleShot(True)
-        self._visibility_timer.timeout.connect(self._check_and_setup)
-        
-        # Start the timer with a very small delay (e.g., 50ms)
-        self._visibility_timer.start(50) 
-        
     @Slot()
     def _check_and_setup(self):
         """
@@ -299,7 +280,6 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         Turns on all the auto-updaters once all the widgets are initialised
         """
         print('>>>>> IRIS: PERFORMING FINAL INITIALISATIONS <<<<<')
-        self._motion._init_workers()
         self._raman.initialise_spectrometer_n_analyser()
         # [extension.initialise() for extension in self._list_extensions_toplevel]
         
@@ -423,7 +403,7 @@ if __name__ == '__main__':
     stageHub.start()
     processor = mp.Pool()
     
-    time.sleep(5)  # Allow some time for processes to start properly
+    # time.sleep(2)  # Allow some time for the controllers to initialise properly
     
     mainWindow_Controller = MainWindow_Controller(
         processor=processor,
@@ -433,5 +413,8 @@ if __name__ == '__main__':
         raman_hub=ramanHub,
         stage_hub=stageHub)
     mainWindow_Controller.show()
+    
+    mainWindow_Controller.initialisations()
+    
     app.exec()
     base_manager.shutdown()

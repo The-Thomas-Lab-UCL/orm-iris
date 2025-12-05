@@ -73,10 +73,8 @@ class Spectrometer_Control_Workers(QObject):
         Returns:
             int: The actual integration time set [us]
         """
-        print(f'Got set integration time request: {new_value_us/1000} ms')
         inttime_ms = self._controller.set_integration_time_us(new_value_us)
         self.sig_integration_time_us.emit(inttime_ms)
-        
         
     @Slot()
     def get_integration_time_us(self) -> None:
@@ -89,7 +87,6 @@ class Spectrometer_Control_Workers(QObject):
         current_time_us = self._controller.get_integration_time_us()
         self.sig_integration_time_us.emit(current_time_us)
         
-        print(f'Got get integration time request {current_time_us/1000} ms')
         
 class AcquisitionParams(TypedDict):
     accumulation: int
