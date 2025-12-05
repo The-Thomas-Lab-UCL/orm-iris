@@ -140,15 +140,19 @@ class Hilvl_MeasurementStorer_Worker(QObject):
         # print(f'Autosaver checking queue, size: {self._queue_measurement.qsize()}')
         for _ in range(self._queue_measurement.qsize()):
             try:
-                result=self._queue_measurement.get(timeout=0.05)
+                result:MeaRaman|tuple[MeaRaman,tuple]=self._queue_measurement.get(timeout=0.05)
                 self.sig_gotmea.emit()
             except queue.Empty: return
             except Exception as e: self.sig_error.emit(f'Error in autosaver: {e}'); return
             
             try:
-                mea:MeaRaman = result
-                ts = mea.get_latest_timestamp()
-                coor = self._ds_stage.get_coordinates_interpolate(ts)
+                if isinstance(result,MeaRaman):
+                    mea = result
+                    ts = mea.get_latest_timestamp()
+                    coor = self._ds_stage.get_coordinates_interpolate(ts)
+                else:
+                    mea, coor = result
+                    ts = mea.get_latest_timestamp()
                 assert coor is not None, 'No stage coordinates found for the measurement timestamp'
                 
                 mea.check_uptodate(autoupdate=True)
@@ -268,7 +272,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 mea:MeaRaman = self._q_mea_acq.get(timeout=int_time/1000 * 10) # Waits up to 10x the integration time for the measurement
                 
                 # Send the measurement data to the autosaver
-                q_mea_out.put(mea)
+                q_mea_out.put((mea, coor))
                 
             except Exception as e:
                 self.emit_finish_signals(self.msg_mea_error + str(e))

@@ -461,7 +461,7 @@ class DataStreamer_Raman(mp.Process):
         self.terminate_process()
         self._flg_process_updater.wait()
         self._flg_process_measurement.wait()
-        self._calibrator.terminate()
+        # self._calibrator.terminate()
         super().join()
 
 def initialise_manager_raman(manager:MyManager|SyncManager):

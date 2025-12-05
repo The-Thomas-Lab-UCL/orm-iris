@@ -403,7 +403,7 @@ class MeaRMap_Unit():
             autoupdate (bool): automatically update the averaged_df based on the current 'list_df'. Defaults to False.
         """
         assert isinstance(measurement, MeaRaman), 'append_measurement_data: The input data type is not correct. Expected raman_measurement object.'
-        assert isinstance(coor, tuple) and len(coor) == 3, 'append_measurement_data: The input coordinate is not correct. Expected a tuple of length 3.'
+        assert isinstance(coor, (tuple,list)) and len(coor) == 3, 'append_measurement_data: The input coordinate is not correct. Expected a tuple of length 3.'
         assert all(isinstance(item, (int,float)) for item in coor), 'append_measurement_data: The input coordinate is not correct. Expected a tuple of integers or floats.'
         assert isinstance(timestamp, int), 'append_measurement_data: The input timestamp is not correct. Expected an integer.'
         assert measurement.check_measurement_exist(), 'append_measurement_data: The measurement data does not exist.'

@@ -1,4 +1,3 @@
-
 """
 A class that manages the motion controller aspect for the Ocean Direct Raman spectrometer
 """
@@ -74,6 +73,7 @@ class Spectrometer_Control_Workers(QObject):
         Returns:
             int: The actual integration time set [us]
         """
+        print(f'Got set integration time request: {new_value_us/1000} ms')
         inttime_ms = self._controller.set_integration_time_us(new_value_us)
         self.sig_integration_time_us.emit(inttime_ms)
         
@@ -88,6 +88,8 @@ class Spectrometer_Control_Workers(QObject):
         """
         current_time_us = self._controller.get_integration_time_us()
         self.sig_integration_time_us.emit(current_time_us)
+        
+        print(f'Got get integration time request {current_time_us/1000} ms')
         
 class AcquisitionParams(TypedDict):
     accumulation: int
@@ -509,7 +511,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._entry_xmax = widget.ent_plt_xmax
         self._entry_ymin = widget.ent_plt_ymin
         self._entry_ymax = widget.ent_plt_ymax
-        widget.btn_reset_plot_limits.clicked.connect(lambda: self._reset_plot_limits())
+        widget.btn_reset_plot_limits.clicked.connect(self._reset_plot_limits)
         
         @Slot(MeaRaman)
         def _put_lastmea_into_plotqueue(measurement: MeaRaman): self._q_plt_mea.put(measurement)
@@ -517,7 +519,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._worker_acquisition.sig_mea.connect(_put_lastmea_into_plotqueue)
         self._sig_request_lastmea.connect(self._worker_acquisition.request_last_measurement)
 
-        [widget.textChanged.connect(lambda: self._sig_request_lastmea.emit())\
+        [widget.textChanged.connect(self._sig_request_lastmea.emit)\
             for widget in get_all_widgets(widget.groupBox_plt) if isinstance(widget,qw.QLineEdit)]
         
     # Raman controller setups
@@ -537,15 +539,13 @@ class Wdg_SpectrometerController(qw.QWidget):
         ### for single measurement integration time
         self._spin_inttime = widget.spin_inttime_ms
         
-        self._spin_inttime.editingFinished.connect(lambda: self._request_integration_time(
-            new_value_ms=int(self._spin_inttime.value())))
+        self._spin_inttime.editingFinished.connect(self._request_integration_time_spinbox)
         
         ### for single measurement number of accumulation
         self._lbl_sngl_acq = widget.lbl_accum
         self._spin_sngl_acq = widget.spin_accum
         
-        self._spin_sngl_acq.editingFinished.connect(lambda: self.set_accumulation(
-            new_value=int(self._spin_sngl_acq.value())))
+        self._spin_sngl_acq.editingFinished.connect(self.set_accumulation_spinbox)
         
         if main: self.initialise_spectrometer_n_analyser()
         
@@ -680,7 +680,19 @@ class Wdg_SpectrometerController(qw.QWidget):
         """
         self._accumulation = new_value
         self._lbl_sngl_acq.setText(f'{self._accumulation}')
-
+        
+    @Slot()
+    def set_accumulation_spinbox(self):
+        """
+        Set the accumulation for measurements
+        
+        Args:
+            new_value (int): The new accumulation value
+        """
+        new_value = self._spin_sngl_acq.value()
+        self._accumulation = new_value
+        self._lbl_sngl_acq.setText(f'{self._accumulation}')
+        
     def get_integration_time_ms(self):
         """
         Returns the integration time in milliseconds
@@ -689,8 +701,23 @@ class Wdg_SpectrometerController(qw.QWidget):
             int: Integration time in milliseconds
         """
         return self.integration_time_ms
-
-    @Slot(int)
+    
+    @Slot()
+    def _request_integration_time_spinbox(self):
+        """
+        Updates the device's integration time using the spinbox value
+        """
+        self._spin_inttime.setEnabled(False)
+        new_value_ms = self._spin_inttime.value()
+        if not isinstance(new_value_ms,int) or new_value_ms <= 0:
+            qw.QErrorMessage(self).showMessage('Invalid integration time input')
+            self._statbar.showMessage('Invalid integration time input',5000)
+            self._spin_inttime.setEnabled(True)
+            return
+        
+        self.sig_set_integration_time_us.emit(new_value_ms*1000)
+        
+    
     def _request_integration_time(self,new_value_ms):
         """
         Sets the integration time of the spectrometer by taking in a variable. It also updates the variable
@@ -757,6 +784,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         
         return xmin,xmax,ymin,ymax
         
+    @Slot()
     def _reset_plot_limits(self):
         """
         Resets the entry inputs for the plot limits
@@ -875,7 +903,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         """
         # Configure the integration time config
         intTime_min, intTime_max, intTime_inc = self._controller.get_integration_time_limits_us()
-        self._spin_inttime.setRange(intTime_min, intTime_max)
+        self._spin_inttime.setRange(int(intTime_min/1000), int(intTime_max)/1000)
 
         # Set and get the current device integration time
         self._request_integration_time(self.integration_time_ms)
