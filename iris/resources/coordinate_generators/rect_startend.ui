@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>565</width>
-    <height>419</height>
+    <width>673</width>
+    <height>422</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -18,11 +18,171 @@
     <rect>
      <x>20</x>
      <y>10</y>
-     <width>531</width>
+     <width>623</width>
      <height>381</height>
     </rect>
    </property>
    <layout class="QGridLayout" name="gridLayout">
+    <item row="1" column="3">
+     <widget class="QLabel" name="label_4">
+      <property name="text">
+       <string>Y:</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+      </property>
+     </widget>
+    </item>
+    <item row="10" column="0">
+     <widget class="QLabel" name="label_17">
+      <property name="text">
+       <string>X:</string>
+      </property>
+     </widget>
+    </item>
+    <item row="10" column="1">
+     <widget class="QLineEdit" name="ent_res_pt_x"/>
+    </item>
+    <item row="12" column="1">
+     <spacer name="verticalSpacer">
+      <property name="orientation">
+       <enum>Qt::Orientation::Vertical</enum>
+      </property>
+      <property name="sizeHint" stdset="0">
+       <size>
+        <width>20</width>
+        <height>40</height>
+       </size>
+      </property>
+     </spacer>
+    </item>
+    <item row="4" column="5">
+     <widget class="QLabel" name="label_10">
+      <property name="text">
+       <string>µm</string>
+      </property>
+     </widget>
+    </item>
+    <item row="10" column="4">
+     <widget class="QLineEdit" name="ent_res_pt_y"/>
+    </item>
+    <item row="7" column="2">
+     <widget class="QLabel" name="label_12">
+      <property name="text">
+       <string>µm</string>
+      </property>
+     </widget>
+    </item>
+    <item row="3" column="0" colspan="3">
+     <widget class="QLabel" name="label_8">
+      <property name="text">
+       <string>End XY coordinate:</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignmentFlag::AlignBottom|Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft</set>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="2">
+     <widget class="QLabel" name="label_3">
+      <property name="text">
+       <string>µm</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="0">
+     <widget class="QLabel" name="label_9">
+      <property name="text">
+       <string>X:</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+      </property>
+     </widget>
+    </item>
+    <item row="10" column="3">
+     <widget class="QLabel" name="label_21">
+      <property name="text">
+       <string>Y:</string>
+      </property>
+     </widget>
+    </item>
+    <item row="11" column="0">
+     <widget class="QLabel" name="label_11">
+      <property name="text">
+       <string>X:</string>
+      </property>
+     </widget>
+    </item>
+    <item row="11" column="3">
+     <widget class="QLabel" name="label_20">
+      <property name="text">
+       <string>Y:</string>
+      </property>
+     </widget>
+    </item>
+    <item row="7" column="1">
+     <widget class="QLineEdit" name="ent_z_um"/>
+    </item>
+    <item row="7" column="0">
+     <widget class="QLabel" name="label_14">
+      <property name="text">
+       <string>Z:</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+      </property>
+     </widget>
+    </item>
+    <item row="11" column="1">
+     <widget class="QLineEdit" name="ent_res_um_x"/>
+    </item>
+    <item row="10" column="2">
+     <widget class="QLabel" name="label_15">
+      <property name="text">
+       <string>points</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="4">
+     <widget class="QLineEdit" name="ent_starty_um"/>
+    </item>
+    <item row="4" column="3">
+     <widget class="QLabel" name="label_6">
+      <property name="text">
+       <string>Y:</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="4">
+     <widget class="QLineEdit" name="ent_endy_um"/>
+    </item>
+    <item row="4" column="2">
+     <widget class="QLabel" name="label_7">
+      <property name="text">
+       <string>µm</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="1">
+     <widget class="QLineEdit" name="ent_startx_um"/>
+    </item>
+    <item row="11" column="4">
+     <widget class="QLineEdit" name="ent_res_um_y"/>
+    </item>
+    <item row="9" column="0" colspan="3">
+     <widget class="QLabel" name="label_16">
+      <property name="text">
+       <string>Imaging resolution:</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignmentFlag::AlignBottom|Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft</set>
+      </property>
+     </widget>
+    </item>
     <item row="0" column="0" colspan="3">
      <widget class="QLabel" name="label">
       <property name="sizePolicy">
@@ -39,12 +199,8 @@
       </property>
      </widget>
     </item>
-    <item row="8" column="0">
-     <widget class="QLabel" name="label_11">
-      <property name="text">
-       <string>X:</string>
-      </property>
-     </widget>
+    <item row="4" column="1">
+     <widget class="QLineEdit" name="ent_endx_um"/>
     </item>
     <item row="1" column="0">
      <widget class="QLabel" name="label_2">
@@ -56,7 +212,28 @@
       </property>
      </widget>
     </item>
-    <item row="4" column="0" colspan="3">
+    <item row="1" column="5">
+     <widget class="QLabel" name="label_5">
+      <property name="text">
+       <string>µm</string>
+      </property>
+     </widget>
+    </item>
+    <item row="10" column="5">
+     <widget class="QLabel" name="label_19">
+      <property name="text">
+       <string>points</string>
+      </property>
+     </widget>
+    </item>
+    <item row="11" column="2">
+     <widget class="QLabel" name="label_18">
+      <property name="text">
+       <string>µm</string>
+      </property>
+     </widget>
+    </item>
+    <item row="6" column="0" colspan="3">
      <widget class="QLabel" name="label_13">
       <property name="text">
        <string>Z coordinate:</string>
@@ -66,210 +243,33 @@
       </property>
      </widget>
     </item>
-    <item row="8" column="4">
-     <widget class="QLineEdit" name="ent_res_um_y"/>
-    </item>
-    <item row="7" column="2">
-     <widget class="QLabel" name="label_15">
-      <property name="text">
-       <string>points</string>
-      </property>
-     </widget>
-    </item>
-    <item row="6" column="0" colspan="3">
-     <widget class="QLabel" name="label_16">
-      <property name="text">
-       <string>Imaging resolution:</string>
-      </property>
-      <property name="alignment">
-       <set>Qt::AlignmentFlag::AlignBottom|Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft</set>
-      </property>
-     </widget>
-    </item>
-    <item row="1" column="1">
-     <widget class="QLineEdit" name="ent_startx_um"/>
-    </item>
-    <item row="7" column="4">
-     <widget class="QLineEdit" name="ent_res_pt_y"/>
-    </item>
-    <item row="8" column="2">
-     <widget class="QLabel" name="label_18">
-      <property name="text">
-       <string>µm</string>
-      </property>
-     </widget>
-    </item>
-    <item row="7" column="0">
-     <widget class="QLabel" name="label_17">
-      <property name="text">
-       <string>X:</string>
-      </property>
-     </widget>
-    </item>
-    <item row="1" column="4">
-     <widget class="QLineEdit" name="ent_starty_um"/>
-    </item>
-    <item row="0" column="3" colspan="3">
-     <widget class="QPushButton" name="btn_curr_start_xy">
-      <property name="text">
-       <string>Insert current XY coordinates</string>
-      </property>
-     </widget>
-    </item>
-    <item row="3" column="5">
-     <widget class="QLabel" name="label_10">
-      <property name="text">
-       <string>µm</string>
-      </property>
-     </widget>
-    </item>
-    <item row="1" column="3">
-     <widget class="QLabel" name="label_4">
-      <property name="text">
-       <string>Y:</string>
-      </property>
-      <property name="alignment">
-       <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
-      </property>
-     </widget>
-    </item>
-    <item row="1" column="2">
-     <widget class="QLabel" name="label_3">
-      <property name="text">
-       <string>µm</string>
-      </property>
-     </widget>
-    </item>
-    <item row="7" column="5">
-     <widget class="QLabel" name="label_19">
-      <property name="text">
-       <string>points</string>
-      </property>
-     </widget>
-    </item>
-    <item row="8" column="5">
+    <item row="11" column="5">
      <widget class="QLabel" name="label_22">
       <property name="text">
        <string>µm</string>
       </property>
      </widget>
     </item>
-    <item row="4" column="3" colspan="3">
+    <item row="2" column="0" colspan="6">
+     <widget class="QPushButton" name="btn_curr_start_xy">
+      <property name="text">
+       <string>Start coordinate: Insert current XY coordinates</string>
+      </property>
+     </widget>
+    </item>
+    <item row="5" column="0" colspan="6">
+     <widget class="QPushButton" name="btn_curr_end_xy">
+      <property name="text">
+       <string>End coordinate: Insert current XY coordinates</string>
+      </property>
+     </widget>
+    </item>
+    <item row="8" column="0" colspan="6">
      <widget class="QPushButton" name="btn_curr_z">
       <property name="text">
        <string>Insert current Z-coordinate</string>
       </property>
      </widget>
-    </item>
-    <item row="5" column="2">
-     <widget class="QLabel" name="label_12">
-      <property name="text">
-       <string>µm</string>
-      </property>
-     </widget>
-    </item>
-    <item row="3" column="1">
-     <widget class="QLineEdit" name="ent_endx_um"/>
-    </item>
-    <item row="8" column="3">
-     <widget class="QLabel" name="label_20">
-      <property name="text">
-       <string>Y:</string>
-      </property>
-     </widget>
-    </item>
-    <item row="5" column="1">
-     <widget class="QLineEdit" name="ent_z_um"/>
-    </item>
-    <item row="3" column="3">
-     <widget class="QLabel" name="label_6">
-      <property name="text">
-       <string>Y:</string>
-      </property>
-      <property name="alignment">
-       <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
-      </property>
-     </widget>
-    </item>
-    <item row="3" column="2">
-     <widget class="QLabel" name="label_7">
-      <property name="text">
-       <string>µm</string>
-      </property>
-     </widget>
-    </item>
-    <item row="3" column="0">
-     <widget class="QLabel" name="label_9">
-      <property name="text">
-       <string>X:</string>
-      </property>
-      <property name="alignment">
-       <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
-      </property>
-     </widget>
-    </item>
-    <item row="5" column="0">
-     <widget class="QLabel" name="label_14">
-      <property name="text">
-       <string>Z:</string>
-      </property>
-      <property name="alignment">
-       <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
-      </property>
-     </widget>
-    </item>
-    <item row="2" column="0" colspan="3">
-     <widget class="QLabel" name="label_8">
-      <property name="text">
-       <string>End XY coordinate:</string>
-      </property>
-      <property name="alignment">
-       <set>Qt::AlignmentFlag::AlignBottom|Qt::AlignmentFlag::AlignLeading|Qt::AlignmentFlag::AlignLeft</set>
-      </property>
-     </widget>
-    </item>
-    <item row="2" column="3" colspan="3">
-     <widget class="QPushButton" name="btn_curr_end_xy">
-      <property name="text">
-       <string>Insert current XY coordinates</string>
-      </property>
-     </widget>
-    </item>
-    <item row="7" column="1">
-     <widget class="QLineEdit" name="ent_res_pt_x"/>
-    </item>
-    <item row="1" column="5">
-     <widget class="QLabel" name="label_5">
-      <property name="text">
-       <string>µm</string>
-      </property>
-     </widget>
-    </item>
-    <item row="8" column="1">
-     <widget class="QLineEdit" name="ent_res_um_x"/>
-    </item>
-    <item row="3" column="4">
-     <widget class="QLineEdit" name="ent_endy_um"/>
-    </item>
-    <item row="7" column="3">
-     <widget class="QLabel" name="label_21">
-      <property name="text">
-       <string>Y:</string>
-      </property>
-     </widget>
-    </item>
-    <item row="9" column="1">
-     <spacer name="verticalSpacer">
-      <property name="orientation">
-       <enum>Qt::Orientation::Vertical</enum>
-      </property>
-      <property name="sizeHint" stdset="0">
-       <size>
-        <width>20</width>
-        <height>40</height>
-       </size>
-      </property>
-     </spacer>
     </item>
    </layout>
   </widget>

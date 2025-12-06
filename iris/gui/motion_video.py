@@ -1417,8 +1417,6 @@ def generate_dummy_motion_controller(parent:qw.QWidget) -> Wdg_MotionController:
         getter_imgcal=lambda: None
     )
     
-    frm_motion._init_workers()
-    
     return frm_motion
 
 if __name__ == '__main__':
