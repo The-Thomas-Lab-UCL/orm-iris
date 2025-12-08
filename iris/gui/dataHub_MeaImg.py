@@ -437,7 +437,7 @@ class Wdg_DataHub_Image(qw.QWidget):
         
         for item in selections:
             unit_id = item.text(0)
-            unit = self.ImageHub.get_ImageMeasurementUnit(unit_id)
+            unit = self.ImageHub.get_ImageMeasurementUnit(unit_id=unit_id)
             self.sig_save_png.emit(unit, dirpath, resolution)
                 
     def append_ImageMeasurementUnit(self, unit:MeaImg_Unit, flg_nameprompt:bool=True):

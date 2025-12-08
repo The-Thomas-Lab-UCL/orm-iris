@@ -683,7 +683,8 @@ class MeaImg_Unit():
             x_coor = float(np.random.uniform(0,1))
             y_coor = float(np.random.uniform(0,1))
             z_coor = float(0)
-            image = Image.new('RGB',(100,100),color=(255,255,0))
+            colour = (np.random.randint(0,256),np.random.randint(0,256),np.random.randint(0,256))
+            image = Image.new('RGB',(100,100),color=colour)
             
             self.add_measurement(timestamp, x_coor, y_coor, z_coor, image)
         return
@@ -818,7 +819,7 @@ class MeaImg_Hub():
         
         self.notify_observers()
         
-    def get_ImageMeasurementUnit(self,unit_id:str) -> MeaImg_Unit:
+    def get_ImageMeasurementUnit(self,*,unit_id:str|None=None,unit_name:str|None=None) -> MeaImg_Unit:
         """
         Returns an ImageMeasurement_Unit from the hub
 
@@ -828,6 +829,14 @@ class MeaImg_Hub():
         Returns:
             ImageMeasurement_Unit: ImageMeasurement_Unit object
         """
+        assert (unit_id is not None) or (unit_name is not None), 'Either unit ID or unit name must be provided'
+        assert not (unit_id is not None and unit_name is not None), 'Only one of unit ID or unit name must be provided'
+        
+        # Get the unit ID from the unit name if provided
+        if unit_name is not None:
+            assert unit_name in self._dict_unit_NameID, 'Unit name does not exist'
+            unit_id = self._dict_unit_NameID[unit_name]
+            
         assert unit_id in self._dict_ImageUnits['unit_id'], 'Unit ID does not exist'
         
         idx = self._dict_ImageUnits['unit_id'].index(unit_id)
@@ -1070,7 +1079,7 @@ class MeaImg_Handler():
         list_unitIDs = hub.get_list_ImageUnit_ids()
         
         for unitID in list_unitIDs:
-            unit = hub.get_ImageMeasurementUnit(unitID)
+            unit = hub.get_ImageMeasurementUnit(unit_id=unitID)
             self.save_ImageMeasurementUnit_database(unit,conn,savepath)
             
         conn.close()

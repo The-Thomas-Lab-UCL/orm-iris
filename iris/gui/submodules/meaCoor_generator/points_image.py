@@ -38,7 +38,7 @@ class Points_Image(Rect_Image):
         *args, **kwargs
         ):
         super().__init__(
-            container_frame=container_frame,
+            parent=container_frame,
             motion_controller=motion_controller,
             dataHub_img=dataHub_img,
             status_bar=status_bar,
@@ -82,7 +82,7 @@ class Points_Image(Rect_Image):
     
     def get_mapping_coordinates_mm(self):
         # Stop the video feed to conserve resources
-        try: self._flg_thd_auto_image.clear(); self._thread_auto_image.join(1)
+        try: self._flg_thd_auto_image.clear(); self._thread_canvas.join(1)
         except Exception as e: print('ERROR get_mapping_coordinates:',e)
         
         if len(self._list_clickMeaCoor_mm) == 0:

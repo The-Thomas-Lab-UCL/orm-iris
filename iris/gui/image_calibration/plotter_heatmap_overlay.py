@@ -321,7 +321,7 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
         if not imgUnit_name in dict_nameToID: return None
         imgUnit_id = dict_nameToID[imgUnit_name]
         
-        return hub.get_ImageMeasurementUnit(imgUnit_id)
+        return hub.get_ImageMeasurementUnit(unit_id=imgUnit_id)
         
     @Slot()
     def plot_heatmap(self) -> None:

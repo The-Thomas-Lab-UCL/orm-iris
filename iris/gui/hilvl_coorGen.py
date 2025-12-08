@@ -14,9 +14,9 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(SCRIPT_DIR))
 
 from iris.gui.submodules.meaCoor_generator.rectangle_endToEnd import Wdg_Rect_StartEnd as Map1
-# from iris.gui.submodules.meaCoor_generator.rectangle_aroundCentre import Rect_AroundCentre as Map2
+from iris.gui.submodules.meaCoor_generator.rectangle_aroundCentre import Rect_AroundCentre as Map2
 # from iris.gui.submodules.meaCoor_generator.rectangle_video import Rect_Video as Map3
-# from iris.gui.submodules.meaCoor_generator.rectangle_image import Rect_Image as Map4
+from iris.gui.submodules.meaCoor_generator.rectangle_image import Rect_Image as Map4
 # from iris.gui.submodules.meaCoor_generator.points_image import Points_Image as Map5
 # from iris.gui.submodules.meaCoor_generator.singlePoint_zScan import singlePoint_zScan as Map6
 from iris.gui.submodules.meaCoor_generator.line_zScan import Wdg_ZScanMethod_linear as ZScan1
@@ -593,14 +593,14 @@ class Wdg_Hilvl_CoorGenerator(qw.QWidget):
         self._dict_mappingmethods_kwargs = {
             'parent':wdg.wdg_coorGen_holder,
             'motion_controller':self._motion_controller,
-            # 'dataHub_img':self._dataHub_img,
-            # 'getter_imgcal':self._dataHub_imgcal.get_selected_calibration,
+            'dataHub_img':self._dataHub_img,
+            'getter_imgcal':self._dataHub_imgcal.get_selected_calibration,
         }
         self._dict_mappingmethods = {
             '1. Start/End': Map1,
-            # '2. Around center': Map2,
+            '2. Around center': Map2,
             # '3. Video': Map3,
-            # '4. Image': Map4,
+            '4. Image': Map4,
             # '5. Image points': Map5,
             # '6. Single point Z-scan': Map6,
             }   # Mapping methods, to be programmed manually

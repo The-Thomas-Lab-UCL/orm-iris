@@ -12,6 +12,7 @@ from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplicat
 from PIL import Image, ImageQt
 
 import threading
+from typing import Callable
 
 from iris.utils.general import *
 
@@ -52,12 +53,45 @@ class Canvas_Image_Annotations(QGraphicsView):
         # Initialise the canvas with a white background
         self._scene.setBackgroundBrush(QColor('white'))
         
+        # Store observers for image updates
+        self._list_observers_clearAnnotations = []
+        
+    def add_observer_clearAnnotations(self,observer:Callable):
+        """
+        Adds an observer to be notified when the annotations are cleared
+        
+        Args:
+            observer (QObject): The observer to be added
+        """
+        assert callable(observer), 'Observer must be a callable'
+        self._list_observers_clearAnnotations.append(observer)
+        
+    def remove_observer_clearAnnotations(self,observer:Callable):
+        """
+        Removes an observer from the list of observers
+        
+        Args:
+            observer (QObject): The observer to be removed
+        """
+        assert callable(observer), 'Observer must be a callable'
+        try: self._list_observers_clearAnnotations.remove(observer)
+        except Exception as e: print(f'Error removing observer: {e}')
+        
+    def notify_observers_clearAnnotations(self):
+        """
+        Notifies all observers that the annotations have been cleared
+        """
+        for observer in self._list_observers_clearAnnotations:
+            try: observer()
+            except Exception as e: print(f'Error notifying observer: {e}')
+        
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.LeftButton: # pyright: ignore[reportAttributeAccessIssue] ; Qt.LeftButton exists
             scene_pos = self.mapToScene(event.position().toPoint())
             self._record_clickCoordinates(scene_pos.x(), scene_pos.y())
         elif event.button() == Qt.RightButton: # pyright: ignore[reportAttributeAccessIssue] ; Qt.RightButton exists
             self.clear_all_annotations()
+            self.notify_observers_clearAnnotations()
         # print(f'Canvas mousePressEvent at ({event.position().x()}, {event.position().y()}), type: {event.button()}')
         super().mousePressEvent(event)
         
@@ -155,6 +189,7 @@ class Canvas_Image_Annotations(QGraphicsView):
         text_item.setBrush(QColor('red'))
         self._annotations.append(text_item)
         
+    @Slot(tuple,tuple,bool)
     def draw_rectangle_canvas(self,coor1:tuple[float,float],coor2:tuple[float,float],scale:bool=True):
         """
         Draws a rectangle on the canvas with the given coordinates
@@ -186,9 +221,11 @@ class Canvas_Image_Annotations(QGraphicsView):
         x2 = min(self.size_pixel[0],x2)
         y2 = min(self.size_pixel[1],y2)
         
+        print(f'Drawing rectangle at ({x1}, {y1}) to ({x2}, {y2}) on canvas')
+        
         # Create a rectangle on the canvas
         # set transparency level to 50%
-        alpha = 0.5
+        alpha = 1
         self._annotations.append(
             self._scene.addRect(x1, y1, x2 - x1, y2 - y1, QPen(QColor('red')), QColor(255,0,0,int(255*alpha)))
         )

@@ -329,7 +329,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
             self._combo_imgunits.setCurrentText(current_name)
         else:
             self._combo_imgunits.setCurrentIndex(0)
-            self.sig_req_plot_imgunit.emit(hub.get_ImageMeasurementUnit(list_ids[0]), self._chk_lres.isChecked())
+            self.sig_req_plot_imgunit.emit(hub.get_ImageMeasurementUnit(unit_id=list_ids[0]), self._chk_lres.isChecked())
         
         self._combo_imgunits.setEnabled(True)
         self._combo_imgunits.blockSignals(False)
@@ -375,7 +375,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
         
         name = self._combo_imgunits.currentText()
         id = dict_nameToID[name]
-        return hub.get_ImageMeasurementUnit(id)
+        return hub.get_ImageMeasurementUnit(unit_id=id)
         
     def _take_image(self):
         """

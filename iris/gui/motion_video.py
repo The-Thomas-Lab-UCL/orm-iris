@@ -1303,8 +1303,8 @@ class Wdg_MotionController(qw.QGroupBox):
                    (img.size[0]-line_offset, img.size[1]-line_offset)],
                   fill=(255,255,255), width=line_width)
         
-        text_params = {'text':'{:.0f} µm'.format(length_mm*1e3),
-                'font':ImageFont.truetype(font,font_size)}
+        try: text_params = {'text':'{:.0f} µm'.format(abs(length_mm*1e3)), 'font':ImageFont.truetype(font,font_size)}
+        except Exception: raise ValueError('Scalebar font file not found. Please check the font path in the configuration.')
         
         text_length = draw.textlength(**text_params)
         
