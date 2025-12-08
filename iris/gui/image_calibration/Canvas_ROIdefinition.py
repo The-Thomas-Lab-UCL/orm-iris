@@ -94,6 +94,7 @@ class Canvas_Image_Annotations(QGraphicsView):
             self.notify_observers_clearAnnotations()
         # print(f'Canvas mousePressEvent at ({event.position().x()}, {event.position().y()}), type: {event.button()}')
         super().mousePressEvent(event)
+        print(f'List of click coordinates: {self._list_clickCoords}')
         
     def clear_all_annotations(self):
         """
@@ -104,6 +105,8 @@ class Canvas_Image_Annotations(QGraphicsView):
             self._scene.removeItem(item)
         self._annotations.clear()
         self._list_clickCoords.clear()
+        
+        self.update()
         
     def annotate_canvas_multi(self,coor_list:list[tuple[float,float]],scale:bool=True,
                               flg_removePreviousAnnotations:bool=True):
@@ -188,6 +191,7 @@ class Canvas_Image_Annotations(QGraphicsView):
         text_item.setFont(QFont("Arial", 12))
         text_item.setBrush(QColor('red'))
         self._annotations.append(text_item)
+        self.update()
         
     @Slot(tuple,tuple,bool)
     def draw_rectangle_canvas(self,coor1:tuple[float,float],coor2:tuple[float,float],scale:bool=True):
@@ -210,10 +214,10 @@ class Canvas_Image_Annotations(QGraphicsView):
         
         x1, y1 = coor1
         x2, y2 = coor2
-        x1 = int(x1/scale_val)
-        y1 = int(y1/scale_val)
-        x2 = int(x2/scale_val)
-        y2 = int(y2/scale_val)
+        x1 = (x1/scale_val)
+        y1 = (y1/scale_val)
+        x2 = (x2/scale_val)
+        y2 = (y2/scale_val)
         
         # Ignore the coordinates outside the canvas
         x1 = max(0,x1)
@@ -225,10 +229,11 @@ class Canvas_Image_Annotations(QGraphicsView):
         
         # Create a rectangle on the canvas
         # set transparency level to 50%
-        alpha = 1
+        alpha = 0.35
         self._annotations.append(
             self._scene.addRect(x1, y1, x2 - x1, y2 - y1, QPen(QColor('red')), QColor(255,0,0,int(255*alpha)))
         )
+        self.update()
         
     @Slot(bool)
     def stop_recordClicks(self,clear_annotations:bool=True) -> None:
