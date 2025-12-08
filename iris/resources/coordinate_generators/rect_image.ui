@@ -32,7 +32,14 @@
            </widget>
           </item>
           <item row="1" column="0">
-           <widget class="QComboBox" name="combo_image"/>
+           <widget class="QComboBox" name="combo_image">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+           </widget>
           </item>
           <item row="1" column="2">
            <widget class="QPushButton" name="btn_instruction">
@@ -312,6 +319,18 @@
    </item>
   </layout>
  </widget>
+ <tabstops>
+  <tabstop>combo_image</tabstop>
+  <tabstop>btn_defineROI</tabstop>
+  <tabstop>btn_instruction</tabstop>
+  <tabstop>chk_lres</tabstop>
+  <tabstop>spin_z</tabstop>
+  <tabstop>btn_storeZ</tabstop>
+  <tabstop>spin_resXPt</tabstop>
+  <tabstop>spin_resYPt</tabstop>
+  <tabstop>spin_resXum</tabstop>
+  <tabstop>spin_resYum</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

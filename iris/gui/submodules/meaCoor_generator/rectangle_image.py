@@ -178,6 +178,9 @@ class Rect_Image(Ui_Rect_Image, qw.QWidget):
         self._canvas_image.add_observer_rightclick(self.sig_resetStoredCoors.emit)
         self.sig_resetStoredCoors.connect(self._reset_click_coors)
         
+        # Resolution checkbox
+        self.chk_lres.stateChanged.connect(self._update_image_shown)
+        
     def _init_workers(self):
         """
         Initialises the worker threads for automatic image updating

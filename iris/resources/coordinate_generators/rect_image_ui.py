@@ -42,6 +42,11 @@ class Ui_Rect_Image(object):
 
         self.combo_image = QComboBox(self.groupBox)
         self.combo_image.setObjectName(u"combo_image")
+        sizePolicy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.combo_image.sizePolicy().hasHeightForWidth())
+        self.combo_image.setSizePolicy(sizePolicy)
 
         self.gridLayout.addWidget(self.combo_image, 1, 0, 1, 1)
 
@@ -71,19 +76,19 @@ class Ui_Rect_Image(object):
         self.gridLayout_2.setObjectName(u"gridLayout_2")
         self.label_11 = QLabel(Rect_Image)
         self.label_11.setObjectName(u"label_11")
-        sizePolicy = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
-        sizePolicy.setHorizontalStretch(0)
-        sizePolicy.setVerticalStretch(0)
-        sizePolicy.setHeightForWidth(self.label_11.sizePolicy().hasHeightForWidth())
-        self.label_11.setSizePolicy(sizePolicy)
+        sizePolicy1 = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        sizePolicy1.setHorizontalStretch(0)
+        sizePolicy1.setVerticalStretch(0)
+        sizePolicy1.setHeightForWidth(self.label_11.sizePolicy().hasHeightForWidth())
+        self.label_11.setSizePolicy(sizePolicy1)
         self.label_11.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
 
         self.gridLayout_2.addWidget(self.label_11, 6, 0, 1, 1)
 
         self.label_9 = QLabel(Rect_Image)
         self.label_9.setObjectName(u"label_9")
-        sizePolicy.setHeightForWidth(self.label_9.sizePolicy().hasHeightForWidth())
-        self.label_9.setSizePolicy(sizePolicy)
+        sizePolicy1.setHeightForWidth(self.label_9.sizePolicy().hasHeightForWidth())
+        self.label_9.setSizePolicy(sizePolicy1)
         self.label_9.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
 
         self.gridLayout_2.addWidget(self.label_9, 5, 0, 1, 1)
@@ -97,8 +102,8 @@ class Ui_Rect_Image(object):
 
         self.label_5 = QLabel(Rect_Image)
         self.label_5.setObjectName(u"label_5")
-        sizePolicy.setHeightForWidth(self.label_5.sizePolicy().hasHeightForWidth())
-        self.label_5.setSizePolicy(sizePolicy)
+        sizePolicy1.setHeightForWidth(self.label_5.sizePolicy().hasHeightForWidth())
+        self.label_5.setSizePolicy(sizePolicy1)
         self.label_5.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
 
         self.gridLayout_2.addWidget(self.label_5, 3, 0, 1, 1)
@@ -119,40 +124,40 @@ class Ui_Rect_Image(object):
 
         self.label_10 = QLabel(Rect_Image)
         self.label_10.setObjectName(u"label_10")
-        sizePolicy.setHeightForWidth(self.label_10.sizePolicy().hasHeightForWidth())
-        self.label_10.setSizePolicy(sizePolicy)
+        sizePolicy1.setHeightForWidth(self.label_10.sizePolicy().hasHeightForWidth())
+        self.label_10.setSizePolicy(sizePolicy1)
 
         self.gridLayout_2.addWidget(self.label_10, 5, 2, 1, 1)
 
         self.label_12 = QLabel(Rect_Image)
         self.label_12.setObjectName(u"label_12")
-        sizePolicy.setHeightForWidth(self.label_12.sizePolicy().hasHeightForWidth())
-        self.label_12.setSizePolicy(sizePolicy)
+        sizePolicy1.setHeightForWidth(self.label_12.sizePolicy().hasHeightForWidth())
+        self.label_12.setSizePolicy(sizePolicy1)
 
         self.gridLayout_2.addWidget(self.label_12, 6, 2, 1, 1)
 
         self.label_7 = QLabel(Rect_Image)
         self.label_7.setObjectName(u"label_7")
-        sizePolicy.setHeightForWidth(self.label_7.sizePolicy().hasHeightForWidth())
-        self.label_7.setSizePolicy(sizePolicy)
+        sizePolicy1.setHeightForWidth(self.label_7.sizePolicy().hasHeightForWidth())
+        self.label_7.setSizePolicy(sizePolicy1)
 
         self.gridLayout_2.addWidget(self.label_7, 3, 2, 1, 1)
 
         self.label_13 = QLabel(Rect_Image)
         self.label_13.setObjectName(u"label_13")
-        sizePolicy.setHeightForWidth(self.label_13.sizePolicy().hasHeightForWidth())
-        self.label_13.setSizePolicy(sizePolicy)
+        sizePolicy1.setHeightForWidth(self.label_13.sizePolicy().hasHeightForWidth())
+        self.label_13.setSizePolicy(sizePolicy1)
         self.label_13.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
 
         self.gridLayout_2.addWidget(self.label_13, 5, 3, 1, 1)
 
         self.label_8 = QLabel(Rect_Image)
         self.label_8.setObjectName(u"label_8")
-        sizePolicy1 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        sizePolicy1.setHorizontalStretch(0)
-        sizePolicy1.setVerticalStretch(0)
-        sizePolicy1.setHeightForWidth(self.label_8.sizePolicy().hasHeightForWidth())
-        self.label_8.setSizePolicy(sizePolicy1)
+        sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        sizePolicy2.setHorizontalStretch(0)
+        sizePolicy2.setVerticalStretch(0)
+        sizePolicy2.setHeightForWidth(self.label_8.sizePolicy().hasHeightForWidth())
+        self.label_8.setSizePolicy(sizePolicy2)
 
         self.gridLayout_2.addWidget(self.label_8, 4, 0, 1, 6)
 
@@ -165,8 +170,8 @@ class Ui_Rect_Image(object):
 
         self.label_14 = QLabel(Rect_Image)
         self.label_14.setObjectName(u"label_14")
-        sizePolicy.setHeightForWidth(self.label_14.sizePolicy().hasHeightForWidth())
-        self.label_14.setSizePolicy(sizePolicy)
+        sizePolicy1.setHeightForWidth(self.label_14.sizePolicy().hasHeightForWidth())
+        self.label_14.setSizePolicy(sizePolicy1)
         self.label_14.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
 
         self.gridLayout_2.addWidget(self.label_14, 6, 3, 1, 1)
@@ -180,15 +185,15 @@ class Ui_Rect_Image(object):
 
         self.label_16 = QLabel(Rect_Image)
         self.label_16.setObjectName(u"label_16")
-        sizePolicy.setHeightForWidth(self.label_16.sizePolicy().hasHeightForWidth())
-        self.label_16.setSizePolicy(sizePolicy)
+        sizePolicy1.setHeightForWidth(self.label_16.sizePolicy().hasHeightForWidth())
+        self.label_16.setSizePolicy(sizePolicy1)
 
         self.gridLayout_2.addWidget(self.label_16, 6, 5, 1, 1)
 
         self.label_15 = QLabel(Rect_Image)
         self.label_15.setObjectName(u"label_15")
-        sizePolicy.setHeightForWidth(self.label_15.sizePolicy().hasHeightForWidth())
-        self.label_15.setSizePolicy(sizePolicy)
+        sizePolicy1.setHeightForWidth(self.label_15.sizePolicy().hasHeightForWidth())
+        self.label_15.setSizePolicy(sizePolicy1)
 
         self.gridLayout_2.addWidget(self.label_15, 5, 5, 1, 1)
 
@@ -201,15 +206,15 @@ class Ui_Rect_Image(object):
         self.horizontalLayout.setObjectName(u"horizontalLayout")
         self.label_4 = QLabel(Rect_Image)
         self.label_4.setObjectName(u"label_4")
-        sizePolicy.setHeightForWidth(self.label_4.sizePolicy().hasHeightForWidth())
-        self.label_4.setSizePolicy(sizePolicy)
+        sizePolicy1.setHeightForWidth(self.label_4.sizePolicy().hasHeightForWidth())
+        self.label_4.setSizePolicy(sizePolicy1)
 
         self.horizontalLayout.addWidget(self.label_4)
 
         self.lbl_scanEdges = QLabel(Rect_Image)
         self.lbl_scanEdges.setObjectName(u"lbl_scanEdges")
-        sizePolicy1.setHeightForWidth(self.lbl_scanEdges.sizePolicy().hasHeightForWidth())
-        self.lbl_scanEdges.setSizePolicy(sizePolicy1)
+        sizePolicy2.setHeightForWidth(self.lbl_scanEdges.sizePolicy().hasHeightForWidth())
+        self.lbl_scanEdges.setSizePolicy(sizePolicy2)
 
         self.horizontalLayout.addWidget(self.lbl_scanEdges)
 
@@ -222,6 +227,15 @@ class Ui_Rect_Image(object):
 
         self.verticalLayout_2.addLayout(self.main_layout)
 
+        QWidget.setTabOrder(self.combo_image, self.btn_defineROI)
+        QWidget.setTabOrder(self.btn_defineROI, self.btn_instruction)
+        QWidget.setTabOrder(self.btn_instruction, self.chk_lres)
+        QWidget.setTabOrder(self.chk_lres, self.spin_z)
+        QWidget.setTabOrder(self.spin_z, self.btn_storeZ)
+        QWidget.setTabOrder(self.btn_storeZ, self.spin_resXPt)
+        QWidget.setTabOrder(self.spin_resXPt, self.spin_resYPt)
+        QWidget.setTabOrder(self.spin_resYPt, self.spin_resXum)
+        QWidget.setTabOrder(self.spin_resXum, self.spin_resYum)
 
         self.retranslateUi(Rect_Image)
 
