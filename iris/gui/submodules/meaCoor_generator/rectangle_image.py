@@ -91,6 +91,7 @@ class CanvasUpdater_Worker(QObject):
                 
                 print(f'Annotating rectangle at pixel coords: {coor_pxl_min} to {coor_pxl_max}')
                 
+                self._canvas_image.stop_recordClicks()
                 self.sig_annotateRectangle.emit(coor_pxl_min,coor_pxl_max,True)
                 self.sig_finished.emit()
             except Exception as e: self.sig_error.emit(f'Error updating rectangle annotation: {e}')
@@ -361,6 +362,7 @@ class Rect_Image(Ui_Rect_Image, qw.QWidget):
         self.lbl_scanEdges.setText('None')
         
         self._canvas_image.clear_all_annotations()
+        self._canvas_image.start_recordClicks()
     
     @Slot()
     def _update_combobox_imageUnits(self):

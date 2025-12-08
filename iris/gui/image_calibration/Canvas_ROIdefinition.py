@@ -16,7 +16,6 @@ from typing import Callable
 
 from iris.utils.general import *
 
-
 from iris.gui import AppPlotEnum
 
 class Canvas_Image_Annotations(QGraphicsView):
@@ -106,7 +105,7 @@ class Canvas_Image_Annotations(QGraphicsView):
         self._annotations.clear()
         self._list_clickCoords.clear()
         
-        self.update()
+        self.viewport().update()
         
     def annotate_canvas_multi(self,coor_list:list[tuple[float,float]],scale:bool=True,
                               flg_removePreviousAnnotations:bool=True):
@@ -190,8 +189,9 @@ class Canvas_Image_Annotations(QGraphicsView):
         text_item.setPos(x_scene + size, y_scene + size) # Offset text from crosshair
         text_item.setFont(QFont("Arial", 12))
         text_item.setBrush(QColor('red'))
+        text_item.setVisible(show)
         self._annotations.append(text_item)
-        self.update()
+        self.viewport().update()
         
     @Slot(tuple,tuple,bool)
     def draw_rectangle_canvas(self,coor1:tuple[float,float],coor2:tuple[float,float],scale:bool=True):
@@ -230,10 +230,10 @@ class Canvas_Image_Annotations(QGraphicsView):
         # Create a rectangle on the canvas
         # set transparency level to 50%
         alpha = 0.35
-        self._annotations.append(
-            self._scene.addRect(x1, y1, x2 - x1, y2 - y1, QPen(QColor('red')), QColor(255,0,0,int(255*alpha)))
-        )
-        self.update()
+        rectangle = self._scene.addRect(x1, y1, x2 - x1, y2 - y1, QPen(QColor('red')), QColor(255,0,0,int(255*alpha)))
+        rectangle.setVisible(True)
+        self._annotations.append(rectangle)
+        self.viewport().update()
         
     @Slot(bool)
     def stop_recordClicks(self,clear_annotations:bool=True) -> None:
