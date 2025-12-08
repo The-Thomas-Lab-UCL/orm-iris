@@ -72,7 +72,7 @@ class CanvasUpdater_Worker(QObject):
         """
         assert isinstance(imgUnit,MeaImg_Unit), 'imgUnit must be an instance of MeaImg_Unit'
         assert isinstance(list_rect_meaCoors_mm,list), 'list_rect_meaCoors_mm must be a list'
-        assert all(isinstance(coor,tuple) and len(coor)==2 for coor in list_rect_meaCoors_mm), \
+        assert all(isinstance(coor,(tuple,list)) and len(coor)>=2 for coor in list_rect_meaCoors_mm), \
             'list_rect_meaCoors_mm must be a list of tuples of length 2'
             
         # Clear the click coordinates and the annotations
