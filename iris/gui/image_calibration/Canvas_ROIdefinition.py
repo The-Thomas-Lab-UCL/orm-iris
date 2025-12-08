@@ -22,6 +22,8 @@ class Canvas_Image_Annotations(QGraphicsView):
     """
     A canvas to show a picture and record click button events
     """
+    sig_leftclick = Signal(tuple)   # x,y coordinates in original image coordinate system
+    sig_rightclick = Signal(tuple)  # Signal emitted on right click (to clear annotations)
     
     def __init__(self, parent:qw.QWidget, size_pixel=AppPlotEnum.IMGCAL_IMG_SIZE.value):
         self.size_pixel:tuple[int,int] = size_pixel   # Size of the canvas (width,height)
@@ -53,9 +55,10 @@ class Canvas_Image_Annotations(QGraphicsView):
         self._scene.setBackgroundBrush(QColor('white'))
         
         # Store observers for image updates
-        self._list_observers_clearAnnotations = []
+        self._list_observers_leftclick = []
+        self._list_observers_rightclick = []
         
-    def add_observer_clearAnnotations(self,observer:Callable):
+    def add_observer_rightclick(self,observer:Callable):
         """
         Adds an observer to be notified when the annotations are cleared
         
@@ -63,9 +66,9 @@ class Canvas_Image_Annotations(QGraphicsView):
             observer (QObject): The observer to be added
         """
         assert callable(observer), 'Observer must be a callable'
-        self._list_observers_clearAnnotations.append(observer)
+        self._list_observers_rightclick.append(observer)
         
-    def remove_observer_clearAnnotations(self,observer:Callable):
+    def remove_observer_rightclick(self,observer:Callable):
         """
         Removes an observer from the list of observers
         
@@ -73,28 +76,31 @@ class Canvas_Image_Annotations(QGraphicsView):
             observer (QObject): The observer to be removed
         """
         assert callable(observer), 'Observer must be a callable'
-        try: self._list_observers_clearAnnotations.remove(observer)
+        try: self._list_observers_rightclick.remove(observer)
         except Exception as e: print(f'Error removing observer: {e}')
         
-    def notify_observers_clearAnnotations(self):
+    def notify_observers_rightclick(self):
         """
         Notifies all observers that the annotations have been cleared
         """
-        for observer in self._list_observers_clearAnnotations:
+        for observer in self._list_observers_rightclick:
             try: observer()
             except Exception as e: print(f'Error notifying observer: {e}')
         
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        scene_pos = self.mapToScene(event.position().toPoint())
         if event.button() == Qt.LeftButton: # pyright: ignore[reportAttributeAccessIssue] ; Qt.LeftButton exists
-            scene_pos = self.mapToScene(event.position().toPoint())
             self._record_clickCoordinates(scene_pos.x(), scene_pos.y())
+            self.sig_leftclick.emit((scene_pos.x()*self._img_scale, scene_pos.y()*self._img_scale))
         elif event.button() == Qt.RightButton: # pyright: ignore[reportAttributeAccessIssue] ; Qt.RightButton exists
             self.clear_all_annotations()
-            self.notify_observers_clearAnnotations()
+            self.notify_observers_rightclick()
+            self.sig_rightclick.emit((scene_pos.x()*self._img_scale, scene_pos.y()*self._img_scale))
         # print(f'Canvas mousePressEvent at ({event.position().x()}, {event.position().y()}), type: {event.button()}')
         super().mousePressEvent(event)
-        print(f'List of click coordinates: {self._list_clickCoords}')
+        # print(f'List of click coordinates: {self._list_clickCoords}')
         
+    @Slot()
     def clear_all_annotations(self):
         """
         Clears the coordinate annotations on the canvas and 
@@ -107,6 +113,7 @@ class Canvas_Image_Annotations(QGraphicsView):
         
         self.viewport().update()
         
+    @Slot(list,bool,bool)
     def annotate_canvas_multi(self,coor_list:list[tuple[float,float]],scale:bool=True,
                               flg_removePreviousAnnotations:bool=True):
         """
@@ -225,7 +232,7 @@ class Canvas_Image_Annotations(QGraphicsView):
         x2 = min(self.size_pixel[0],x2)
         y2 = min(self.size_pixel[1],y2)
         
-        print(f'Drawing rectangle at ({x1}, {y1}) to ({x2}, {y2}) on canvas')
+        # print(f'Drawing rectangle at ({x1}, {y1}) to ({x2}, {y2}) on canvas')
         
         # Create a rectangle on the canvas
         # set transparency level to 50%

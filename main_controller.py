@@ -264,17 +264,6 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         except: qw.QMessageBox.warning(self, 'Error', 'The input must be a number')
         else: self._stageHub.set_measurement_offset_ms(offset_ms); qw.QMessageBox.information(self, 'Success', f'The offset has been set to {offset_ms} ms')
         
-    @Slot()
-    def _check_and_setup(self):
-        """
-        Checks visibility and executes the final setup if ready.
-        """
-        if self.isVisible():
-            print("Widget is now visible. Proceeding with setup.")
-            self.initialisations()
-        else:
-            self._visibility_timer.start(200)
-        
     def initialisations(self):
         """
         Turns on all the auto-updaters once all the widgets are initialised

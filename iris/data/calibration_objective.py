@@ -497,6 +497,37 @@ class ImgMea_Cal_Hub():
         }
         self._last_path = None
         
+        self._list_observers = []
+        
+    def add_observer(self,callback_func) -> None:
+        """
+        Adds an observer callback function to be notified when the calibration hub is updated
+        
+        Args:
+            callback_func (function): Callback function to be called when the calibration hub is updated
+        """
+        assert callable(callback_func), 'Callback function must be callable'
+        self._list_observers.append(callback_func)
+        
+    def remove_observer(self,callback_func) -> None:
+        """
+        Removes an observer callback function
+        
+        Args:
+            callback_func (function): Callback function to be removed
+        """
+        assert callable(callback_func), 'Callback function must be callable'
+        try: self._list_observers.remove(callback_func)
+        except Exception as e: print(f'Error removing observer (ImgCalHub): {e}')
+        
+    def notify_observers(self) -> None:
+        """
+        Notifies all observers that the calibration hub has been updated
+        """
+        for callback in self._list_observers:
+            try: callback()
+            except Exception as e: print(f'Error notifying observer (ImgCalHub): {e}')
+        
     def load_calibration_folder(self, uselastpath:bool=False) -> None:
         """
         Prompts the user to select a folder to load the calibration files

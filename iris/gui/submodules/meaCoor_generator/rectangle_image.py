@@ -89,7 +89,7 @@ class CanvasUpdater_Worker(QObject):
                 coor_pxl_max = imgUnit.convert_stg2imgpt(coor_stage_mm=stage_coor_mm,\
                     coor_point_mm=list_rect_meaCoors_mm[1],correct_rot=True,low_res=low_resolution)
                 
-                print(f'Annotating rectangle at pixel coords: {coor_pxl_min} to {coor_pxl_max}')
+                # print(f'Annotating rectangle at pixel coords: {coor_pxl_min} to {coor_pxl_max}')
                 
                 self._canvas_image.stop_recordClicks()
                 self.sig_annotateRectangle.emit(coor_pxl_min,coor_pxl_max,True)
@@ -157,6 +157,7 @@ class Rect_Image(Ui_Rect_Image, qw.QWidget):
         """
         # Set scan area button
         self.btn_defineROI.clicked.connect(self._set_scan_area)
+        self.btn_instruction.clicked.connect(self._show_instructions)
         
         # Image unit combobox
         self.combo_image.setEnabled(False)
@@ -174,7 +175,7 @@ class Rect_Image(Ui_Rect_Image, qw.QWidget):
         self.spin_resYum.editingFinished.connect(self.sig_updateResPt.emit)
         
         # Canvas clear annotations observer
-        self._canvas_image.add_observer_clearAnnotations(self.sig_resetStoredCoors.emit)
+        self._canvas_image.add_observer_rightclick(self.sig_resetStoredCoors.emit)
         self.sig_resetStoredCoors.connect(self._reset_click_coors)
         
     def _init_workers(self):
@@ -193,6 +194,20 @@ class Rect_Image(Ui_Rect_Image, qw.QWidget):
         self._worker_canvas.sig_error.connect(lambda msg: qw.QMessageBox.warning(self, 'Error', msg))
         self._worker_canvas.sig_img_stageCoor_mm.connect(self._update_img_stageCoor_mm)
         self._thread_canvas.start()
+    
+    @Slot()
+    def _show_instructions(self):
+        """
+        Shows the instructions for using the rectangle image mapping method
+        """
+        instructions = (
+            "Instructions:\n"
+            "1. Select an image to display\n"
+            "2. Left-click on the image to include points in the ROI\n"
+            "3. Right-click on the image to reset the selected points.\n"
+            "4. Click the 'Define ROI' button to finalise the setup."
+        )
+        qw.QMessageBox.information(self, 'Instructions - Rectangle Image Mapping Method', instructions)
     
     @Slot(tuple)
     def _update_img_stageCoor_mm(self,coor_mm:tuple):
@@ -358,7 +373,6 @@ class Rect_Image(Ui_Rect_Image, qw.QWidget):
         """
         self._list_clickMeaCoor_mm.clear()
         self._list_rect_meaCoors_mm.clear()
-        self.lbl_selectedCoors.setText('None')
         self.lbl_scanEdges.setText('None')
         
         self._canvas_image.clear_all_annotations()
@@ -414,7 +428,7 @@ class Rect_Image(Ui_Rect_Image, qw.QWidget):
         if img is None:
             print('No image unit selected')
             return
-        print(f'Updating image shown: {img.get_IdName()}')
+        # print(f'Updating image shown: {img.get_IdName()}')
         
         self._reset_click_coors()
         

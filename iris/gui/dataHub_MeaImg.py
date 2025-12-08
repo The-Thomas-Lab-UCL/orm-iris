@@ -45,6 +45,9 @@ class Wdg_DataHub_ImgCal(qw.QWidget):
     
     Note: the term calibration and objective are used interchangeably in this object docstrings/attributes/methods.
     """
+    
+    sig_update_combobox = Signal()
+    
     def __init__(self, main, getter_ImageCalHub:Callable[[], ImgMea_Cal_Hub]|None=None,
                  *args, **kwargs) -> None:
         """
@@ -81,6 +84,49 @@ class Wdg_DataHub_ImgCal(qw.QWidget):
         
         self._btn_loaddir.clicked.connect(lambda: self._load_calibration_folder())
         self._btn_refreshdir.clicked.connect(lambda: self._refresh_calibration_folder())
+        
+        # Observers
+        self._list_observer_calibrationChange:list[Callable[[],None]] = []
+        
+    def _init_signals(self):
+        """
+        Initialize the signals for the frame.
+        """
+        self._combo_cal.activated.connect(self._notify_observers_calibrationChange)
+        self._CalHub.add_observer(self.sig_update_combobox.emit)
+        self.sig_update_combobox.connect(self.update_combobox)
+        
+    def add_observer_calibrationChange(self, func:Callable[[],None]) -> None:
+        """
+        Append an observer function to be called when the selected calibration changes.
+        
+        Args:
+            func (Callable[[], None]): Function to be called when the selected calibration changes
+        """
+        assert callable(func), 'Observer must be a callable function'
+        
+        self._list_observer_calibrationChange.append(func)
+        
+    def remove_observer_calibrationChange(self, func:Callable[[],None]) -> None:
+        """
+        Remove an observer function from the list.
+        
+        Args:
+            func (Callable[[], None]): Function to be removed
+        """
+        assert callable(func), 'Observer must be a callable function'
+        assert func in self._list_observer_calibrationChange, 'Function not found in observer list'
+        
+        if func in self._list_observer_calibrationChange:
+            self._list_observer_calibrationChange.remove(func)
+            
+    def _notify_observers_calibrationChange(self) -> None:
+        """
+        Notify all observer functions of a calibration change.
+        """
+        for func in self._list_observer_calibrationChange:
+            try: func()
+            except Exception as e: print(f'Error notifying observer (ImgCal): {e}')
         
     def get_ImageMeasurement_Calibration_Hub(self) -> ImgMea_Cal_Hub:
         """
@@ -119,6 +165,7 @@ class Wdg_DataHub_ImgCal(qw.QWidget):
         
         if self._combo_cal.currentText() not in self._list_cals:
             self._combo_cal.setCurrentIndex(0)
+            self._notify_observers_calibrationChange()
         
     def _refresh_calibration_folder(self, supp_msg:bool=False) -> None:
         """
@@ -146,6 +193,7 @@ class Wdg_DataHub_ImgCal(qw.QWidget):
         finally:
             self._btn_refreshdir.setEnabled(True)
             self._btn_refreshdir.setText(ori_text)
+            self._notify_observers_calibrationChange()
         
     def _load_calibration_folder(self,dirpath:str|None=None,supp_msg:bool=False) -> None:
         """
@@ -179,6 +227,7 @@ class Wdg_DataHub_ImgCal(qw.QWidget):
         finally:
             self._btn_loaddir.setEnabled(True)
             self._btn_loaddir.setText(ori_text)
+            self._notify_observers_calibrationChange()
         
 
 class Image_SaverLoader_Worker(QObject):
