@@ -2,11 +2,11 @@
 A GUI module to modify the z-coordinates of a mapping coordinates list.
 """
 
-import tkinter as tk
-from tkinter import ttk
-from tkinter import messagebox
+import PySide6.QtWidgets as qw
+from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication
 
 from typing import Literal
+from enum import Enum
 import threading
 
 if __name__ == '__main__':
@@ -20,7 +20,183 @@ from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 
 from iris.utils.general import *
 
-class EveryZ(tk.Frame):
+from iris.resources.coordinate_modifiers.every_z_ui import Ui_every_z
+
+class Option_NextZ(Enum):
+    ORIGINAL = 'original'
+    LAST = 'last'
+
+class EveryZModifier_Worker(QObject):
+    sig_error = Signal(str)
+    sig_finish = Signal(str)
+    sig_saveModification = Signal(MeaCoor_mm)
+    sig_current_coordinate_index = Signal(str)
+    sig_current_coordinate_z_mm = Signal(float)
+    sig_original_coordinate_z_mm = Signal(str)
+    
+    msg_error_finish = "Error in modifying z-coordinates:"
+    msg_error_inprogress = "Error in modifying z-coordinates (in progress):"
+    msg_success_finish = "Successfully modified z-coordinates."
+    msg_cancelled_finish = "Z-coordinates modification cancelled by user."
+    
+    _sig_gotocoor = Signal(tuple,threading.Event)
+    
+    def __init__(self, motion_controller:Wdg_MotionController):
+        super().__init__()
+        self._motion_controller = motion_controller
+        self._mappingCoor:MeaCoor_mm|None = None
+        self._index:int = 0
+        self._last_z_mm:float|None = None
+        
+        self._gotoworker = self._motion_controller.get_goto_worker()
+        self._sig_gotocoor.connect(self._gotoworker.work)
+        
+    def _emit_current_coordinate(self):
+        """Emits the current coordinate index as a string"""
+        if self._mappingCoor is None:
+            self.sig_current_coordinate_index.emit('N/A')
+            return
+        
+        total = len(self._mappingCoor.mapping_coordinates)
+        current = self._index + 1  # 1-based index for user display
+        self.sig_current_coordinate_index.emit(f'{current} of {total}')
+        self.sig_original_coordinate_z_mm.emit(
+            f"{self._mappingCoor.mapping_coordinates[self._index][2]*1e3:.2f} µm"
+        )
+        
+    @Slot(MeaCoor_mm)
+    def _set_mapping_coordinates(self, mapping_coordinates:MeaCoor_mm):
+        """
+        Runs the modification of the z-coordinates of the selected mapping coordinates
+        """
+        self._mappingCoor = mapping_coordinates.copy()
+        self.sig_current_coordinate_z_mm.emit(self._mappingCoor.mapping_coordinates[self._index][2])
+        self._emit_current_coordinate()
+        
+    @Slot(float)
+    def _set_newZCoor_mm(self, new_z_mm:float):
+        """Sets the last known z-coordinate
+        """
+        if self._mappingCoor is None:
+            self.sig_error.emit(f"{self.msg_error_inprogress} No mapping coordinates set.")
+            return
+        
+        new_coor_mm = self._mappingCoor.mapping_coordinates[self._index]
+        new_coor_mm = (
+            new_coor_mm[0],
+            new_coor_mm[1],
+            new_z_mm,
+        )
+        self._mappingCoor.mapping_coordinates[self._index] = new_coor_mm
+        self._last_z_mm = new_z_mm
+        
+    @Slot(Option_NextZ)
+    def _go_to_next_coordinate(self, option_nextZ:Option_NextZ):
+        """Moves the motion controller to the next coordinate
+        
+        Args:
+            target_coor_mm (tuple): The target coordinate to move to
+        """
+        self._index += 1
+        
+        if self._mappingCoor is None:
+            self.sig_error.emit(f"{self.msg_error_inprogress} No mapping coordinates set.")
+            return
+        
+        if self._index >= len(self._mappingCoor.mapping_coordinates):
+            self._index = len(self._mappingCoor.mapping_coordinates) - 1
+            self.sig_error.emit(f"{self.msg_error_inprogress} Already at the last coordinate.")
+            return
+        
+        target_coor_mm = self._mappingCoor.mapping_coordinates[self._index]
+        nextZ = target_coor_mm[2]
+        if option_nextZ == Option_NextZ.LAST and isinstance(self._last_z_mm, (int,float)):
+            target_coor_mm = (
+                target_coor_mm[0],
+                target_coor_mm[1],
+                self._last_z_mm,
+            )
+            nextZ = self._last_z_mm
+        
+        try:
+            reached = threading.Event()
+            self._sig_gotocoor.emit(target_coor_mm, reached)
+            reached.wait(10)
+            if not reached.is_set(): raise TimeoutError("Motion controller did not reach target coordinate in time.")
+        except Exception as e:
+            self.sig_error.emit(f"{self.msg_error_inprogress} Failed to move to next coordinate: {e}")
+            return
+        
+        self._emit_current_coordinate()
+        self.sig_current_coordinate_z_mm.emit(nextZ)
+        
+    @Slot()
+    def _go_to_prev_coordinate(self):
+        if self._mappingCoor is None:
+            self.sig_error.emit(f"{self.msg_error_inprogress} No mapping coordinates set.")
+            return
+        
+        self._index -= 1
+        if self._index < 0:
+            self._index = 0
+            self.sig_error.emit(f"{self.msg_error_inprogress} Already at the first coordinate.")
+            return
+        
+        target_coor_mm = self._mappingCoor.mapping_coordinates[self._index]
+        try:
+            reached = threading.Event()
+            self._sig_gotocoor.emit(target_coor_mm, reached)
+            reached.wait(10)
+            if not reached.is_set(): raise TimeoutError("Motion controller did not reach target coordinate in time.")
+        except Exception as e:
+            self.sig_error.emit(f"{self.msg_error_inprogress} Failed to move to previous coordinate: {e}")
+            return
+        
+        self.sig_current_coordinate_z_mm.emit(self._mappingCoor.mapping_coordinates[self._index][2])
+        
+    @Slot()
+    def _cancel_modification(self):
+        """Cancels the modification process
+        """
+        self._mappingCoor = None
+        self._index = 0
+        self._last_z_mm = None
+        self.sig_finish.emit(self.msg_cancelled_finish)
+        
+    @Slot()
+    def _finish_modification(self):
+        """Finishes the modification process and emits the modified mapping coordinates
+        """
+        if self._mappingCoor is None:
+            self.sig_error.emit(f"{self.msg_error_finish} No mapping coordinates set.")
+            return
+        
+        modified_mappingCoor = self._mappingCoor
+        self._mappingCoor = None
+        self._index = 0
+        self._last_z_mm = None
+        
+        self.sig_saveModification.emit(modified_mappingCoor)
+        self.sig_finish.emit(self.msg_success_finish)
+
+class EveryZ(Ui_every_z, qw.QWidget):
+    msg_instructions = (
+        "This module allows you to modify the z-coordinates of a mapping coordinates list.\n"
+        "1. Select a mapping unit from the dropdown menu.\n"
+        "2. Click 'Start modification' to start the modification process.\n"
+        "3. For each coordinate, the current z-coordinate will be displayed.\n"
+        "4. You can either enter a new z-coordinate manually or click 'Insert current Z-coor'.\n"
+        "5. Move to the next coordinate by either enabling the 'Automove' checkbos or clicking 'Next coordinate'.\n"
+        "6. You can cancel the modification process at any time by clicking 'Cancel modification'.\n"
+        "7. After all coordinates have been modified or after pressing 'Finish and save modification',"
+        "you will be prompted to enter a name for the new mapping unit.\n")
+    
+    sig_updateCombo_mappingUnits = Signal()
+    sig_perform_zModification = Signal(MeaCoor_mm)
+    
+    sig_gotonext_coordinate = Signal(Option_NextZ)
+    sig_store_coorZ_mm = Signal(float)
+    
     def __init__(
         self,
         parent,
@@ -30,233 +206,215 @@ class EveryZ(tk.Frame):
         """Initializes the mapping method
         
         Args:
-            parent (tk.Frame): The parent frame to place this widget in
+            parent (qw.QWidget): The parent widget to place this widget in
             MappingCoorHub (MappingCoordinatesHub): The hub to store the resulting mapping coordinates in
             getter_MappingCoor (Callable[[], MappingCoordinates_mm]): A function to get the mapping coordinates to modify
             motion_controller (Frm_MotionController): The motion controller to use for the mapping
         """
         super().__init__(parent)
+        self.setupUi(self)
+        self.setLayout(self.main_layout)
+        
         self._coorHub = mappingCoorHub
         self._motion_controller = motion_controller
         
-    # >>> Top level frame <<<
-        frm_instruction = tk.Frame(self)
-        frm_mapUnit_selection = tk.Frame(self)
-        self._frm_zModification = tk.LabelFrame(self, text='Z-coordinates modifier', padx=5, pady=5)
+        # Button setup
+        self.btn_showInstructions.clicked.connect(lambda: qw.QMessageBox.information(self, "Instructions", self.msg_instructions))
+        self.btn_start.clicked.connect(self._start_modify_z_coordinates)
+        self._set_enabled_modifier(enabled=False)
         
-        row=0; col_curr=0
-        frm_instruction.grid(row=row, column=0, sticky='nsew', padx=5, pady=5); row+=1
-        frm_mapUnit_selection.grid(row=row, column=0, sticky='nsew', padx=5, pady=5); row+=1
-        self._frm_zModification.grid(row=row, column=0, sticky='nsew', padx=5, pady=5)
-        
-        [self.grid_rowconfigure(i, weight=1) for i in range(row+1)]
-        [self.grid_columnconfigure(i, weight=1) for i in range(col_curr+1)]
-        
-    # >>> Information widget <<<
-        btn_instructions = tk.Button(frm_instruction, text='Show instructions', command=self._show_instructions)
-        
-        row=0; col_curr=0
-        btn_instructions.grid(row=0, column=0, sticky='ew', padx=5, pady=5)
-        
-        [frm_instruction.grid_rowconfigure(i, weight=0) for i in range(row+1)]
-        [frm_instruction.grid_columnconfigure(i, weight=1) for i in range(col_curr+1)]
-        
-    # >>> Selection widget <<<
-        self._combo_mapUnit = ttk.Combobox(frm_mapUnit_selection, state='readonly')
-        self._btn_modifyZ = tk.Button(frm_mapUnit_selection, text='Modify Z-coordinates', command=self._run_modify_z_coordinates)
-        
-        row=0; col_curr=0
-        self._combo_mapUnit.grid(row=row, column=0, sticky='ew', padx=5, pady=5); row+=1
-        self._btn_modifyZ.grid(row=row, column=0, sticky='ew', padx=5, pady=5)
-        
-        [frm_mapUnit_selection.grid_rowconfigure(i, weight=0) for i in range(row+1)]
-        [frm_mapUnit_selection.grid_columnconfigure(i, weight=1) for i in range(col_curr+1)]
-        
-    # >>> Z-coordinates modification widgets <<<
-        lbl_coorinfo = tk.Label(self._frm_zModification, text='Coordinates left to modify:')
-        self._str_coorinfo_val = tk.StringVar(value='N/A')
-        lbl_coorinfo_value = tk.Label(self._frm_zModification, textvariable=self._str_coorinfo_val)
-        
-        lbl_old_z_coor = tk.Label(self._frm_zModification, text='Old Z-coordinate [μm]:')
-        self._str_oldZCoor = tk.StringVar(value='N/A')
-        lbl_old_z_value = tk.Label(self._frm_zModification, textvariable=self._str_oldZCoor)
-        
-        lbl_new_z_coor = tk.Label(self._frm_zModification, text='New Z-coordinate [μm]:')
-        self._entry_newZCoor = tk.Entry(self._frm_zModification)
-        self._btn_currentZCoor = tk.Button(self._frm_zModification, text='Insert current Z-coordinate',\
-            command=self._insert_current_z_coordinate)
-        
-        self._btn_currentZCoor_commit = tk.Button(self._frm_zModification, text='Insert current Z-coordinate and commit')
-        self._btn_commit_modification = tk.Button(self._frm_zModification, text='Commit modification')
-        self._btn_cancel_modification = tk.Button(self._frm_zModification, text='Cancel modification')
-        
-        row=0; col_curr=0; col_max=0
-        lbl_coorinfo.grid(row=row, column=0, sticky='w', padx=5, pady=5); col_curr+=1
-        lbl_coorinfo_value.grid(row=row, column=1, sticky='w', padx=5, pady=5); row+=1; col_max=max(col_max, col_curr); col_curr=0
-        
-        lbl_old_z_coor.grid(row=row, column=0, sticky='w', padx=5, pady=5); col_curr+=1
-        lbl_old_z_value.grid(row=row, column=1, sticky='w', padx=5, pady=5); row+=1; col_max=max(col_max, col_curr); col_curr=0
-        
-        lbl_new_z_coor.grid(row=row, column=0, sticky='w', padx=5, pady=5); col_curr+=1
-        self._entry_newZCoor.grid(row=row, column=1, sticky='ew', padx=5, pady=5); row+=1; col_max=max(col_max, col_curr); col_curr=0
-        
-        self._btn_currentZCoor.grid(row=row, column=0, sticky='ew', padx=5, pady=5); col_curr+=1
-        self._btn_currentZCoor_commit.grid(row=row, column=1, sticky='ew', padx=5, pady=5); row+=1; col_max=max(col_max, col_curr); col_curr=0
-        
-        self._btn_commit_modification.grid(row=row, column=0, sticky='ew', padx=5, pady=5); col_curr+=1
-        self._btn_cancel_modification.grid(row=row, column=1, sticky='ew', padx=5, pady=5)
-        
-        col_max = max(col_max, col_curr)
-        [self._frm_zModification.grid_rowconfigure(i, weight=0) for i in range(row+1)]
-        [self._frm_zModification.grid_columnconfigure(i, weight=1) for i in range(col_max+1)]
-        
-        # Disable the buttons and entry fields initially
-        self._reset_zMod_widgets('disabled')
-        
-    # >>> Parameters for the mapping coordinates modification <<<
+        # Params
         self._dict_mapUnit = {}  # Dictionary to store mapping units
-        self._modify_response:Literal['commit', 'cancel'] = None    # Response from the modification process
         
-    # >>> Others <<<
-        self._coorHub.add_observer(self._update_list_units)
-        self._update_list_units()
+        # Initialize the worker thread for motion controller communication
+        self._init_worker()
+        self._init_signals()
+        self.sig_updateCombo_mappingUnits.emit()
         
-    def _insert_current_z_coordinate(self):
-        """Inserts the current z-coordinate from the motion controller into the new
-        Z-coordinate entry field"""
-        current_z_um = self._motion_controller.get_coordinates_closest_mm()[2]*1e3
-        self._entry_newZCoor.delete(0, tk.END)
-        self._entry_newZCoor.insert(0, f'{current_z_um:.0f}')
+    def _init_worker(self):
+        # Initialize the worker thread for z-coordinate modification
+        self._thread_modifier = QThread()
+        self._worker_modifier = EveryZModifier_Worker(self._motion_controller)
+        self._worker_modifier.moveToThread(self._thread_modifier)
         
-    def _show_instructions(self):
-        instructions = (
-            "This module allows you to modify the z-coordinates of a mapping coordinates list.\n"
-            "TODO: Add instructions on how to use this module.\n"
-        )
-        messagebox.showinfo("Instructions", instructions)
-    
+        self._worker_modifier.sig_finish.connect(self._handle_finish)
+        self._worker_modifier.sig_saveModification.connect(self._handle_save_modification)
+        self._worker_modifier.sig_error.connect(self._handle_error)
+        
+        self._worker_modifier.sig_current_coordinate_index.connect(lambda idx_str: self.lbl_coorLeft.setText(idx_str))
+        self._worker_modifier.sig_current_coordinate_z_mm.connect(lambda z_mm: self.spin_newZUm.setValue(z_mm*1e3))
+        self._worker_modifier.sig_original_coordinate_z_mm.connect(lambda z_str: self.lbl_prevZ.setText(z_str))
+        
+        self.sig_perform_zModification.connect(self._worker_modifier._set_mapping_coordinates)
+        self.sig_gotonext_coordinate.connect(self._worker_modifier._go_to_next_coordinate)
+        self.sig_store_coorZ_mm.connect(self._worker_modifier._set_newZCoor_mm)
+        
+        self.btn_goToNext.clicked.connect(self._go_to_next_coordinate)
+        self.btn_goToPrev.clicked.connect(self._worker_modifier._go_to_prev_coordinate)
+        self.btn_storeZ.clicked.connect(self._store_current_z_coordinate)
+        
+        self.btn_cancel.clicked.connect(self._worker_modifier._cancel_modification)
+        self.btn_finishAndSave.clicked.connect(self._worker_modifier._finish_modification)
+        
+        self._thread_modifier.start()
+        
+    def _init_signals(self):
+        self.sig_updateCombo_mappingUnits.connect(self._update_list_units)
+        self._coorHub.add_observer(self.sig_updateCombo_mappingUnits.emit)
+        
+    @Slot()
     def _update_list_units(self):
         """Updates the list of mapping units in the combobox"""
         self._dict_mapUnit.clear()  # Clear the existing dictionary
         self._dict_mapUnit = {unit.mappingUnit_name: unit for unit in self._coorHub}
         
-        self._combo_mapUnit.configure(
-            values=list(self._dict_mapUnit.keys()),
-            state='readonly'
+        self.combo_mappingCoor.clear()
+        self.combo_mappingCoor.addItems(list(self._dict_mapUnit.keys()))
+        
+    @Slot(str)
+    def _handle_error(self, msg:str):
+        """Handles errors from the modifier worker"""
+        qw.QMessageBox.critical(self, "Error", msg)
+        
+    @Slot(str)
+    def _handle_finish(self, msg:str):
+        """Handles the finishing of the modification process"""
+        self._set_enabled_modifier(False)
+        self._set_enabled_selector(True)
+        
+        if msg.startswith(self._worker_modifier.msg_error_finish):
+            qw.QMessageBox.critical(self, "Error", msg)
+        elif msg.startswith(self._worker_modifier.msg_success_finish):
+            qw.QMessageBox.information(self, "Success", msg)
+        elif msg.startswith(self._worker_modifier.msg_cancelled_finish):
+            qw.QMessageBox.information(self, "Cancelled", msg)
+            
+    @Slot(MeaCoor_mm)
+    def _handle_save_modification(self, mapping_coor:MeaCoor_mm):
+        """Handles saving the modified mapping coordinates
+        
+        Args:
+            mapping_coor (MeaCoor_mm): The modified mapping coordinates
+        """
+        # Prompt for new name
+        new_name, ok = qw.QInputDialog.getText(
+            self,
+            "New Mapping Unit Name",
+            "Please enter a new name for the modified mapping coordinates:",
+            text=f"{mapping_coor.mappingUnit_name}_z modified"
         )
         
-    def _reset_zMod_widgets(self,state:Literal['normal', 'disabled']):
+        if not ok or not new_name:
+            qw.QMessageBox.warning(self, "Warning", "Modification cancelled: No name provided for new mapping unit.")
+            return
+        
+        # Add the new mapping coordinates to the hub
+        new_mapping_coor = MeaCoor_mm(new_name, mapping_coor.mapping_coordinates)
+        try: self._coorHub.append(new_mapping_coor)
+        except Exception as e:
+            qw.QMessageBox.critical(self, "Error", f"Failed to add new mapping coordinates: {e}")
+            return
+        
+    def _set_enabled_selector(self, enabled:bool):
+        """Resets the widgets in the mapping coordinates selection frame to the given state
+        Args:
+            enabled (bool): The state to set the widgets to enabled or disabled. True for enabled, False for disabled.
+        """
+        list_widgets = get_all_widgets_from_layout(self.lyt_selector)
+        
+        for widget in list_widgets:
+            if isinstance(widget, (qw.QPushButton, qw.QComboBox)):
+                widget.setEnabled(enabled)
+        
+    def _set_enabled_modifier(self, enabled:bool):
         """Resets the widgets in the z-coordinates modification frame to the given state
         Args:
-            state (Literal['normal', 'disabled']): The state to set the widgets to
+            enabled (bool): The state to set the widgets to enabled or disabled. True for enabled, False for disabled.
         """
-        assert state in ['normal', 'disabled'], f"Invalid state: {state}"
-        [widget.configure(state=state) for widget in get_all_widgets(self._frm_zModification) if isinstance(widget, (tk.Button, tk.Entry))]
+        list_widgets = get_all_widgets_from_layout(self.lyt_modifications)
         
-    @thread_assign
-    def _run_modify_z_coordinates(self):
+        for widget in list_widgets:
+            if isinstance(widget, (qw.QPushButton, qw.QLineEdit, qw.QCheckBox, qw.QRadioButton)):
+                widget.setEnabled(enabled)
+        
+    def _get_mapping_coordinates(self) -> MeaCoor_mm|None:
+        """Retrieves the selected mapping coordinates from the combobox
+        
+        Returns:
+            MeaCoor_mm|None: The selected mapping coordinates, or None if not found
         """
-        Runs the modification of the z-coordinates of the selected mapping coordinates
-        """
-    # > Retrieve the selected mapping unit from the combobox and check it <
-        selected_unit_name = self._combo_mapUnit.get()
+        selected_unit_name = self.combo_mappingCoor.currentText()
         if not selected_unit_name:
-            messagebox.showwarning("Warning", "Please select a mapping unit to modify.")
-            return
+            qw.QMessageBox.warning(self, "Warning", "Please select a mapping unit to modify.")
+            return None
         
         if selected_unit_name not in self._dict_mapUnit:
-            messagebox.showerror("Error", f"Mapping unit '{selected_unit_name}' not found.")
-            return
+            qw.QMessageBox.critical(self, "Error", f"Mapping unit '{selected_unit_name}' not found.")
+            return None
         
-        # Get the current mapping coordinates
         mapping_coordinates = self._dict_mapUnit[selected_unit_name]
         
         if not isinstance(mapping_coordinates, MeaCoor_mm):
-            messagebox.showerror("Error", "Invalid mapping coordinates type.")
+            qw.QMessageBox.critical(self, "Error", "Invalid mapping coordinates type.")
+            return None
+        
+        return mapping_coordinates
+        
+    @Slot()
+    def _start_modify_z_coordinates(self):
+        """
+        Runs the modification of the z-coordinates of the selected mapping coordinates
+        """
+        mapping_coordinate = self._get_mapping_coordinates()
+        if mapping_coordinate is None: return
+        
+        self.sig_perform_zModification.emit(mapping_coordinate)
+        self._set_enabled_modifier(True)
+        self._set_enabled_selector(False)
+        
+    @Slot()
+    def _go_to_next_coordinate(self):
+        """
+        Moves to the next coordinate using the modifier worker
+        """
+        self.sig_gotonext_coordinate.emit(self._get_nextZ_option())
+        
+    def _get_nextZ_option(self) -> Option_NextZ:
+        """Retrieves the next Z-coordinate option from the radio buttons
+        
+        Returns:
+            Option_NextZ: The selected next Z-coordinate option
+        """
+        return Option_NextZ.ORIGINAL if self.rad_originalZ.isChecked() else Option_NextZ.LAST
+        
+    @Slot()
+    def _store_current_z_coordinate(self):
+        """
+        Stores the current z-coordinate from the motion controller into the modifier worker
+        """
+        new_z_mm = self._motion_controller.get_coordinates_closest_mm()[2]
+        if not isinstance(new_z_mm, (int,float)):
+            qw.QMessageBox.warning(self, "Error", "Could not retrieve current Z coordinate from motion controller.")
             return
         
-    # > Prep the parameters for the modification process <
-        flg_input = threading.Event()
+        self.spin_newZUm.setValue(new_z_mm*1e3)
+        self.sig_store_coorZ_mm.emit(new_z_mm)
         
-        def commit(): flg_input.set(); self._modify_response = 'commit'
-        def cancel(): flg_input.set(); self._modify_response = 'cancel'
-        def insert_and_commit(): self._insert_current_z_coordinate(); flg_input.set(); self._modify_response = 'commit'
-        def reset_flg_input(): flg_input.clear()
-        
-        # Assign the functions to the buttons
-        self._btn_commit_modification.configure(command=commit)
-        self._btn_cancel_modification.configure(command=cancel)
-        self._btn_currentZCoor_commit.configure(command=insert_and_commit)
-        self._entry_newZCoor.bind('<Return>', lambda event: commit())  # Pressing Enter commits the modification
-        
-    # > Modify the z-coordinates <
-        list_new_coordinates = mapping_coordinates.mapping_coordinates.copy()
-        # Enable the widgets
-        self._reset_zMod_widgets('normal')
-        
-        
-        # Modify the z-coordinates
-        for i in range(len(list_new_coordinates)):
-            reset_flg_input()
-            # Get the current z-coordinate
-            old_z_value_um = list_new_coordinates[i][2]*1e3
-            self._str_oldZCoor.set(f'{old_z_value_um:.0f}')
-            self._entry_newZCoor.delete(0, tk.END)  # Clear the entry field
-            self._entry_newZCoor.insert(0, f'{old_z_value_um:.0f}')  # Insert the current z-coordinate
-            
-            self._motion_controller.go_to_coordinates(
-                coor_x_mm= list_new_coordinates[i][0],
-                coor_y_mm= list_new_coordinates[i][1],
-                coor_z_mm= list_new_coordinates[i][2],
-            )
-            
-            self._str_coorinfo_val.set(f'{len(list_new_coordinates)-i}/{len(list_new_coordinates)}')
-            
-            flg_input.wait()  # Wait for the user to input the new z-coordinate
-            if self._modify_response == 'cancel':
-                messagebox.showinfo("Cancelled", "Z-coordinates modification cancelled.")
-                self._reset_zMod_widgets('disabled')
-                return
-            try:
-                new_z_value_um = float(self._entry_newZCoor.get())
-                new_coor_mm = (list_new_coordinates[i][0], list_new_coordinates[i][1], new_z_value_um*1e-3)
-                valid = self._motion_controller.check_coordinates(new_coor_mm)
-                if not valid: raise ValueError("Out of the stage's travel range")
-            except Exception as e:
-                i-=1 # Repeat the current iteration if the input is invalid
-                messagebox.showerror("Error", f"Invalid input for new Z-coordinate: {e}")
-                continue
-            # Update the z-coordinate
-            list_new_coordinates[i] = new_coor_mm
-        
-        self._str_coorinfo_val.set('N/A')
-        
-        while True:
-            # Request for a new name
-            new_name = messagebox_request_input(
-                "New Mapping Unit Name",
-                "Please enter a new name for the modified mapping coordinates:",
-                default=f"{selected_unit_name}_z modified"
-            )
-            
-            # Add the new mapping coordinates to the hub
-            new_mapping_coor = MeaCoor_mm(new_name,list_new_coordinates)
-            try: self._coorHub.append(new_mapping_coor); break
-            except Exception as e: messagebox.showerror("Error", f"Failed to add new mapping coordinates: {e}"); continue
-        
-        messagebox.showinfo("Success", "Z-coordinates modified successfully.")
-        self._reset_zMod_widgets('disabled')
+        if self.chk_autoNextCoor.isChecked():
+            self.sig_gotonext_coordinate.emit(self._get_nextZ_option())
         
     
 def test():
     from iris.gui.motion_video import generate_dummy_motion_controller
+    import sys
     
-    root = tk.Tk()
-    root.title('Test')
+    app = qw.QApplication([])
+    mw = qw.QMainWindow()
+    mwdg = qw.QWidget()
+    mw.setCentralWidget(mwdg)
+    lyt = qw.QHBoxLayout(mwdg)
     
-    frm_motion = generate_dummy_motion_controller(root)
-    frm_motion._init_workers()
-    frm_motion.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
+    frm_motion = generate_dummy_motion_controller(mwdg)
     
     coorUnit = MeaCoor_mm(
         mappingUnit_name='Test Mapping Unit',
@@ -267,14 +425,15 @@ def test():
     coorHub.append(coorUnit)
     
     frm_coor_mod = EveryZ(
-        root,
+        mwdg,
         mappingCoorHub=coorHub,
         motion_controller=frm_motion,
     )
+    lyt.addWidget(frm_motion)
+    lyt.addWidget(frm_coor_mod)
     
-    frm_coor_mod.grid(row=0, column=1, sticky='nsew', padx=5, pady=5)
-    
-    root.mainloop()
+    mw.show()
+    sys.exit(app.exec())
     
 if __name__ == '__main__':
     test()

@@ -18,7 +18,7 @@ from iris.gui.submodules.meaCoor_generator.rectangle_aroundCentre import Rect_Ar
 from iris.gui.submodules.meaCoor_generator.rectangle_video import Rect_Video as Map3
 from iris.gui.submodules.meaCoor_generator.rectangle_image import Rect_Image as Map4
 from iris.gui.submodules.meaCoor_generator.points_image import Points_Image as Map5
-# from iris.gui.submodules.meaCoor_generator.singlePoint_zScan import singlePoint_zScan as Map6
+from iris.gui.submodules.meaCoor_generator.singlePoint_zScan import singlePoint_zScan as Map6
 from iris.gui.submodules.meaCoor_generator.line_zScan import Wdg_ZScanMethod_linear as ZScan1
 
 # from iris.gui.submodules.meaCoor_modifier.every_z import EveryZ as MapMod1
@@ -603,7 +603,7 @@ class Wdg_Hilvl_CoorGenerator(qw.QWidget):
             '3. Video': Map3,
             '4. Image': Map4,
             '5. Image points': Map5,
-            # '6. Single point Z-scan': Map6,
+            '6. Single point Z-scan': Map6,
             }   # Mapping methods, to be programmed manually
         self._current_map_method = Map1(**self._dict_mappingmethods_kwargs)
         wdg.lyt_coorGen_holder.addWidget(self._current_map_method)
