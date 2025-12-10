@@ -13,6 +13,7 @@ import time
 import datetime as dt
 from configupdater import ConfigUpdater
 import numpy as np
+from typing import Callable
 
 import threading
 import time
@@ -78,40 +79,55 @@ def generate_test_app(lyt:qw.QVBoxLayout|qw.QHBoxLayout) -> tuple[qw.QApplicatio
     wdg.setLayout(lyt)
     return app, wdg
 
-def messagebox_request_input(title: str, message: str, default: str = '') -> str:
+def messagebox_request_input(
+        parent: qw.QWidget, 
+        title: str, 
+        message: str, 
+        default: str = '',
+        validator: Callable[[str], bool]|None = None,
+        invalid_msg: str = "The entered value is invalid. Please try again.",
+        loop_until_valid: bool = False
+    ) -> str | None:
     """
-    A function that creates a messagebox that requests for an input from the user
+    A function that creates a QInputDialog to request input with optional validation.
     
     Args:
-        title (str): Title of the messagebox
-        message (str): Message to be displayed in the messagebox
-        default (str, optional): Default value of the input
+        parent (qw.QWidget): The parent widget for the dialog (recommended).
+        title (str): Title of the dialog box.
+        message (str): Message/label to be displayed for the input field.
+        default (str, optional): Default value of the input.
+        validator (Callable[[str], bool]|None, optional): A function that takes the 
+            input string and returns True if valid, False otherwise.
+        invalid_msg (str): Message to show if validation fails.
+        loop_until_valid (bool): If True, keeps asking until the input is valid 
+            or the user presses Cancel.
     
     Returns:
-        str: User input
+        str | None: User input string if OK was pressed and validation passed, 
+                    otherwise None (if Cancel was pressed).
     """
-    user_input = [default]  # List to hold the input (mutable)
-    def on_ok():
-        user_input[0] = entry.get()  # Update the value within the list
-        tl.destroy()
-
-    tl = tk.Toplevel()
-    tl.title(title)
-    tl.geometry("400x150")  # Set a fixed size for the input dialog
+    current_default = default
     
-    frm = tk.Frame(tl)
-    frm.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
-    
-    tk.Label(frm, text=message).pack()
-    entry = tk.Entry(frm)
-    entry.insert(0, default)
-    entry.pack(pady=(0,5), fill=tk.X, expand=True)
-    entry.focus_set()
-    entry.bind("<Return>", lambda event: on_ok())
-    tk.Button(frm, text="OK", command=on_ok).pack(pady=(0,5),fill=tk.X, expand=True)
-    tl.attributes("-topmost", True)
-    tl.wait_window()  # Wait for the window to close
-    return user_input[0]  # Return the updated value from the list
+    while True:
+        # 1. Show the input dialog
+        user_input, ok = qw.QInputDialog.getText(
+            parent,
+            title,
+            message,
+            qw.QLineEdit.Normal, # pyright: ignore[reportAttributeAccessIssue]
+            current_default
+        )
+        
+        if not ok: return None  # User pressed Cancel
+        
+        is_valid = True
+        if validator is not None: is_valid = validator(user_input)
+        if is_valid: return user_input
+        
+        if not loop_until_valid: return None
+        else:
+            qw.QMessageBox.warning(parent, "Invalid Input", invalid_msg)
+            current_default = user_input
 
 def convert_wavelength_to_ramanshift(wavelength:float|np.ndarray,excitation_wavelength:float) -> float|np.ndarray:
     """

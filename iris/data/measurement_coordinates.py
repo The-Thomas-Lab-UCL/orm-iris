@@ -130,6 +130,22 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         super().__init__(*args)
         self._list_observers:list[Callable] = []
         
+    def validator_new_name(self, new_name:str) -> bool:
+        """
+        Checks if a new mapping unit name is valid (i.e., not already in use).
+        
+        Args:
+            new_name (str): The new mapping unit name to check.
+            
+        Returns:
+            bool: True if the name is valid, False otherwise.
+        """
+        if not isinstance(new_name, str): raise TypeError(f"Expected str, got {type(new_name)}")
+        for mapcoor in self:
+            if mapcoor.mappingUnit_name == new_name:
+                return False
+        return True
+        
     def add_observer(self, observer:Callable):
         """
         Adds an observer to the list of observers.

@@ -296,15 +296,17 @@ class EveryZ(Ui_every_z, qw.QWidget):
         Args:
             mapping_coor (MeaCoor_mm): The modified mapping coordinates
         """
-        # Prompt for new name
-        new_name, ok = qw.QInputDialog.getText(
+        new_name = messagebox_request_input(
             self,
-            "New Mapping Unit Name",
-            "Please enter a new name for the modified mapping coordinates:",
-            text=f"{mapping_coor.mappingUnit_name}_z modified"
+            title="New Mapping Unit Name",
+            message="Enter a name for the new mapping unit:",
+            default=mapping_coor.mappingUnit_name + "_modified",
+            validator=self._coorHub.validator_new_name,
+            invalid_msg="The name is already in use. Please enter a different name.",
+            loop_until_valid=True
         )
         
-        if not ok or not new_name:
+        if new_name is None:
             qw.QMessageBox.warning(self, "Warning", "Modification cancelled: No name provided for new mapping unit.")
             return
         
