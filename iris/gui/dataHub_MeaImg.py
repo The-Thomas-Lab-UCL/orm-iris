@@ -305,6 +305,7 @@ class Wdg_DataHub_Image(qw.QWidget):
     sig_save = Signal(MeaImg_Hub, str, str)
     sig_load = Signal(MeaImg_Hub, str)
     sig_save_png = Signal(MeaImg_Unit, str, float)
+    sig_updateTree = Signal()
     
     def __init__(self, main, getter_ImageHub: Callable[[], MeaImg_Hub]|None=None, **kwargs) -> None:
         """
@@ -331,6 +332,8 @@ class Wdg_DataHub_Image(qw.QWidget):
     # >>> Hub setups <<<
         self.ImageHub = self._getter_ImageHub() \
             if self._getter_ImageHub is not None else MeaImg_Hub()
+            
+        self.ImageHub.add_observer(self.sig_updateTree.emit)
             
     # >>> Save parameters setup <<<
         self._sessionid = get_timestamp_us_str()    # Session ID
@@ -359,9 +362,9 @@ class Wdg_DataHub_Image(qw.QWidget):
         self._txt_btn_save_png = self._btn_save_png.text()
         
     # >>> Worker setup <<<
-        self._init_workers()
+        self._init_workers_and_signals()
         
-    def _init_workers(self):
+    def _init_workers_and_signals(self):
         """
         Initialize the worker threads for saving and loading ImageMeasurement_Hub data.
         """
@@ -381,6 +384,9 @@ class Wdg_DataHub_Image(qw.QWidget):
         
         self._thread.start()
         
+        # Signals
+        self.sig_updateTree.connect(self.update_tree)
+        
     def on_worker_finished(self, msg:str):
         """
         Slot to handle the finished signal from the worker.
@@ -392,7 +398,7 @@ class Wdg_DataHub_Image(qw.QWidget):
             self._flg_issaved = True
         elif msg == self._worker.msg_load_db:
             self._flg_issaved = True
-            self.update_tree()
+            self.sig_updateTree.emit()
         
         qw.QMessageBox.information(self, 'Success', msg)
         
@@ -513,7 +519,7 @@ class Wdg_DataHub_Image(qw.QWidget):
                 unit.set_name(imgname)
             self.ImageHub.append_ImageMeasurementUnit(unit)
             self._flg_issaved = False
-            self.update_tree()
+            self.sig_updateTree.emit()
             
         except Exception as e:
             qw.QMessageBox.warning(self, 'Error', str(e))
@@ -539,7 +545,7 @@ class Wdg_DataHub_Image(qw.QWidget):
             self.ImageHub.remove_ImageMeasurementUnit(unit_id)
         
         self._flg_issaved = False
-        self.update_tree()
+        self.sig_updateTree.emit()
         
     def get_ImageMeasurement_Hub(self) -> MeaImg_Hub:
         """
@@ -558,8 +564,9 @@ class Wdg_DataHub_Image(qw.QWidget):
             self.ImageHub = self._getter_ImageHub()
             
         self._flg_issaved = False
-        self.update_tree()
+        self.sig_updateTree.emit()
         
+    @Slot()
     def update_tree(self):
         """
         Update the treeview widget with the data from the ImageMeasurement_Hub.
@@ -597,7 +604,6 @@ class Wdg_DataHub_Image(qw.QWidget):
         Generate dummy data for testing purposes.
         """
         self.ImageHub.test_generate_dummy()
-        self.update_tree()
 
 def generate_dummy_frmImageHub(parent:qw.QWidget) -> Wdg_DataHub_Image:
     """
@@ -657,5 +663,5 @@ def test_DataHub_ImgCal():
     sys.exit(app.exec())
 
 if __name__ == '__main__':
-    # test_DataHubImage()
-    test_DataHub_ImgCal()
+    test_DataHubImage()
+    # test_DataHub_ImgCal()
