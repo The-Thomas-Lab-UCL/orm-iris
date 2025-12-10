@@ -206,7 +206,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     _sig_acquire_continuous_mea = Signal(AcquisitionParams, queue.Queue, queue.Queue)
     _sig_acquire_list_coors = Signal(list, threading.Event)
 
-    def __init__(self, mapping_hub:MeaRMap_Hub, syncer_raman:Syncer_Raman):
+    def __init__(self, mapping_hub:MeaRMap_Hub, syncer_raman:Syncer_Raman, event_isacquiring:threading.Event):
         """
         Worker to perform the measurement acquisition for Raman imaging. For the slots details, refer to the
         methods in RamanMeasurement_Worker class in raman.py.
@@ -214,27 +214,21 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         Args:
             mapping_hub (MeaRMap_Hub): The mapping measurement hub to store the measurement data
             syncer_raman (Syncer_Raman): The synchronization object for Raman measurements
+            event_isacquiring (threading.Event): The event flag to indicate if a measurement is ongoing
         """
         super().__init__()
         self.mapping_hub = mapping_hub
-        self._isacquiring = True
         self._syncer = syncer_raman
+        self._event_isacquiring = event_isacquiring
         
         self._q_mea_acq:queue.Queue = queue.Queue() # Queue for the acquisition to store the measurement data
-        
-    @Slot()
-    def stop_measurement(self):
-        """
-        Stops the measurement acquisition
-        """
-        self._isacquiring = False
     
     @Slot(AcquisitionParams, list, queue.Queue)
     def run_scan_discrete(
         self,
         params:AcquisitionParams,
         mapping_coordinates:list,
-        q_mea_out:queue.Queue[MeaRaman]):
+        q_mea_out:queue.Queue[tuple[MeaRaman,tuple]]):
         print("Starting discrete mapping measurement...")
         
         # Go through all the coordinates
@@ -247,10 +241,10 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         event_append_done = threading.Event()
         self._sig_append_queue_mea.emit(self._q_mea_acq, event_append_done)
         event_append_done.wait()
-        self._isacquiring = True
+        self._event_isacquiring.set()
         for coor in mapping_coordinates:
             try:
-                if not self._isacquiring:
+                if not self._event_isacquiring.is_set():
                     self.emit_finish_signals(self.msg_mea_cancelled)
                     break
                 
@@ -278,6 +272,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 self.emit_finish_signals(self.msg_mea_error + str(e))
                 print('Error in run_scan_discrete:',e)
         
+        self._event_isacquiring.clear()
         self._sig_remove_queue_mea.emit(self._q_mea_acq)
         self.emit_finish_signals(self.msg_mea_finished)
         return
@@ -313,8 +308,9 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         
         print('Acquisition started, moving to start position...')
         # >>> Perform the mapping measurement <<<
+        self._event_isacquiring.set()
         for i, coor in enumerate(mapping_coordinates_ends):
-            if not self._isacquiring:
+            if not self._event_isacquiring.is_set():
                 self.emit_finish_signals(self.msg_mea_cancelled)
                 break   # Stops the measurement immediately when required.
             
@@ -364,6 +360,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         q_trig.put(EnumTrig.STORE)
         q_trig.put(EnumTrig.FINISH)
         
+        self._event_isacquiring.clear()
         self._sig_remove_queue_mea.emit(self._q_mea_acq)
         self.emit_finish_signals(self.msg_mea_finished)
         
@@ -609,7 +606,11 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         Initialises the workers and their connections
         """
     # >>> Worker setups <<<
-        self._worker_hilvlacq = Hilvl_MeasurementAcq_Worker(self._dataHub_map.get_MappingHub(), self.raman_controller.get_syncer_acquisition())
+        self._event_isacquiring = threading.Event()
+        self._worker_hilvlacq = Hilvl_MeasurementAcq_Worker(
+            self._dataHub_map.get_MappingHub(),
+            self.raman_controller.get_syncer_acquisition(),
+            self._event_isacquiring)
         
         # Try to get the goto worker, but be defensive about timing
         try:
@@ -633,7 +634,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         
     # >>> Mapping acquisition worker setup <<<
         # Connection: Mapping acquisition signals
-        self.sig_stop_measurement.connect(self._worker_hilvlacq.stop_measurement)
+        self.sig_stop_measurement.connect(self._event_isacquiring.clear)
         self.sig_run_scan_discrete.connect(self._worker_hilvlacq.run_scan_discrete)
         self.sig_run_scan_continuous.connect(self._worker_hilvlacq.run_scan_continuous)
         self._worker_hilvlacq.sig_mea_done_msg.connect(self._worker_autoMeaStorer.relay_finished_message)
@@ -854,15 +855,18 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         list_mappingUnit_names = list(mappingHub.get_dict_nameToID().keys())
         if mappingUnit_name is None and mapping_coordinates_mm.mappingUnit_name != '':
             mappingUnit_name = mapping_coordinates_mm.mappingUnit_name
-        while mappingUnit_name is None:
-            mappingUnit_name = messagebox_request_input('Mapping ID','Enter the ID for the mapping measurement:')
-            if mappingUnit_name == '' or not isinstance(mappingUnit_name,str) or mappingUnit_name in list_mappingUnit_names:
-                retry = qw.QMessageBox.question(self, 'Error',"Invalid 'mappingUnit name'. The name cannot be empty or already exist. Please try again.",
-                                               qw.QMessageBox.Retry | qw.QMessageBox.Cancel) # pyright: ignore[reportAttributeAccessIssue]
-                if retry == qw.QMessageBox.Retry: return False # type: ignore
-                mappingUnit_name = None
-            else: break
         
+        while mappingUnit_name is None:
+            mappingUnit_name = messagebox_request_input(
+                parent=self,
+                title='Mapping ID',
+                message='Enter the ID for the mapping measurement:',
+                default='',
+                validator=self._dataHub_map.get_MappingHub().validate_new_unit_name,
+                invalid_msg="Invalid 'mappingUnit name'. The name cannot be empty or already exist. Please try again.",
+                loop_until_valid=True
+            )
+            
         return (list_coor_mm, mapping_speed_mmPerSec, mappingUnit_name)
         
         

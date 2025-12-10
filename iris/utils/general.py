@@ -79,6 +79,22 @@ def generate_test_app(lyt:qw.QVBoxLayout|qw.QHBoxLayout) -> tuple[qw.QApplicatio
     wdg.setLayout(lyt)
     return app, wdg
 
+def validator_float_greaterThanZero(input_str: str) -> bool:
+    """
+    A validator function that checks if the input string can be converted to a non-negative float
+
+    Args:
+        input_str (str): Input string to validate
+
+    Returns:
+        bool: True if valid, False otherwise
+    """
+    try:
+        val = float(input_str)
+        return val >= 0.0
+    except:
+        return False
+
 def messagebox_request_input(
         parent: qw.QWidget, 
         title: str, 

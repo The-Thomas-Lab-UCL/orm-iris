@@ -23,8 +23,8 @@ from iris.gui.submodules.meaCoor_generator.line_zScan import Wdg_ZScanMethod_lin
 
 from iris.gui.submodules.meaCoor_modifier.every_z import EveryZ as MapMod1
 from iris.gui.submodules.meaCoor_modifier.zInterpolate import ZInterpolate as MapMod2
-# from iris.gui.submodules.meaCoor_modifier.topology_visualiser import TopologyVisualizer as MapMod3
-# from iris.gui.submodules.meaCoor_modifier.translateXYZ import TranslateXYZ as MapMod4
+from iris.gui.submodules.meaCoor_modifier.topology_visualiser import TopologyVisualiser as MapMod3
+from iris.gui.submodules.meaCoor_modifier.translateXYZ import TranslateXYZ as MapMod4
 # from iris.gui.submodules.meaCoor_modifier.gridify import Gridify as MapMod5
 
 from iris.utils.general import *
@@ -480,8 +480,8 @@ class Wdg_CoorModifier(Ui_coorMod, qw.QWidget):
         self._dict_mapModMethods = {
             '1. Every Z': MapMod1,
             '2. Z Interpolate': MapMod2,
-            # '3. Topology visualiser': MapMod3,
-            # '4. Translate XYZ': MapMod4,
+            '3. Topology visualiser': MapMod3,
+            '4. Translate XYZ': MapMod4,
             # '5. Gridify': MapMod5
         }   # Mapping methods, to be programmed manually
 

@@ -204,7 +204,7 @@ class Motion_AutoCoorReport_Worker(QObject):
         coor_str = 'X: {:.1f} Y: {:.1f} Z: {:.1f} µm'.format(coor_x_um,coor_y_um,coor_z_um)
         self.sig_coor.emit(coor_str)
 
-class Motion_GetCoordinatesClosest_mm(QObject):
+class Motion_GetCoordinatesClosest_mm_Worker(QObject):
     """
     A worker to get the closest coordinates in mm from the stage controller
     """
@@ -693,14 +693,16 @@ class Wdg_MotionController(qw.QGroupBox):
         self._thread_coor_report.finished.connect(self._worker_coor_report.deleteLater)
         self._thread_coor_report.finished.connect(self._thread_coor_report.deleteLater)
         self._thread_coor_report.start()
+        self.destroyed.connect(self._thread_coor_report.quit)
         
         # For _worker_get_coordinates_closest_mm
-        self._worker_getcoorclosest = Motion_GetCoordinatesClosest_mm(stageHub=self._stageHub)
+        self._worker_getcoorclosest = Motion_GetCoordinatesClosest_mm_Worker(stageHub=self._stageHub)
         self._thread_getcoorclosest = QThread(self)
         self._worker_getcoorclosest.moveToThread(self._thread_getcoorclosest)
         self._thread_getcoorclosest.finished.connect(self._worker_getcoorclosest.deleteLater)
         self._thread_getcoorclosest.finished.connect(self._thread_getcoorclosest.deleteLater)
         self._thread_getcoorclosest.start()
+        self.destroyed.connect(self._thread_getcoorclosest.quit)
         
         # For _worker_go_to_coordinates
         self._worker_gotocoor = Motion_GoToCoor_Worker(
@@ -715,6 +717,9 @@ class Wdg_MotionController(qw.QGroupBox):
         self._thread_gotocoor.finished.connect(self._worker_gotocoor.deleteLater)
         self._thread_gotocoor.finished.connect(self._thread_gotocoor.deleteLater)
         self._thread_gotocoor.start()
+        self.destroyed.connect(self._thread_gotocoor.quit)
+        
+        # self.destroyed.connect(self.terminate)
         
     def get_goto_worker(self) -> Motion_GoToCoor_Worker:
         """
@@ -734,9 +739,17 @@ class Wdg_MotionController(qw.QGroupBox):
         try:
             init_gain = self._stageHub.get_flatfield_gain()
             new_gain = messagebox_request_input(
-                'Set gain',
-                'Set gain for the image processing (not camera gain)',
-                str(init_gain))
+                parent=self,
+                title='Set gain',
+                message='Set gain for the image processing (not camera gain)',
+                default=str(init_gain),
+                validator=validator_float_greaterThanZero,
+                invalid_msg='Gain must be a positive number',
+                loop_until_valid=True,
+            )
+            if new_gain is None:
+                qw.QMessageBox.information(self, 'Gain not set', 'Gain not changed')
+                return
             
             self._stageHub.set_flatfield_gain(float(new_gain))
             qw.QMessageBox.information(self, 'Gain set', 'Gain set to {}'.format(self._stageHub.get_flatfield_gain()))

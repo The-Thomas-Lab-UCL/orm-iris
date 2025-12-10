@@ -13,6 +13,7 @@ import multiprocessing as mp
 import multiprocessing.pool as mpp
 import time
 
+from PySide6.QtGui import QCloseEvent
 import PySide6.QtWidgets as qw
 from PySide6.QtCore import Signal, Slot, QTimer, QThread
 
@@ -258,8 +259,25 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         """
         Set the time offset between the stage and the Raman spectrometer reported timestamps
         """
+        def validator_float(input_str:str) -> bool:
+            try:
+                newval = float(input_str)
+                return newval > 0
+            except: return False
+        
         current_offset_ms = self._stageHub.get_measurement_offset_ms()
-        offset_ms = messagebox_request_input('Stage and Raman Hub offset setup [ms]','Enter the time offset between the stage and the Raman Hub in [ms]',str(current_offset_ms))
+        offset_ms = messagebox_request_input(
+            parent=self._raman,
+            title='Stage and Raman Hub offset setup [ms]',
+            message='Enter the time offset between the stage and the Raman Hub in [ms]:',
+            default=str(current_offset_ms),
+            validator=validator_float,
+            loop_until_valid=True
+        )
+        if not isinstance(offset_ms, str):
+            qw.QMessageBox.information(self, 'Cancelled', 'The offset setting has been cancelled')
+            return
+        
         try: offset_ms = float(offset_ms)
         except: qw.QMessageBox.warning(self, 'Error', 'The input must be a number')
         else: self._stageHub.set_measurement_offset_ms(offset_ms); qw.QMessageBox.information(self, 'Success', f'The offset has been set to {offset_ms} ms')
@@ -277,6 +295,10 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         self._hilvl_coorGen.initialise()
         self._hilvl_raman.initialise()
         print('>>>>> IRIS: INITIALISATIONS COMPLETE <<<<<')
+        
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self.terminate()
+        return super().closeEvent(event)
         
     # def _set_extensions(self):
     #     """
@@ -359,7 +381,7 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         try:
             print('Terminating the spectrometer controller connection')
             self._ramanHub.terminate()
-            self._ramanHub.join(3)       # Waits for the processes to be terminated
+            self._ramanHub.join()       # Waits for the processes to be terminated
         except Exception as e: print('Error in closing the spectrometer controller:\n{}'.format(e))
         
         

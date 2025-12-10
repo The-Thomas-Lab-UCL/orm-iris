@@ -454,7 +454,7 @@ class DataStreamer_Raman(mp.Process):
         finally:
             self._flg_process_measurement.set()
             
-    def join(self):
+    def join(self, timeout:float|None=None):
         """
         Joins the process
         """
@@ -462,7 +462,7 @@ class DataStreamer_Raman(mp.Process):
         self._flg_process_updater.wait()
         self._flg_process_measurement.wait()
         # self._calibrator.terminate()
-        super().join()
+        super().join(timeout)
 
 def initialise_manager_raman(manager:MyManager|SyncManager):
     """
