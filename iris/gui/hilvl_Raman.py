@@ -1059,6 +1059,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         list_coor = self._convertCoor_byScanOptions(list_coor, ends_only=ends_only)
         
         try:
+            self._btn_stop.setEnabled(True)
             assert list_coor is not None and len(list_coor)>0, "No coordinates to perform mapping"
             self._request_Mapping(mapping_coordinates=list_coor, unit_name=unit_name, method=method, mapping_speed_mmPerSec=mapping_speed_mmPerSec)
         except Exception as e:

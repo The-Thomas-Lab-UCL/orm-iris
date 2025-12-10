@@ -2118,9 +2118,13 @@ class MeaRMap_Plotter:
         except ValueError as e: pass; return
         except Exception as e: print(f'Error in plot_heatmap_interp: {e}'); return
         
-        if isinstance(self._cbar,Colorbar):
-            self._cbar.remove()
-        self._ax.clear()
+        try:
+            if isinstance(self._cbar,Colorbar):
+                self._cbar.remove()
+        except Exception as e: print(f'Error in plot_heatmap_interp while removing cbar: {e}')
+        
+        try: self._ax.clear()
+        except Exception as e: print(f'Error in plot_heatmap_interp while clearing ax: {e}')
         
         # Check if the the data can be plot using tripcolor
         if any([len(intensity) < 3, len(set(x_val)) < 2, len(set(y_val)) < 2]):
@@ -2190,9 +2194,13 @@ class MeaRMap_Plotter:
         try: x_val, y_val, intensity = self._retrieve_heatmap_data(mapping_unit, wavelength)
         except ValueError as e: print(f'Error in plot_heatmap_scatter: {e}'); return
         
-        if isinstance(self._cbar,Colorbar):
-            self._cbar.remove()
-        self._ax.clear()
+        try:
+            if isinstance(self._cbar,Colorbar):
+                self._cbar.remove()
+        except Exception as e: print(f'Error in plot_heatmap_scatter while clearing ax or cbar: {e}')
+        
+        try: self._ax.clear()
+        except Exception as e: print(f'Error in plot_heatmap_scatter while clearing ax: {e}')
         
         # Check if the the data can be plot using tripcolor
         if any([len(intensity) < 3, len(set(x_val)) < 2, len(set(y_val)) < 2]): return

@@ -125,7 +125,7 @@ class Canvas_Image_Annotations(QGraphicsView):
             image being displayed. Default is True
         """
         assert isinstance(coor_list, list), 'Coordinates must be a list'
-        assert all([isinstance(coor, tuple) and len(coor) == 2 for coor in coor_list]),\
+        assert all([isinstance(coor, (tuple,list)) and len(coor) == 2 for coor in coor_list]),\
             'Coordinates must be a list of tuples of (x,y)'
         assert all([all([isinstance(coor[i], (float,int)) for i in range(2)]) for coor in coor_list]),\
             'Coordinates must be a list of tuples of (floats or integers)'
@@ -164,7 +164,7 @@ class Canvas_Image_Annotations(QGraphicsView):
         Note:
             Coordinates outside the canvas are ignored (will not be annotated)
         """
-        assert isinstance(coor, tuple) and len(coor) == 2, 'Coordinates must be a tuple of (x,y)'
+        assert isinstance(coor, (tuple,list)) and len(coor) == 2, 'Coordinates must be a tuple of (x,y)'
         assert all([isinstance(coor[i], (float,int)) for i in range(len(coor))]),\
             'Coordinates must be a tuple of (floats or integers)'
         
@@ -211,9 +211,9 @@ class Canvas_Image_Annotations(QGraphicsView):
             scale (bool): Scale the coordinates according to the scale factor of the
             image being displayed. Default is True
         """
-        assert isinstance(coor1, tuple) and len(coor1) == 2, 'Coordinates must be a tuple of (x,y)'
+        assert isinstance(coor1, (tuple,list)) and len(coor1) == 2, 'Coordinates must be a tuple of (x,y)'
         assert all([isinstance(coor1[i], (float,int)) for i in range(2)]), 'Coordinates must be a tuple of (floats or integers)'
-        assert isinstance(coor2, tuple) and len(coor2) == 2, 'Coordinates must be a tuple of (x,y)'
+        assert isinstance(coor2, (tuple,list)) and len(coor2) == 2, 'Coordinates must be a tuple of (x,y)'
         assert all([isinstance(coor2[i], (float,int)) for i in range(2)]), 'Coordinates must be a tuple of (floats or integers)'
         
         if scale: scale_val = self._img_scale
