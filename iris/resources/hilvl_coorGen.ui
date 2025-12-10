@@ -19,7 +19,7 @@
      <item>
       <widget class="QTabWidget" name="tab_coorGenMod">
        <property name="currentIndex">
-        <number>0</number>
+        <number>1</number>
        </property>
        <widget class="QWidget" name="tab_coorGen">
         <attribute name="title">
@@ -58,10 +58,7 @@
         </attribute>
         <layout class="QVBoxLayout" name="verticalLayout">
          <item>
-          <widget class="QComboBox" name="combo_coorMod"/>
-         </item>
-         <item>
-          <widget class="QWidget" name="wdg_coorMod_holder" native="true"/>
+          <layout class="QVBoxLayout" name="lyt_coorMod_holder"/>
          </item>
         </layout>
        </widget>

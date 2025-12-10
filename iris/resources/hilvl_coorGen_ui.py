@@ -68,15 +68,10 @@ class Ui_hilvl_coorGen(object):
         self.tab_coorMod.setObjectName(u"tab_coorMod")
         self.verticalLayout = QVBoxLayout(self.tab_coorMod)
         self.verticalLayout.setObjectName(u"verticalLayout")
-        self.combo_coorMod = QComboBox(self.tab_coorMod)
-        self.combo_coorMod.setObjectName(u"combo_coorMod")
+        self.lyt_coorMod_holder = QVBoxLayout()
+        self.lyt_coorMod_holder.setObjectName(u"lyt_coorMod_holder")
 
-        self.verticalLayout.addWidget(self.combo_coorMod)
-
-        self.wdg_coorMod_holder = QWidget(self.tab_coorMod)
-        self.wdg_coorMod_holder.setObjectName(u"wdg_coorMod_holder")
-
-        self.verticalLayout.addWidget(self.wdg_coorMod_holder)
+        self.verticalLayout.addLayout(self.lyt_coorMod_holder)
 
         self.tab_coorGenMod.addTab(self.tab_coorMod, "")
 
@@ -115,7 +110,7 @@ class Ui_hilvl_coorGen(object):
 
         self.retranslateUi(hilvl_coorGen)
 
-        self.tab_coorGenMod.setCurrentIndex(0)
+        self.tab_coorGenMod.setCurrentIndex(1)
 
 
         QMetaObject.connectSlotsByName(hilvl_coorGen)

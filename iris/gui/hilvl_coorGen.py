@@ -21,8 +21,8 @@ from iris.gui.submodules.meaCoor_generator.points_image import Points_Image as M
 from iris.gui.submodules.meaCoor_generator.singlePoint_zScan import singlePoint_zScan as Map6
 from iris.gui.submodules.meaCoor_generator.line_zScan import Wdg_ZScanMethod_linear as ZScan1
 
-# from iris.gui.submodules.meaCoor_modifier.every_z import EveryZ as MapMod1
-# from iris.gui.submodules.meaCoor_modifier.zInterpolate import ZInterpolate as MapMod2
+from iris.gui.submodules.meaCoor_modifier.every_z import EveryZ as MapMod1
+from iris.gui.submodules.meaCoor_modifier.zInterpolate import ZInterpolate as MapMod2
 # from iris.gui.submodules.meaCoor_modifier.topology_visualiser import TopologyVisualizer as MapMod3
 # from iris.gui.submodules.meaCoor_modifier.translateXYZ import TranslateXYZ as MapMod4
 # from iris.gui.submodules.meaCoor_modifier.gridify import Gridify as MapMod5
@@ -39,6 +39,7 @@ from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 
 from iris.resources.dataHub_coor_ui import Ui_dataHub_coor
 from iris.resources.hilvl_coorGen_ui import Ui_hilvl_coorGen
+from iris.resources.hilvl_coorGen_coorMod_ui import Ui_coorMod
 
 class Hilvl_CoorGen_UiDesign(qw.QWidget, Ui_hilvl_coorGen):
     def __init__(self, parent):
@@ -448,94 +449,66 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         for i, mappingCoor in enumerate(self._mappingCoorHub):
             qw.QTreeWidgetItem(self._tree, [str(i+1), mappingCoor.mappingUnit_name, str(len(mappingCoor.mapping_coordinates))])
     
-# class sFrm_CoorModifier(tk.Frame):
-#     def __init__(
-#         self,
-#         master:tk.Tk|tk.Frame,
-#         motion_controller:Wdg_MotionController,
-#         coor_Hub:List_MeaCoor_Hub):
-#         """
-#         Displays the GUI for the coordinate modifier methods.
+class Wdg_CoorModifier(Ui_coorMod, qw.QWidget):
+    def __init__(
+        self,
+        parent:qw.QWidget,
+        motion_controller:Wdg_MotionController,
+        coor_Hub:List_MeaCoor_Hub):
+        """
+        Displays the GUI for the coordinate modifier methods.
         
-#         Args:
-#             master (tk.Tk | tk.Frame): The parent frame or window.
-#             motion_controller (Frm_MotionController): The motion controller to use.
-#             coor_Hub (MappingCoordinatesHub): The hub for the mapping coordinates.
-#         """
-#         super().__init__(master)
-#         self._motion_controller = motion_controller
-#         self._coorHub = coor_Hub
+        Args:
+            master (tk.Tk | tk.Frame): The parent frame or window.
+            motion_controller (Frm_MotionController): The motion controller to use.
+            coor_Hub (MappingCoordinatesHub): The hub for the mapping coordinates.
+        """
+        super().__init__(parent)
+        self.setupUi(self)
+        self.setLayout(self.main_layout)
         
-#         # > Top level frame setup <
-#         self._frm_options = tk.Frame(self)
-#         self._frm_methods = tk.Frame(self)
+        self._motion_controller = motion_controller
+        self._coorHub = coor_Hub
         
-#         row=0; col=0
-#         self._frm_options.grid(row=row,column=0,sticky='nsew'); row+=1
-#         self._frm_methods.grid(row=row,column=0,sticky='nsew')
-        
-#         [self.grid_rowconfigure(i, weight=1) for i in range(row+1)]
-#         [self.grid_columnconfigure(i, weight=1) for i in range(col+1)]
-        
-#         # > Options setup <
-#         self._dict_mapModMethods_kwargs = {
-#             'parent': self._frm_methods,
-#             'motion_controller': self._motion_controller,
-#             'mappingCoorHub': self._coorHub,
-#             'motion_controller': self._motion_controller,
-#         }
-#         self._dict_mapModMethods = {
-#             '1. Every Z': MapMod1,
-#             '2. Z Interpolate': MapMod2,
-#             '3. Topology visualiser': MapMod3,
-#             '4. Translate XYZ': MapMod4,
-#             '5. Gridify': MapMod5
-#         }   # Mapping methods, to be programmed manually
+        # > Options setup <
+        self._dict_mapModMethods_kwargs = {
+            'parent': self,
+            'motion_controller': self._motion_controller,
+            'mappingCoorHub': self._coorHub,
+            'motion_controller': self._motion_controller,
+        }
+        self._dict_mapModMethods = {
+            '1. Every Z': MapMod1,
+            '2. Z Interpolate': MapMod2,
+            # '3. Topology visualiser': MapMod3,
+            # '4. Translate XYZ': MapMod4,
+            # '5. Gridify': MapMod5
+        }   # Mapping methods, to be programmed manually
 
-#         self._combo_mapModMethods = ttk.Combobox(self._frm_options,
-#             values=list(self._dict_mapModMethods.keys()), width=50,
-#             state='readonly')
-#         self._combo_mapModMethods.current(0)
-#         self._combo_mapModMethods.bind("<<ComboboxSelected>>", func=lambda event: self.show_frm_mapModMethod())
-#         self._combo_mapModMethods.grid(row=0, column=0, sticky='ew', padx=10, pady=10)
+        self.combo_methods.addItems(list(self._dict_mapModMethods.keys()))
+        self.combo_methods.currentTextChanged.connect(
+            lambda text: self.show_chosen_mapModMethod(text))
         
-#         self._frm_options.grid_rowconfigure(0, weight=0)
-#         self._frm_options.grid_columnconfigure(0, weight=1)
+        # > Initial map modifier method setup <
+        self._current_mapModMethod = MapMod1(**self._dict_mapModMethods_kwargs)
+        self.lyt_holder_modifiers.addWidget(self._current_mapModMethod)
         
-#         # > Initial map modifier method setup <
-#         self._current_mapModMethod = MapMod1(**self._dict_mapModMethods_kwargs)
-#         self._dict_mappingmethods_grid_params = {
-#             'row':0,
-#             'column':0,
-#             'columnspan':2,
-#             'sticky':'nsew'
-#         }
+    @Slot(str)
+    def show_chosen_mapModMethod(self, method_name:str):
+        """
+        Shows the options for the selected mapping method
         
-#         # > Initialisations <
-#         self.show_frm_mapModMethod()
+        Args:
+            method_name (str): The name of the mapping method to show.
+        """
+        widgets = get_all_widgets_from_layout(self.lyt_holder_modifiers)
         
-#     def show_frm_mapModMethod(self):
-#         """
-#         Shows the options for the selected mapping method
+        for widget in widgets:
+            widget.deleteLater()
+        qw.QApplication.processEvents()
         
-#         Args:
-#             frm_master(Tkinter frame): The frame that will house the widget
-#         """
-#         widgets = get_all_widgets(self._frm_methods)
-        
-#         method = self._combo_mapModMethods.get()
-#         self._current_map_method:Map1 = self._dict_mapModMethods[method](**self._dict_mapModMethods_kwargs)
-#         self._current_map_method.grid(**self._dict_mappingmethods_grid_params)
-        
-#         row = self._dict_mappingmethods_grid_params['row']
-#         col = self._dict_mappingmethods_grid_params['column']
-        
-#         self._frm_methods.grid_rowconfigure(row, weight=1)
-#         self._frm_methods.grid_columnconfigure(col, weight=1)
-        
-#         for widget in widgets:
-#             if isinstance(widget,(tk.Frame,tk.LabelFrame)) and widget != self._current_map_method:
-#                 widget.grid_forget()
+        self._current_map_method = self._dict_mapModMethods[method_name](**self._dict_mapModMethods_kwargs)
+        self.lyt_holder_modifiers.addWidget(self._current_map_method)
     
 class Wdg_Hilvl_CoorGenerator(qw.QWidget):
     """
@@ -580,12 +553,12 @@ class Wdg_Hilvl_CoorGenerator(qw.QWidget):
             wdg.wdg_coorHub_holder,self._coorHub)
         wdg.lyt_coorHub_holder.addWidget(self._wdg_tv_mapcoor)
         
-        # >> Notebook setup <<
-        # self._sfrm_mapping_coorMod = sFrm_CoorModifier(
-        #     master=notebook,
-        #     motion_controller=self._motion_controller,
-        #     coor_Hub=self._coorHub,
-        # )
+        self._wdg_coorMod = Wdg_CoorModifier(
+            parent=self,
+            motion_controller=self._motion_controller,
+            coor_Hub=self._coorHub,
+        )
+        wdg.lyt_coorMod_holder.addWidget(self._wdg_coorMod)
         
     # >>> Mapping coordinate method widgets<<<
         # > Dictionaries and parameters to set up the mapping methods <
@@ -651,9 +624,16 @@ class Wdg_Hilvl_CoorGenerator(qw.QWidget):
         
         if mapping_coordinates is None: raise ValueError("No mapping coordinates generated")
         
+        validator = self._dataHub_map.get_MappingHub().validate_new_unit_name
         unit_name = None
         while unit_name is None:
-            unit_name = messagebox_request_input('Unit name','Enter the "unit name" for the measurement:')
+            unit_name = messagebox_request_input(
+                parent=self,
+                title='Unit name',
+                message='Enter the "unit name" for the measurement:',
+                validator=validator,
+                invalid_msg='Invalid unit name. Please try again.',
+            )
         
         return MeaCoor_mm(mappingUnit_name=unit_name, mapping_coordinates=mapping_coordinates) # pyright: ignore[reportArgumentType] ; At this point, mapping_coordinates is guaranteed to be a list of tuples of floats.
 
@@ -663,7 +643,7 @@ class Wdg_Hilvl_CoorGenerator(qw.QWidget):
         Shows the options for the selected mapping method
         
         Args:
-            frm_master(Tkinter frame): The frame that will house the widget
+            method_name (str): The name of the mapping method to show.
         """
         widgets = get_all_widgets_from_layout(self._widget.lyt_coorGen_holder)
         
@@ -792,9 +772,13 @@ def test_wdg_Hilvl_CoorGenerator():
     app = qw.QApplication([])
     window = qw.QMainWindow()
     window.setWindowTitle('Dummy High-level Coordinate Generator')
+    mwdg = qw.QWidget()
+    window.setCentralWidget(mwdg)
+    lyt = qw.QHBoxLayout(mwdg)
     
-    dummy_sfrmCoorGen = generate_dummy_wdg_hilvlCoorGenerator(window)
-    window.setCentralWidget(dummy_sfrmCoorGen)
+    dummy_sfrmCoorGen = generate_dummy_wdg_hilvlCoorGenerator(mwdg)
+    lyt.addWidget(dummy_sfrmCoorGen)
+    
     window.show()
     app.exec()
     

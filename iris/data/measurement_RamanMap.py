@@ -888,6 +888,19 @@ class MeaRMap_Hub():
         
         return dest_unit
     
+    def validate_new_unit_name(self,unit_name:str) -> bool:
+        """
+        Validates if the new unit name is valid (i.e., does not already exist in the hub)
+        
+        Args:
+            unit_name (str): unit name to be validated
+            
+        Returns:
+            bool: True if the unit name is valid, False otherwise
+        """
+        assert isinstance(unit_name, str), 'validate_new_unit_name: The input data type is not correct. Expected a string.'
+        return unit_name not in self._dict_mappingUnit_NameID
+    
     def check_measurement_exist(self):
         """
         Check if the measurement data exists
