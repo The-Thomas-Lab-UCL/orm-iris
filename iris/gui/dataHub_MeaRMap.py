@@ -519,8 +519,14 @@ class Wdg_DataHub_Mapping(qw.QWidget):
             coor (tuple, optional): The coordinates of the measurement. Defaults to (0,0,0).
         """
         # Mapping ID request and check
-        while True:
-            unit_name = messagebox_request_input("Unit ID", "Enter the ID for the added Raman measurement:")
+        unit_name = None
+        while unit_name == None:
+            unit_name = messagebox_request_input(
+                parent=self,
+                title= "Unit ID",
+                message="Enter the ID for the added Raman measurement:",
+                default=f"Single point measurement at {coor}: ",
+                )
             if isinstance(unit_name,str) and not unit_name == '': break
         
         unit = MeaRMap_Unit(unit_name=unit_name)
@@ -530,20 +536,33 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
         self.append_MappingUnit(unit)
         
+    def check_safeToTerminate(self) -> bool:
+        """
+        Check if the data has been saved before terminating the app.
+        
+        Returns:
+            bool: True if the app can be terminated, False otherwise
+        """
+        if self._flg_issaved: return True
+        elif len(self._MappingHub.get_list_MappingUnit()) == 0: return True
+        
+        flg_close = qw.QMessageBox.question(
+            None,
+            "Unsaved data",
+            "There is unsaved data in the Mapping Hub.\nAre you sure you want to exit without saving?",
+            qw.QMessageBox.Yes | qw.QMessageBox.Cancel, # pyright: ignore[reportAttributeAccessIssue]
+            qw.QMessageBox.Cancel) # type: ignore
+        
+        if flg_close == qw.QMessageBox.Yes:   # type: ignore
+            return True
+        else:
+            return False
+        
     def terminate(self):
         """
         App termination sequence:
         Force the user to save the data before closing the app
         """
-        while not self._flg_issaved:
-            flg_save = qw.QMessageBox.question(
-                None,
-                "Save Mapping Hub",
-                "There are unsaved changes to the Mapping Data Hub. Do you want to save the before closing?",
-                qw.QMessageBox.Yes | qw.QMessageBox.No, qw.QMessageBox.No) # type: ignore
-            if flg_save == qw.QMessageBox.Yes: # type: ignore
-                self._save_hub_database()
-            else: break
         return
         
 class Wdg_DataHubPlus_Mapping_Ui(qw.QWidget, Ui_DataHubPlus_mapping):

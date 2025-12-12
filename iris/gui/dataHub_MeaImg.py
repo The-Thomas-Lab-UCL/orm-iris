@@ -585,20 +585,35 @@ class Wdg_DataHub_Image(qw.QWidget):
             item.setText(3, str(meta))
             tree.addTopLevelItem(item)
             
+    def check_safeToTerminate(self) -> bool:
+        """
+        Check if the data has been saved before terminating the app.
+        
+        Returns:
+            bool: True if safe to terminate, False otherwise
+        """
+        if self._flg_issaved: return True
+        elif len(self.ImageHub.get_list_ImageUnit_ids()) == 0: return True
+        
+        flg_close = qw.QMessageBox.question(
+            self, 'Save Image Hub',
+            'There are unsaved changes to the Image Data Hub. Are you sure you want to exit without saving?',
+            qw.QMessageBox.Yes | qw.QMessageBox.Cancel, # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes/No/Cancel exists
+            qw.QMessageBox.Cancel # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Cancel exists
+        )
+        
+        if flg_close == qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes exists
+            return True
+        else: # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.No exists
+            return False
+        
+            
     def terminate(self):
         """
         Termination protocol for the Image data hub.
         """
-        while not self._flg_issaved:
-            flg_save = qw.QMessageBox.question(
-                self, 'Save Image Hub',
-                'There are unsaved changes to the Image Data Hub. Do you want to save before closing?',
-                qw.QMessageBox.Yes | qw.QMessageBox.No | qw.QMessageBox.Cancel # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes/No/Cancel exists
-            )
-            if flg_save == qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes exists
-                self.save_ImageMeasurementHub()
-                qw.QMessageBox.information(self, 'Info', 'The program will attempt to save the data in the background.')
-            
+        return
+                
     def test_generate_dummy(self):
         """
         Generate dummy data for testing purposes.

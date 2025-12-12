@@ -2,7 +2,7 @@ import sys
 import os
 
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication
+from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication, Qt
 
 from glob import glob
 from uuid import uuid1
@@ -380,7 +380,7 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         def reset():
             nonlocal self
         
-        if autosave: list_selection = self._tree.findItems('*', qw.Qt.MatchWildcard | qw.Qt.MatchRecursive) # pyright: ignore[reportAttributeAccessIssue] ; MatchWildcard and MatchRecursive attributes exists
+        if autosave: list_selection = self._tree.findItems('*', Qt.MatchWildcard | Qt.MatchRecursive) # pyright: ignore[reportAttributeAccessIssue] ; MatchWildcard and MatchRecursive attributes exists
         else: list_selection = self._tree.selectedItems()
         
         if len(list_selection) == 0:

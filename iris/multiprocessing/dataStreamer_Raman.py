@@ -459,8 +459,8 @@ class DataStreamer_Raman(mp.Process):
         Joins the process
         """
         self.terminate_process()
-        self._flg_process_updater.wait()
-        self._flg_process_measurement.wait()
+        self._flg_process_updater.wait(timeout)
+        self._flg_process_measurement.wait(timeout)
         # self._calibrator.terminate()
         super().join(timeout)
 

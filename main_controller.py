@@ -15,6 +15,7 @@ import time
 
 from PySide6.QtGui import QCloseEvent
 import PySide6.QtWidgets as qw
+from PySide6.QtCore import Qt # For context
 from PySide6.QtCore import Signal, Slot, QTimer, QThread
 
 from iris.controllers import Controller_Spectrometer, Controller_XY, Controller_Z
@@ -212,48 +213,41 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
     #     menu_controllers.add_command(label='Set the stage timestamp offset [ms]',command=self.set_RamanStage_offset)
     #     self._menubar.add_cascade(label='Controllers',menu=menu_controllers)
         
-    # # >> Set up the keybindings <<
-    #     self._shortcutHandler = ShortcutHandler()
-    #     self._set_keybindings()
+    # >> Set up the keybindings <<
+        self.shortcutHandler = ShortcutHandler(self)
+        self._set_keybindings()
         
-    # def _set_keybindings(self):
-    #     """
-    #     Set up the keybindings for the main controller
-    #     """
-    #     # Set up the keybindings for the motion controller continuous movement
-    #     self._shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_UP.value,lambda: self._motion.motion_button_manager('yfwd'))
-    #     self._shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_DOWN.value,lambda: self._motion.motion_button_manager('yrev'))
-    #     self._shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_RIGHT.value,lambda: self._motion.motion_button_manager('xfwd'))
-    #     self._shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_LEFT.value,lambda: self._motion.motion_button_manager('xrev'))
+    def _set_keybindings(self):
+        """
+        Set up the keybindings for the main controller
+        """
+        # Set up the keybindings for the motion controller continuous movement
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFocus()
+        self.shortcutHandler.set_keybinding_press_release(ShortcutsEnum.XY_UP.value,lambda: self._motion.motion_button_manager('yfwd'),lambda: self._motion.motion_button_manager('ystop'))
+        self.shortcutHandler.set_keybinding_press_release(ShortcutsEnum.XY_DOWN.value,lambda: self._motion.motion_button_manager('yrev'),lambda: self._motion.motion_button_manager('ystop'))
+        self.shortcutHandler.set_keybinding_press_release(ShortcutsEnum.XY_RIGHT.value,lambda: self._motion.motion_button_manager('xfwd'),lambda: self._motion.motion_button_manager('xstop'))
+        self.shortcutHandler.set_keybinding_press_release(ShortcutsEnum.XY_LEFT.value,lambda: self._motion.motion_button_manager('xrev'),lambda: self._motion.motion_button_manager('xstop'))
+        self.shortcutHandler.set_keybinding_press_release(ShortcutsEnum.Z_UP.value,lambda: self._motion.motion_button_manager('zfwd'),lambda: self._motion.motion_button_manager('zstop'))
+        self.shortcutHandler.set_keybinding_press_release(ShortcutsEnum.Z_DOWN.value,lambda: self._motion.motion_button_manager('zrev'),lambda: self._motion.motion_button_manager('zstop'))
         
-    #     self._shortcutHandler.set_keybinding_press(ShortcutsEnum.Z_UP.value,lambda: self._motion.motion_button_manager('zfwd'))
-    #     self._shortcutHandler.set_keybinding_press(ShortcutsEnum.Z_DOWN.value,lambda: self._motion.motion_button_manager('zrev'))
+        # Set up the keybindings for the motion controller jogging
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_JOG_UP.value,lambda: self._motion.move_jog('yfwd'))
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_JOG_DOWN.value,lambda: self._motion.move_jog('yrev'))
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_JOG_RIGHT.value,lambda: self._motion.move_jog('xfwd'))
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_JOG_LEFT.value,lambda: self._motion.move_jog('xrev'))
         
-    #     self._shortcutHandler.set_keybinding_release(ShortcutsEnum.XY_UP.value,lambda: self._motion.motion_button_manager('ystop'))
-    #     self._shortcutHandler.set_keybinding_release(ShortcutsEnum.XY_DOWN.value,lambda: self._motion.motion_button_manager('ystop'))
-    #     self._shortcutHandler.set_keybinding_release(ShortcutsEnum.XY_RIGHT.value,lambda: self._motion.motion_button_manager('xstop'))
-    #     self._shortcutHandler.set_keybinding_release(ShortcutsEnum.XY_LEFT.value,lambda: self._motion.motion_button_manager('xstop'))
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.Z_JOG_UP.value,lambda: self._motion.move_jog('zfwd'))
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.Z_JOG_DOWN.value,lambda: self._motion.move_jog('zrev'))
         
-    #     self._shortcutHandler.set_keybinding_release(ShortcutsEnum.Z_UP.value,lambda: self._motion.motion_button_manager('zstop'))
-    #     self._shortcutHandler.set_keybinding_release(ShortcutsEnum.Z_DOWN.value,lambda: self._motion.motion_button_manager('zstop'))
+        # Set up the keybindings for the motion controller speed
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_SPEED_UP.value,lambda: self._motion.incrase_decrease_speed('xy',True))
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_SPEED_DOWN.value,lambda: self._motion.incrase_decrease_speed('xy',False))
+
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.Z_SPEED_UP.value,lambda: self._motion.incrase_decrease_speed('z',True))
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.Z_SPEED_DOWN.value,lambda: self._motion.incrase_decrease_speed('z',False))
         
-    #     # Set up the keybindings for the motion controller jogging
-    #     self._shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_JOG_UP.value,lambda: self._motion.move_jog('yfwd'))
-    #     self._shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_JOG_DOWN.value,lambda: self._motion.move_jog('yrev'))
-    #     self._shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_JOG_RIGHT.value,lambda: self._motion.move_jog('xfwd'))
-    #     self._shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_JOG_LEFT.value,lambda: self._motion.move_jog('xrev'))
-        
-    #     self._shortcutHandler.set_keybinding_press(ShortcutsEnum.Z_JOG_UP.value,lambda: self._motion.move_jog('zfwd'))
-    #     self._shortcutHandler.set_keybinding_press(ShortcutsEnum.Z_JOG_DOWN.value,lambda: self._motion.move_jog('zrev'))
-        
-    #     # Set up the keybindings for the motion controller speed
-    #     self._shortcutHandler.set_keybinding_presshold(ShortcutsEnum.XY_SPEED_UP.value,lambda: self._motion.incrase_decrease_speed('xy',True))
-    #     self._shortcutHandler.set_keybinding_presshold(ShortcutsEnum.XY_SPEED_DOWN.value,lambda: self._motion.incrase_decrease_speed('xy',False))
-        
-    #     self._shortcutHandler.set_keybinding_presshold(ShortcutsEnum.Z_SPEED_UP.value,lambda: self._motion.incrase_decrease_speed('z',True))
-    #     self._shortcutHandler.set_keybinding_presshold(ShortcutsEnum.Z_SPEED_DOWN.value,lambda: self._motion.incrase_decrease_speed('z',False))
-        
-    #     self._shortcutHandler.set_keybinding_press(ShortcutsEnum.JOG_MODE_SWITCH.value,self._motion._chkbox_jog_enabled.toggle)
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.JOG_MODE_SWITCH.value,self._motion._chkbox_jog_enabled.toggle)
         
     def set_RamanStage_offset(self):
         """
@@ -297,8 +291,21 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         print('>>>>> IRIS: INITIALISATIONS COMPLETE <<<<<')
         
     def closeEvent(self, event: QCloseEvent) -> None:
+        close_confirm_map = self._dataHub_map.check_safeToTerminate()
+        if not close_confirm_map:
+            event.ignore()
+            return
+        
+        close_confirm_img = self._dataHub_img.check_safeToTerminate()
+        if not close_confirm_img:
+            event.ignore()
+            return
+        
+        print('>>>>> IRIS: CLOSING THE APP <<<<<')
+        self.hide()
         self.terminate()
-        return super().closeEvent(event)
+        event.accept()
+        
         
     # def _set_extensions(self):
     #     """
@@ -381,20 +388,17 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         try:
             print('Terminating the spectrometer controller connection')
             self._ramanHub.terminate()
-            self._ramanHub.join()       # Waits for the processes to be terminated
+            self._ramanHub.join(3)       # Waits for the processes to be terminated
         except Exception as e: print('Error in closing the spectrometer controller:\n{}'.format(e))
-        
         
         # try: self.toplevel_analyser.destroy()
         # except Exception as e: print('Error in closing the analyser:\n{}'.format(e))
         
         print('Terminating the processes')
         self._processor.terminate()
-        self.destroy()
         
         # Force close all the threads in this session
         print('---------- PROGRAM TERMINATED SUCCESSFULLY ----------')
-        os._exit(0)
 
 if __name__ == '__main__':
     print('>>>>> IRIS: INITIATING THE CONTROLLERS AND THE APP <<<<<')
@@ -426,6 +430,8 @@ if __name__ == '__main__':
     mainWindow_Controller.show()
     
     mainWindow_Controller.initialisations()
+    
+    app.installEventFilter(mainWindow_Controller.shortcutHandler)
     
     app.exec()
     base_manager.shutdown()
