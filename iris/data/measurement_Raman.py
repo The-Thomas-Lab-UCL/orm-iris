@@ -791,47 +791,44 @@ class MeaRaman_Plotter():
             plt.close()
         return img_resized
 
-    def plot_with_scatter_RamanMeasurement(self, measurement:MeaRaman|None,
-            spectralabel:str='Spectra', title='Spectra',list_scatter_wavelength:list=[],
-            list_scatter_intensity:list=[], scatterlabel:str="Scatter", plt_size:list|None=None,
-            flg_plot_ramanshift=False, fig:Figure|None=None,ax:Axes|None=None,
+    def plot_with_scatter_RamanMeasurement(
+            self,
+            measurement:MeaRaman|None,
+            title='Spectra',
+            list_scatter_wavelength:list=[],
+            list_scatter_intensity:list=[],
+            flg_plot_ramanshift=False,
             limits:tuple[float,float,float,float]|tuple[None,None,None,None]=(None,None,None,None)
-            ) -> tuple[Figure,Axes]:
+            ) -> None:
         """
         Plots a given spectra with scatter points.
         
         Args:
             measurement (RamanMeasurement): Measurement instance to plot.
-            spectralabel (str, optional): Label of the spectra. Defaults to 'Spectra'.
             title (str, optional): Title of the plot. Defaults to 'Spectra'.
             list_scatter_wavelength (list, optional): List of scatter points' wavelengths. Defaults to [].
             list_scatter_intensity (list, optional): List of scatter points' intensities. Defaults to [].
-            scatterlabel (str, optional): Label of the scatter points. Defaults to "Scatter".
-            plt_size (list, optional): Manually change the plot size, [y-pixel, x-pixel].
             flg_plot_ramanshift (bool, optional): Plot the Raman shift instead of the wavelength. Defaults to False.
-            fig (Figure, optional): Matplotlib figure. Defaults to None.
-            ax (Axes, optional): Matplotlib axes. Defaults to None.
             limits (tuple[float,float,float,float], optional): Limits of the plot (xmin,xmax,ymin,ymax). Defaults to (None,None,None,None).
         
         Returns:
-            tuple[Figure,Axes]: Matplotlib figure and axes
+            None
         
         Note:
             - If the given 'spectra' variable is not a pandas DataFrame, a white image will be returned.
             - The plot will be resized based on the specified plt_size or the default plt_size if not provided.
         """
-        if isinstance(plt_size,type(None)):
-            plt_size = self.plt_size
+        fig = self._fig
+        ax = self._ax
             
         # Initialises the plot
         if isinstance(fig,type(None)) and isinstance(ax,type(None)):
-            fig,ax = plt.subplots(figsize=plt_size)
+            fig,ax = plt.subplots()
         elif isinstance(fig,type(None)) or isinstance(ax,type(None)):
             raise ValueError('Both fig and ax should be given')
         
         # Check if the given 'spectra' variable is a measurement. Otherwise, returns an white image
-        if not isinstance(measurement,MeaRaman):
-            return fig,ax
+        if not isinstance(measurement,MeaRaman): return
         
         # Extracts the data
         df = measurement.get_analysed()
@@ -889,8 +886,6 @@ class MeaRaman_Plotter():
         # ax.legend()
         
         fig.tight_layout()
-        
-        return fig,ax
 
 def test():
     """

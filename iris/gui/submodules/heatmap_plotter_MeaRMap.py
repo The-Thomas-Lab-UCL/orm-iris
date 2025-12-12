@@ -9,7 +9,6 @@ import matplotlib.backend_bases
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 matplotlib.use('Agg')   # Force matplotlib to use the backend to prevent memory leak
 
-
 import threading
 import queue
 from typing import Any
@@ -22,7 +21,6 @@ if __name__ == '__main__':
 
 from iris.utils.general import *
 from iris.data.measurement_RamanMap import MeaRMap_Hub,MeaRMap_Unit, MeaRMap_Plotter
-
 
 from iris.resources.heatmap_plotter_ui import Ui_HeatmapPlotter
 

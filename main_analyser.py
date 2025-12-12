@@ -12,7 +12,6 @@ import multiprocessing.pool as mpp
 import threading
 import queue
 
-
 from iris.utils.general import *
 
 from iris.gui.submodules.heatmap_plotter_MeaRMap import Wdg_MappingMeasurement_Plotter
