@@ -14,6 +14,7 @@ import queue
 import threading
 
 from fuzzywuzzy import fuzz, process
+import bisect
 
 if __name__ == '__main__':
     import sys
@@ -128,6 +129,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
     _sig_modify_tree = Signal()     # Emitted when the treeview needs to be modified (internal)
     sig_tree_changed = Signal()     # Emitted when the treeview is changed
     sig_tree_selection = Signal()   # Emitted when the treeview selection is changed
+    sig_tree_selection_str = Signal(str)   # Emitted when the treeview selection is changed, with the selected unit name as argument
 
     sig_save_ext = Signal(str,str,str)  # Emitted to save the selected MappingMeasurement_Unit externally
     sig_save_db = Signal(str,str)       # Emitted to save the MappingMeasurement_Hub to the database
@@ -185,7 +187,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._btn_load_MappingHub_ori = self._btn_load_db.text()
         
         # Other connection setups
-        self._tree.itemSelectionChanged.connect(lambda: self.sig_tree_selection.emit())
+        self._tree.itemSelectionChanged.connect(self._emit_signal_selection)
         
     # > Save/load worker and thread setup <
         self._save_worker = Save_worker(self._MappingHub)
@@ -221,6 +223,20 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         if self._autosave_interval <= 0.0: self._flg_autosave = False
         if self._flg_autosave:
             wdg.lbl_autosave.setText(f'Autosave: every {self._autosave_interval} hours to\n{self._autosave_path}')
+        
+    @Slot()
+    def _emit_signal_selection(self):
+        """
+        Emit the selection changed signal with the selected unit name
+        """
+        selections = self._tree.selectedItems()
+        if len(selections) == 0:
+            self.sig_tree_selection_str.emit("")
+        else:
+            unit_name = selections[0].text(0)
+            self.sig_tree_selection_str.emit(unit_name)
+            
+        self.sig_tree_selection.emit()
         
     def get_tree(self) -> qw.QTreeWidget:
         return self._tree
@@ -572,14 +588,16 @@ class Wdg_DataHubPlus_Mapping_Ui(qw.QWidget, Ui_DataHubPlus_mapping):
         lyt = qw.QVBoxLayout()
         self.setLayout(lyt)
         
-class Frm_DataHub_Mapping_Plus(qw.QWidget):
+class Wdg_DataHub_Mapping_Plus(qw.QWidget):
     """
     Like the Frm_DataHub, but also shows the data of a single MappingMeasurement_Unit.
     """
-    sig_mea_selection_changed = Signal()   # Emitted when the RamanMeasurement selection is changed
+    sig_selection_changed = Signal()   # Emitted when the RamanMeasurement selection is changed
+    sig_selection_changed_mea = Signal(MeaRaman)   # Emitted when the RamanMeasurement selection is changed, with the measurement as argument
     
     _sig_modify_tree = Signal()         # Emitted when the treeview needs to be modified (internal)
     _sig_tree_rebuild_done = Signal()   # Emitted when the treeview has been rebuilt (internal)
+    _sig_emit_selection_changed = Signal()  # Emitted to indicate that the selection has changed (internal)
     
     def __init__(self, master,dataHub:Wdg_DataHub_Mapping):
         """
@@ -624,9 +642,25 @@ class Frm_DataHub_Mapping_Plus(qw.QWidget):
         
         # Interactive widget setup
         self._sig_modify_tree.connect(self.update_tree_unit)
-        self._tree_unit.clicked.connect(lambda: self.sig_mea_selection_changed.emit())
         self._dataHub.sig_tree_selection.connect(self._set_unit_dataHub)
+        self._tree_unit.itemSelectionChanged.connect(self._emit_signal_selection)
         
+        self._sig_emit_selection_changed.connect(self._emit_signal_selection)
+        
+    @Slot()
+    def _emit_signal_selection(self):
+        """
+        Emits the selection changed signals with the selected RamanMeasurement
+        """
+        # Process the previous events first
+        QCoreApplication.processEvents()
+        
+        self.sig_selection_changed.emit()
+        mea = self.get_selected_RamanMeasurement()
+        if mea is not None:
+            self.sig_selection_changed_mea.emit(mea)
+        
+    @Slot(str)
     def set_selected_RamanMeasurement(self, measurement_id:str):
         """
         Sets the selected RamanMeasurement in the unit treeview
@@ -635,10 +669,29 @@ class Frm_DataHub_Mapping_Plus(qw.QWidget):
             measurement_id (str): The id of the RamanMeasurement to select
         """
         assert isinstance(measurement_id, str), "measurement_id must be a string"
-        list_selections = self._tree_unit.selectedItems()
-        list_ts = [item.text(0) for item in list_selections]
-        if not isinstance(self._mappingUnit, MeaRMap_Unit): return
-        self._mappingUnit.get_RamanMeasurement(list_ts[0])
+        
+        print("Setting selected RamanMeasurement to:", measurement_id)
+        
+        if not isinstance(self._mappingUnit, MeaRMap_Unit):
+            print("No MappingMeasurement_Unit is currently selected.")
+            return
+        
+        list_measurementIds = self._mappingUnit.get_list_RamanMeasurement_ids()
+        list_measurementIds_str = [str(mid) for mid in list_measurementIds]
+        if measurement_id not in list_measurementIds_str:
+            print(f"RamanMeasurement with ID {measurement_id} not found in the current MappingMeasurement_Unit.")
+            return
+        
+        # Set the selection in the treeview
+        self._tree_unit.clearSelection()
+        idx_selection = bisect.bisect_left(list_measurementIds, int(measurement_id))
+        item = self._tree_unit.topLevelItem(idx_selection)
+        if item is None:
+            qw.QMessageBox.warning(None, "Selection error", f"Could not find the RamanMeasurement with ID {measurement_id} in the treeview.")
+            return
+        item.setSelected(True)
+        
+        self._sig_emit_selection_changed.emit()
         
     def get_selected_RamanMeasurement_summary(self) -> dict:
         """
@@ -663,6 +716,7 @@ class Frm_DataHub_Mapping_Plus(qw.QWidget):
         """
         selections = self._tree_unit.selectedItems()
         if not isinstance(self._mappingUnit, MeaRMap_Unit): return None
+        if len(selections) == 0: return None
         mea_id = selections[0].text(0)
         return self._mappingUnit.get_RamanMeasurement(mea_id)
             
@@ -734,10 +788,10 @@ def test_dataHub_Plus():
     datahub = Wdg_DataHub_Mapping(central_widget,mappingHub=mappinghub,autosave=False)
     layout.addWidget(datahub)
     
-    datahubplus = Frm_DataHub_Mapping_Plus(central_widget,datahub)
+    datahubplus = Wdg_DataHub_Mapping_Plus(central_widget,datahub)
     layout.addWidget(datahubplus)
     
-    datahubplus.sig_mea_selection_changed.connect(lambda: print(datahubplus.get_selected_RamanMeasurement_summary()))
+    datahubplus.sig_selection_changed.connect(lambda: print(datahubplus.get_selected_RamanMeasurement_summary()))
     
     window.show()
     mappinghub.test_generate_dummy()

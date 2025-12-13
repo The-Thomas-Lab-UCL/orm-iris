@@ -51,15 +51,14 @@ class PeakFinderPlotter_Worker(QObject):
         super().__init__()
         self._plotter = plotter
     
-    @Slot(MeaRaman, str, dict, tuple, bool)
-    def plot_spectra(self, mea:MeaRaman, mea_id:str, options:dict, limits:tuple,
+    @Slot(MeaRaman, dict, tuple, bool)
+    def plot_spectra(self, mea:MeaRaman, options:dict, limits:tuple,
                      flg_RamanShift:bool) -> None:
         """
         Plots the Raman spectra.
         
         Args:
             mea (RamanMeasurement): The Raman measurement
-            mea_id (str): The ID of the Raman measurement for the plot title
             options (dict): The options for peak finding
             limits (tuple): The plot limits
             flg_RamanShift (bool): Whether to plot Raman shift or wavelength
@@ -80,7 +79,7 @@ class PeakFinderPlotter_Worker(QObject):
             # Update the treeview
             self._plotter.plot_with_scatter_RamanMeasurement(
                 measurement=mea,
-                title='Raman spectra of {}'.format(mea_id),
+                title='Raman spectra of {}'.format(str(mea.get_latest_timestamp())),
                 list_scatter_wavelength=peak_wavelength,
                 list_scatter_intensity=peak_intensity,
                 flg_plot_ramanshift=flg_RamanShift,
@@ -92,9 +91,9 @@ class PeakFinderPlotter_Worker(QObject):
         except Exception as e:
             self.sig_error.emit(str(e))
 
-class Frm_RamanMeasurement_Plotter(Ui_spectra_peak_finder, qw.QWidget):
+class Wdg_RamanMeasurement_Peakfinder_Plotter(Ui_spectra_peak_finder, qw.QWidget):
     
-    sig_request_plot = Signal(MeaRaman,str,dict,tuple,bool)
+    sig_request_plot = Signal(MeaRaman, dict, tuple, bool)
     
     def __init__(self, parent:qw.QWidget):
         """
@@ -139,17 +138,24 @@ class Frm_RamanMeasurement_Plotter(Ui_spectra_peak_finder, qw.QWidget):
         Initialises the workers and signals for the peak finder plotter.
         """
         # Worker setup
-        self._worker_thread = QThread()
+        # self._worker_thread = QThread()
         self._worker = PeakFinderPlotter_Worker(self._plotter)
-        self._worker.moveToThread(self._worker_thread)
-        self._worker_thread.start()
+        # self._worker.moveToThread(self._worker_thread)
+        # self._worker_thread.start()
         
         # Signals setup
         self._worker.sig_peaks.connect(self._update_treeview_peaks)
         self._worker.sig_error.connect(self._handle_error)
-        self._worker.sig_drawPlot.connect(self._fig_canvas.draw_idle)
+        self._worker.sig_drawPlot.connect(self._update_plot)
         
         self.sig_request_plot.connect(self._worker.plot_spectra)
+        
+    @Slot()
+    def _update_plot(self):
+        """
+        Updates the plot.
+        """
+        self._fig_canvas.draw_idle()
         
     @Slot(list,list,list)
     def _update_treeview_peaks(self,list_wavelength_str:list,list_Ramanshift_str:list,
@@ -258,7 +264,7 @@ class Frm_RamanMeasurement_Plotter(Ui_spectra_peak_finder, qw.QWidget):
         """
         self.plot_spectra(**self._dict_replot_params)
         
-    def plot_spectra(self,mea:MeaRaman|None=None,mea_id:str|None=None) -> None:
+    def plot_spectra(self,mea:MeaRaman|None=None) -> None:
         """
         Plots the Raman spectra.
         
@@ -271,18 +277,16 @@ class Frm_RamanMeasurement_Plotter(Ui_spectra_peak_finder, qw.QWidget):
         """
         if mea is None: mea = self._RamanMeasurement
         if mea is None: qw.QMessageBox.warning(self,'Error','No Raman measurement to plot.'); return
-        if mea_id is None: mea_id = str(mea.get_latest_timestamp())
         
         self._dict_replot_params = {
             'mea': mea,
-            'mea_id': mea_id
         }
         
         dict_options = self._get_dict_peakfinder_options()
         limits = self._get_plot_limits()
         flg_RamanShift = self.chk_RamanShift.isChecked()
         
-        self.sig_request_plot.emit(mea,mea_id,dict_options,limits,flg_RamanShift)
+        self.sig_request_plot.emit(mea,dict_options,limits,flg_RamanShift)
         
         
 def test():
@@ -294,7 +298,7 @@ def test():
     
     app = QApplication(sys.argv)
     mw = qw.QMainWindow()
-    mwdg = Frm_RamanMeasurement_Plotter(mw)
+    mwdg = Wdg_RamanMeasurement_Peakfinder_Plotter(mw)
     mw.setCentralWidget(mwdg)
     mw.show()
     
@@ -303,7 +307,6 @@ def test():
     
     mwdg.plot_spectra(
         mea=mea,
-        mea_id='Test Measurement'
     )
     
     sys.exit(app.exec())

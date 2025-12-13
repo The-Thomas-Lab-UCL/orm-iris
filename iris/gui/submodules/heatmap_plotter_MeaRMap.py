@@ -32,7 +32,8 @@ class HeatmapPlotter_Design(Ui_HeatmapPlotter, qw.QWidget):
 
 class Wdg_MappingMeasurement_Plotter(qw.QWidget):
     
-    sig_plotclicked = Signal(tuple)  # Signal emitted when the plot is clicked, sends (mappingUnit_ID, (x_mm, y_mm))
+    sig_plotclicked_id = Signal(str)  # Signal emitted when the plot is clicked, sends (mappingUnit_ID (str))
+    sig_plotclicked_coor = Signal(tuple)  # Signal emitted when the plot is clicked, sends (x_mm, y_mm)
     
     _sig_request_update_plot = Signal()  # Signal to update the plot in the main thread
     _sig_request_update_comboboxes = Signal()  # Signal to update the comboboxes in the main thread
@@ -322,19 +323,16 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         
         self._sig_request_update_plot.emit()
         
-    def set_combobox_values(self,mappingUnit_name:str|None=None,wavelength:float|None=None) -> None:
+    def set_combobox_name(self,mappingUnit_name:str) -> None:
         """
         Set the mappingUnit and spectralPosition selection in the combobox
         
         Args:
             mappingUnit_id (str): MappingUnit_ID to be selected. If None, no change is made.
-            wavelength (float): Wavelength to be selected. If None, no change is made.
         """
         current_name = self._combo_plot_mappingUnitName.currentText()
-        current_wavelength = self.get_current_wavelength()
         
         if mappingUnit_name is None: mappingUnit_name = current_name
-        if wavelength is None: wavelength = current_wavelength
             
         self._update_currentMappingUnit_observer(mappingUnit_name=mappingUnit_name)
         
@@ -364,6 +362,9 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
                 be set to Raman shift automatically according to the checkbox state.
         """
         if self._isupdating_comboboxes: return
+        if self._combo_plot_mappingUnitName.hasFocus() or self._combo_plot_SpectralPosition.hasFocus():
+            self._eve_combo_req.set()   # Re-request the update later
+            return
         
         self._isupdating_comboboxes = True
         self._combo_plot_mappingUnitName.blockSignals(True)
@@ -373,10 +374,9 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         set_wavelength = self.get_current_wavelength()
         
         # Clear the comboboxes
-        
         self._combo_plot_mappingUnitName.clear()
         self._combo_plot_SpectralPosition.clear()
-            
+        
         # Check if there are any measurements in the mappingHub for the refresh. Returns if not
         if not self._mappingHub.check_measurement_exist():
             self._isupdating_comboboxes = False
@@ -631,7 +631,8 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
                 f"x={coorx:.3f} mm, y={coory:.3f} mm, intensity={intensity_str} (a.u.)"
             )
             
-            self.sig_plotclicked.emit((clicked_measurementId,(coorx,coory)))
+            self.sig_plotclicked_id.emit(str(clicked_measurementId))
+            self.sig_plotclicked_coor.emit((coorx,coory))
 
 def test_plotter():
     import sys
@@ -653,7 +654,7 @@ def test_plotter():
         main_wdg,
         mappingHub=mappinghub,
         )
-    wdg_plotter.sig_plotclicked.connect(lambda data: queue_click.put(data))
+    wdg_plotter.sig_plotclicked_id.connect(lambda data: queue_click.put(data))
     wdg_plotter.request_plot_heatmap()
     lyt.addWidget(wdg_plotter)
 

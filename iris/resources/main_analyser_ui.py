@@ -38,6 +38,21 @@ class Ui_main_analyser(object):
         self.verticalLayout.setObjectName(u"verticalLayout")
         self.horizontalLayout_2 = QHBoxLayout()
         self.horizontalLayout_2.setObjectName(u"horizontalLayout_2")
+        self.lyt_dataholder = QVBoxLayout()
+        self.lyt_dataholder.setObjectName(u"lyt_dataholder")
+
+        self.horizontalLayout_2.addLayout(self.lyt_dataholder)
+
+        self.lyt_heatmap = QVBoxLayout()
+        self.lyt_heatmap.setObjectName(u"lyt_heatmap")
+
+        self.horizontalLayout_2.addLayout(self.lyt_heatmap)
+
+        self.lyt_peakfinder = QVBoxLayout()
+        self.lyt_peakfinder.setObjectName(u"lyt_peakfinder")
+
+        self.horizontalLayout_2.addLayout(self.lyt_peakfinder)
+
 
         self.verticalLayout.addLayout(self.horizontalLayout_2)
 

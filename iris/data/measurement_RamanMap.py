@@ -139,7 +139,7 @@ class MeaRMap_Unit():
         power_key,wavelength_key = MeaRaman(reconstruct=True).get_laserMetadata_key()
         return (metadata[power_key],metadata[wavelength_key])
         
-    def get_measurementId_from_coor(self, coor:tuple[float,float]):
+    def get_measurementId_from_coor(self, coor:tuple[float,float]) -> str:
         """
         Retrieves the measurement ID from the coordinates closest to the given coordinates.
         
@@ -547,12 +547,12 @@ class MeaRMap_Unit():
         
         return df
         
-    def get_list_RamanMeasurement_ids(self) -> list:
+    def get_list_RamanMeasurement_ids(self) -> list[int]:
         """
         Returns the list of timestamps stored in the measurement data
         
         Returns:
-            list: list of timestamps
+            list[int]: list of timestamps
         """
         return self._dict_measurement[self._label_ts]
     
