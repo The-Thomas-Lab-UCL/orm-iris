@@ -44,7 +44,7 @@ from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam,ini
 
 from iris.utils.general import *
 
-from iris.main_analyser import main_analyser
+from main_analyser import main_analyser
 
 # NOTE: controller classes and enums imported lazily inside MainWindow_Controller.__init__
 # to avoid importing hardware SDKs / creating OS handles at module import time
@@ -86,9 +86,6 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         self.lytDataHubMap.addWidget(self._dataHub_map)
         self.lytDataHubImg.addWidget(self._dataHub_img)
         self.lytObjCalHub.addWidget(self._dataHub_imgcal)
-        
-        # > Menu bar setup
-        self._menubar = self.menubar
         
         # Initialise the app subframes
         self._motion = Wdg_MotionController(
@@ -159,43 +156,30 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
     #             )
         
     # >> Set up the calibration generator <<
-        mw_spectrometerCalibration = MainWindow_SpectrometerCalibrationGenerator(
+        self._spectrometer_calibrator = MainWindow_SpectrometerCalibrationGenerator(
             pipe_update=self._ramanHub.get_calibrator_pipe()
         )
-        self.frm_calibrator = mw_spectrometerCalibration.get_WdgCalibrator()
         
     # >> Set up the analysers <<
-    #     self.toplevel_analyser = tk.Toplevel(self)
-    #     self.toplevel_analyser.title('IRIS analyser')
-    #     self.frm_iris_analyser = main_analyser(self.toplevel_analyser,
-    #         processor=self._processor,dataHub=self._dataHub_map)
-    #     self.frm_iris_analyser.pack()
+        self._main_analyser = main_analyser(
+            processor=self._processor,
+            dataHub=self._dataHub_map,
+        )
         
-    #     # Set up a list for top level instances
-    #     self._list_analyser_toplevel = []
-    #     self._list_analyser_instances = []
+        # Set up the menu bar
+        menu_windows = self.menubar.addMenu('Windows')
+        menu_analyser = self.menubar.addMenu('Analyser')
+        menu_extensions = self.menubar.addMenu('Extensions')
+        menu_controllers = self.menubar.addMenu('Controllers')
         
-    # # >> Set up the menu bars on all the main top level windows <<
-    #     self.toplevel_analyser.config(menu=self.winfo_toplevel().config('menu')[-1])
+    # >> Set up the windows menubar <<
+        menu_windows.addAction('Show "Main controller"',self.show)
+        menu_windows.addAction('Show "Main analyser"',self._main_analyser.show)
+        menu_windows.addAction('Show "Spectrometer calibration"',self._spectrometer_calibrator.show)
         
-    #     # Override the close button for the main app to allow proper termination
-    #     self.protocol("WM_DELETE_WINDOW",self.terminate)
-        
-    #     # Override the close button to not destroy the top level
-    #     self.toplevel_analyser.protocol("WM_DELETE_WINDOW",self.toplevel_analyser.withdraw)
-    #     self.toplevel_analyser.withdraw()
-        
-    #     # Set up the menu bar
-    #     menu_window = tk.Menu(self._menubar,tearoff=0)
-    #     menu_window.add_command(label='Show "Main controller"',command=self.deiconify)
-    #     menu_window.add_command(label='Show "Main analyser"',command=self.toplevel_analyser.deiconify)
-    #     menu_window.add_command(label='Show "Spectrometer calibration"',command=self.toplevel_calibrator.deiconify)
-    #     self._menubar.add_cascade(label='Windows',menu=menu_window)
-        
-    #     menu_analyser = tk.Menu(self._menubar,tearoff=0)
-    #     menu_analyser.add_command(label='Show "Main analyser"',command=self.toplevel_analyser.deiconify)
-    #     menu_analyser.add_command(label='Create a new [destructible] "analyser"',command=self._set_IRIS_analyser)
-    #     self._menubar.add_cascade(label='Analyser',menu=menu_analyser)
+    # >> Set up the analyser menubar <<
+        menu_analyser.addAction('Show "Main analyser"',self._main_analyser.show)
+        # menu_analyser.addAction('Create a new [destructible] "analyser
         
     # # >> Set up the extensions <<
     #     self._list_extensions_toplevel:list[Extension_TopLevel] = []
@@ -207,11 +191,9 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
     #         menu_extensions.add_command(label='Show "{}"'.format(ext.title()),command=ext.deiconify)
     #     self._menubar.add_cascade(label='Extensions',menu=menu_extensions)
         
-    # # >> Set up the controllers menubar <<
-    #     menu_controllers = tk.Menu(self._menubar,tearoff=0)
-    #     menu_controllers.add_command(label='Set camera exposure time',command=self._motion.set_camera_exposure)
-    #     menu_controllers.add_command(label='Set the stage timestamp offset [ms]',command=self.set_RamanStage_offset)
-    #     self._menubar.add_cascade(label='Controllers',menu=menu_controllers)
+    # >> Set up the controllers menubar <<
+        menu_controllers.addAction('Set camera exposure time',self._motion.set_camera_exposure)
+        menu_controllers.addAction('Set the stage timestamp offset [ms]',self.set_RamanStage_offset)
         
     # >> Set up the keybindings <<
         self.shortcutHandler = ShortcutHandler(self)
@@ -222,8 +204,6 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         Set up the keybindings for the main controller
         """
         # Set up the keybindings for the motion controller continuous movement
-        self.setFocusPolicy(Qt.StrongFocus)
-        self.setFocus()
         self.shortcutHandler.set_keybinding_press_release(ShortcutsEnum.XY_UP.value,lambda: self._motion.motion_button_manager('yfwd'),lambda: self._motion.motion_button_manager('ystop'))
         self.shortcutHandler.set_keybinding_press_release(ShortcutsEnum.XY_DOWN.value,lambda: self._motion.motion_button_manager('yrev'),lambda: self._motion.motion_button_manager('ystop'))
         self.shortcutHandler.set_keybinding_press_release(ShortcutsEnum.XY_RIGHT.value,lambda: self._motion.motion_button_manager('xfwd'),lambda: self._motion.motion_button_manager('xstop'))

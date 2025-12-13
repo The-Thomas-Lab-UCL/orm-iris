@@ -64,7 +64,7 @@ class ShortcutHandler(QObject):
         shortcut.activated.connect(callback)
         
         self._shortcuts.append(shortcut)
-        print(f"[QShortcut] Set: {keybinding}")
+        # print(f"[QShortcut] Set: {keybinding}")
 
     # --- Methods for Raw Event Bindings (Press/Release Pairs) ---
     
@@ -141,7 +141,7 @@ class ShortcutHandler(QObject):
         
         self._press_callbacks[key_qt] = on_press
         self._release_callbacks[key_qt] = on_release
-        print(f"[RawEvent] Set: {key.upper()} (Press/Release)")
+        # print(f"[RawEvent] Set: {key.upper()} (Press/Release)")
     
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         """
