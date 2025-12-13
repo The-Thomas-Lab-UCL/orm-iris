@@ -75,6 +75,7 @@ class main_analyser(Ui_main_analyser,qw.QMainWindow):
     def _init_signals(self):
         # Heatmap plot
         self._dataHub_local.sig_tree_selection_str.connect(self._heatmapPlotter.set_combobox_name)
+        self._heatmapPlotter.sig_mappingUnit_changed.connect(self._dataHub_local.set_selection_unitName)
         
         # 1D plot
         self._heatmapPlotter.sig_plotclicked_id.connect(self._dataHubPlus.set_selected_RamanMeasurement)

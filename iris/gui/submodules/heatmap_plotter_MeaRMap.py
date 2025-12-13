@@ -34,6 +34,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
     
     sig_plotclicked_id = Signal(str)  # Signal emitted when the plot is clicked, sends (mappingUnit_ID (str))
     sig_plotclicked_coor = Signal(tuple)  # Signal emitted when the plot is clicked, sends (x_mm, y_mm)
+    sig_mappingUnit_changed = Signal(str)  # Signal emitted when the mappingUnit selection is changed, sends (mappingUnit_name (str))
     
     _sig_request_update_plot = Signal()  # Signal to update the plot in the main thread
     _sig_request_update_comboboxes = Signal()  # Signal to update the comboboxes in the main thread
@@ -151,6 +152,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         self._combo_plot_mappingUnitName.currentIndexChanged.connect(lambda: self._sig_request_update_comboboxes.emit())
         self._combo_plot_SpectralPosition.currentIndexChanged.connect(lambda: self._sig_request_update_plot.emit())
         
+        self._combo_plot_mappingUnitName.currentTextChanged.connect(self._emit_current_mappingUnit_name)
         
         # > Set up the save widgets
         wdg.btn_saveplot.clicked.connect(self.save_plot)
@@ -279,7 +281,14 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
             self._dict_plotter_kwargs_widgets[key] = entry
 
         self._sig_request_update_plot.emit()
-
+    
+    def _emit_current_mappingUnit_name(self):
+        """
+        Emit the current mappingUnit name through the sig_mappingUnit_changed signal
+        """
+        mappingUnit_name = self._combo_plot_mappingUnitName.currentText()
+        self.sig_mappingUnit_changed.emit(mappingUnit_name)
+    
     def _get_plotter_kwargs(self) -> dict:
         """
         Get the plotter options for the current mapping plot
@@ -323,6 +332,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         
         self._sig_request_update_plot.emit()
         
+    @Slot(str)
     def set_combobox_name(self,mappingUnit_name:str) -> None:
         """
         Set the mappingUnit and spectralPosition selection in the combobox
@@ -330,9 +340,12 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         Args:
             mappingUnit_id (str): MappingUnit_ID to be selected. If None, no change is made.
         """
-        current_name = self._combo_plot_mappingUnitName.currentText()
+        list_names = self._mappingHub.get_list_MappingUnit_names()
+        if not mappingUnit_name in list_names: return
         
-        if mappingUnit_name is None: mappingUnit_name = current_name
+        self._combo_plot_mappingUnitName.blockSignals(True)
+        self._combo_plot_mappingUnitName.setCurrentText(mappingUnit_name)
+        self._combo_plot_mappingUnitName.blockSignals(False)
             
         self._update_currentMappingUnit_observer(mappingUnit_name=mappingUnit_name)
         

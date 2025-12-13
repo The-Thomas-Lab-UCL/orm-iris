@@ -340,7 +340,20 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._tree.blockSignals(False)
         
         self.sig_tree_selection.emit()
-                
+        
+    @Slot(str)
+    def set_selection_unitName(self, unit_name:str):
+        """
+        Sets the selection in the treeview to the given unit name.
+
+        Args:
+            unit_name (str): The unit name to select.
+        """
+        list_names = self._MappingHub.get_list_MappingUnit_names()
+        if not unit_name in list_names: return
+        unit = self._MappingHub.get_MappingUnit(unit_name=unit_name)
+        self.set_selection_unitID(unit.get_unit_id())
+        
     def append_MappingUnit(self, unit: MeaRMap_Unit, persist:bool=True):
         """
         Append a MappingMeasurement_Unit to the MappingMeasurement_Hub
@@ -669,8 +682,6 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
             measurement_id (str): The id of the RamanMeasurement to select
         """
         assert isinstance(measurement_id, str), "measurement_id must be a string"
-        
-        print("Setting selected RamanMeasurement to:", measurement_id)
         
         if not isinstance(self._mappingUnit, MeaRMap_Unit):
             print("No MappingMeasurement_Unit is currently selected.")
