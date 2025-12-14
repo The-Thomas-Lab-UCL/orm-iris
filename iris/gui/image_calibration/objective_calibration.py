@@ -28,6 +28,7 @@ from iris.data.calibration_objective import ImgMea_Cal
 from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image,Wdg_DataHub_ImgCal
 from iris.gui.image_calibration.Canvas_ROIdefinition import Canvas_Image_Annotations
 
+from iris import LibraryConfigEnum
 from iris.data import SaveParamsEnum
 from iris.gui import AppPlotEnum
 
@@ -286,6 +287,7 @@ class Wdg_Calibration(qw.QWidget):
     sig_get_stitched_img = Signal(MeaImg_Unit,bool)
     sig_perform_calibration = Signal()
     sig_perform_finetune_calibration = Signal()
+    sig_saved_calibration = Signal()    # Signal emitted when a calibration is saved in the calibration folder
     
     def __init__(self,
                  parent:qw.QWidget,
@@ -737,12 +739,21 @@ class Wdg_Calibration(qw.QWidget):
             meaImg (MeaImg_Unit): Measurement image unit containing the calibration to be saved
         """
         self._meaImgUnit = meaImg
-        flg_save = qw.QMessageBox.question(self,'Save calibration','Do you want to save the calibration file?',
-            qw.QMessageBox.Yes | qw.QMessageBox.No, qw.QMessageBox.No) == qw.QMessageBox.Yes # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes, No exist
-        if not flg_save: raise ValueError('Calibration not saved')
+        ans = qw.QMessageBox.question(
+            self, 'Save calibration file', 'Do you want to save the calibration file now?',
+            qw.QMessageBox.Yes | qw.QMessageBox.No, qw.QMessageBox.Yes # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes, No exist
+        )
+        if ans != qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes exists
+            button_text = self._btn_save.text()
+            qw.QMessageBox.information(self,'Warning',f'The calibration file was not saved, it can still be saved manually using the "{button_text}" button."')
+            return
         
-        MeaImg_Handler().save_calibration_json_from_ImgMea(meaImg)
+        savepath = os.path.abspath(LibraryConfigEnum.OBJECTIVE_CALIBRATION_DIR.value)
+        savepath = os.path.join(savepath, meaImg.get_ImageMeasurement_Calibration().id + '.json')
+        
+        MeaImg_Handler().save_calibration_json_from_ImgMea(meaImg,savepath)
         qw.QMessageBox.information(self,'Calibration saved','Calibration file saved successfully')
+        self.sig_saved_calibration.emit()
     
     @Slot()
     def _set_internal_meaImgUnit(self, imgunit:MeaImg_Unit):

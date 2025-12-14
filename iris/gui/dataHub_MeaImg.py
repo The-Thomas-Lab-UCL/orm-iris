@@ -68,11 +68,6 @@ class Wdg_DataHub_ImgCal(Ui_wdg_objectives,qw.QWidget):
         
         # Setup the combobox and button
         self._combo_cal = self.combo_objective
-        self._btn_loaddir = self.btn_load
-        self._btn_refreshdir = self.btn_refresh
-        
-        self._btn_loaddir.clicked.connect(lambda: self._load_calibration_folder())
-        self._btn_refreshdir.clicked.connect(self._refresh_calibration_folder)
         
         # Observers
         self._list_observer_calibrationChange:list[Callable[[],None]] = []
@@ -167,19 +162,12 @@ class Wdg_DataHub_ImgCal(Ui_wdg_objectives,qw.QWidget):
         if not self._lastdirpath:
             qw.QMessageBox.warning(self, 'Error', 'No previously selected folder.'); return
             
-        ori_text = self._btn_refreshdir.text()
         try:
-            self._btn_refreshdir.setText('Refreshing...')
-            self._btn_refreshdir.setEnabled(False)
-            
             self._CalHub.load_calibrations(self._lastdirpath)
             self.update_combobox()
-            qw.QMessageBox.information(self, 'Success', 'Calibration folder refreshed successfully.')
         except Exception as e:
             qw.QMessageBox.critical(self, 'Error', str(e))
         finally:
-            self._btn_refreshdir.setEnabled(True)
-            self._btn_refreshdir.setText(ori_text)
             self._notify_observers_calibrationChange()
         
     def _load_calibration_folder(self,dirpath:str|None=None,supp_msg:bool=False) -> None:
@@ -200,10 +188,7 @@ class Wdg_DataHub_ImgCal(Ui_wdg_objectives,qw.QWidget):
         
         self._lastdirpath = dirpath
         
-        ori_text = self._btn_loaddir.text()
         try:
-            self._btn_loaddir.setEnabled(False)
-            self._btn_loaddir.setText('Loading...')
             self._CalHub.load_calibrations(dirpath)
             self.update_combobox()
             if not supp_msg: qw.QMessageBox.information(self, 'Success', 'Calibration folder loaded successfully.')
@@ -212,8 +197,6 @@ class Wdg_DataHub_ImgCal(Ui_wdg_objectives,qw.QWidget):
             if not supp_msg: qw.QMessageBox.critical(self, 'Error', str(e))
             print(f'Error loading calibration folder: {e}')
         finally:
-            self._btn_loaddir.setEnabled(True)
-            self._btn_loaddir.setText(ori_text)
             self._notify_observers_calibrationChange()
         
 

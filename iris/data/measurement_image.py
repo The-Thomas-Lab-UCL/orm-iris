@@ -1013,11 +1013,6 @@ class MeaImg_Handler():
         Returns:
             tuple[str,str]: Directory path and name of the saved JSON file
         """
-        
-        print('!!!!! TO BE MODIFIED !!!!!')
-        # Modification idea: to save the calibration file from an ImageMeasurement_Calibration
-        # obj instead of an ImageMeasurement_Unit obj
-        
         assert isinstance(measurement, MeaImg_Unit), 'Measurement must be an image measurement object'
         assert measurement.check_calibration_exist(), 'Calibration parameters are not set'
             

@@ -264,7 +264,10 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         self._raman.initialise_spectrometer_n_analyser()
         # [extension.initialise() for extension in self._list_extensions_toplevel]
         
-        self._dataHub_imgcal._load_calibration_folder(dirpath=LibraryConfigEnum.OBJECTIVE_CALIBRATION_DIR.value,supp_msg=True)
+        # > Prepare the objectives <
+        dirpath_objcal = LibraryConfigEnum.OBJECTIVE_CALIBRATION_DIR.value
+        if not os.path.isdir(dirpath_objcal): os.makedirs(dirpath_objcal,exist_ok=True)
+        self._dataHub_imgcal._load_calibration_folder(dirpath=dirpath_objcal,supp_msg=True)
         
         self._hilvl_coorGen.initialise()
         self._hilvl_raman.initialise()

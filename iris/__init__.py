@@ -5,7 +5,7 @@ from .utils.general import read_update_config_file_section
 
 dict_lib_default = {
     'spectrometer_calibration_path': '',
-    'objective_calibration_directory': '',
+    'objective_calibration_directory': './calibrations/objectives/',
 }
 
 dict_lib_comments = {
@@ -23,11 +23,6 @@ for key in dict_lib_default.keys():
     if key.endswith('_path'):
         if dict_lib_read[key] == '': continue
         assert os.path.isfile(dict_lib_read[key]),\
-            f"Error: {key} directory inserted in the config.ini file is invalid.\
-            Please check the directory path and try again."
-    elif key.endswith('_directory'):
-        if dict_lib_read[key] == '': continue
-        assert os.path.isdir(dict_lib_read[key]),\
             f"Error: {key} directory inserted in the config.ini file is invalid.\
             Please check the directory path and try again."
             

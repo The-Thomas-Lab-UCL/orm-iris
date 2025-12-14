@@ -130,6 +130,8 @@ class Wdg_HighLvlController_Brightfield(qw.QWidget):
         self._main_window_calibration.setCentralWidget(self._wdg_Calibration)
         self._dataHub_imgcal.btn_objectiveSetup.clicked.connect(
             self._main_window_calibration.show)
+        self._wdg_Calibration.sig_saved_calibration.connect(
+            self._dataHub_imgcal._refresh_calibration_folder)
         
         # Override the main window close event to hide the window instead of closing it
         def closeEvent_override(event):
