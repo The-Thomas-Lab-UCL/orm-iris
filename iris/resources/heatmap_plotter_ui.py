@@ -15,9 +15,10 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFormLayout,
-    QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QSizePolicy, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDockWidget,
+    QFormLayout, QGridLayout, QHBoxLayout, QLabel,
+    QLineEdit, QPushButton, QSizePolicy, QVBoxLayout,
+    QWidget)
 
 class Ui_HeatmapPlotter(object):
     def setupUi(self, HeatmapPlotter):
@@ -38,10 +39,26 @@ class Ui_HeatmapPlotter(object):
 
         self.main_layout.addLayout(self.lyt_plot_params)
 
+        self.dock_plot = QDockWidget(HeatmapPlotter)
+        self.dock_plot.setObjectName(u"dock_plot")
+        sizePolicy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.dock_plot.sizePolicy().hasHeightForWidth())
+        self.dock_plot.setSizePolicy(sizePolicy)
+        self.dock_plot.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetFloatable|QDockWidget.DockWidgetFeature.DockWidgetMovable)
+        self.dockWidgetContents = QWidget()
+        self.dockWidgetContents.setObjectName(u"dockWidgetContents")
+        self.verticalLayout = QVBoxLayout(self.dockWidgetContents)
+        self.verticalLayout.setObjectName(u"verticalLayout")
         self.lyt_heatmap_holder = QVBoxLayout()
         self.lyt_heatmap_holder.setObjectName(u"lyt_heatmap_holder")
 
-        self.main_layout.addLayout(self.lyt_heatmap_holder)
+        self.verticalLayout.addLayout(self.lyt_heatmap_holder)
+
+        self.dock_plot.setWidget(self.dockWidgetContents)
+
+        self.main_layout.addWidget(self.dock_plot)
 
         self.horizontalLayout_3 = QHBoxLayout()
         self.horizontalLayout_3.setObjectName(u"horizontalLayout_3")
@@ -53,11 +70,11 @@ class Ui_HeatmapPlotter(object):
 
         self.lbl_clickedcoor = QLabel(HeatmapPlotter)
         self.lbl_clickedcoor.setObjectName(u"lbl_clickedcoor")
-        sizePolicy = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
-        sizePolicy.setHorizontalStretch(1)
-        sizePolicy.setVerticalStretch(0)
-        sizePolicy.setHeightForWidth(self.lbl_clickedcoor.sizePolicy().hasHeightForWidth())
-        self.lbl_clickedcoor.setSizePolicy(sizePolicy)
+        sizePolicy1 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        sizePolicy1.setHorizontalStretch(1)
+        sizePolicy1.setVerticalStretch(0)
+        sizePolicy1.setHeightForWidth(self.lbl_clickedcoor.sizePolicy().hasHeightForWidth())
+        self.lbl_clickedcoor.setSizePolicy(sizePolicy1)
 
         self.horizontalLayout_3.addWidget(self.lbl_clickedcoor)
 
@@ -68,11 +85,11 @@ class Ui_HeatmapPlotter(object):
         self.horizontalLayout.setObjectName(u"horizontalLayout")
         self.combo_unitchoise = QComboBox(HeatmapPlotter)
         self.combo_unitchoise.setObjectName(u"combo_unitchoise")
-        sizePolicy1 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        sizePolicy1.setHorizontalStretch(3)
-        sizePolicy1.setVerticalStretch(0)
-        sizePolicy1.setHeightForWidth(self.combo_unitchoise.sizePolicy().hasHeightForWidth())
-        self.combo_unitchoise.setSizePolicy(sizePolicy1)
+        sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        sizePolicy2.setHorizontalStretch(3)
+        sizePolicy2.setVerticalStretch(0)
+        sizePolicy2.setHeightForWidth(self.combo_unitchoise.sizePolicy().hasHeightForWidth())
+        self.combo_unitchoise.setSizePolicy(sizePolicy2)
 
         self.horizontalLayout.addWidget(self.combo_unitchoise)
 
@@ -84,11 +101,11 @@ class Ui_HeatmapPlotter(object):
 
         self.combo_spectralpos = QComboBox(HeatmapPlotter)
         self.combo_spectralpos.setObjectName(u"combo_spectralpos")
-        sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        sizePolicy2.setHorizontalStretch(1)
-        sizePolicy2.setVerticalStretch(0)
-        sizePolicy2.setHeightForWidth(self.combo_spectralpos.sizePolicy().hasHeightForWidth())
-        self.combo_spectralpos.setSizePolicy(sizePolicy2)
+        sizePolicy3 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        sizePolicy3.setHorizontalStretch(1)
+        sizePolicy3.setVerticalStretch(0)
+        sizePolicy3.setHeightForWidth(self.combo_spectralpos.sizePolicy().hasHeightForWidth())
+        self.combo_spectralpos.setSizePolicy(sizePolicy3)
         self.combo_spectralpos.setEditable(True)
 
         self.horizontalLayout.addWidget(self.combo_spectralpos)

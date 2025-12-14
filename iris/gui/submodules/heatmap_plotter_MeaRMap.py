@@ -2,7 +2,7 @@
 A class to control the plot for SERS mapping measurements. To be used inside the high level controller module.
 """
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QTimer, QCoreApplication
+from PySide6.QtCore import Signal, Slot, QTimer, QCoreApplication, Qt
 
 import matplotlib
 import matplotlib.backend_bases
@@ -29,6 +29,34 @@ class HeatmapPlotter_Design(Ui_HeatmapPlotter, qw.QWidget):
         super().__init__(parent)
         self.setupUi(self)
         self.setLayout(self.main_layout)
+        
+        # Set the initial dock location
+        self.main_win = self.window()
+        
+        self._register_videofeed_dock()
+        self.dock_plot.installEventFilter(self)
+        self.dock_plot.topLevelChanged.connect(self._handle_videofeed_docking_changed)
+        
+    def _register_videofeed_dock(self):
+        if isinstance(self.main_win, qw.QMainWindow):
+            # This tells the Main Window: "You are the boss of this dock now"
+            self._dock_original_index = self.main_win.layout().indexOf(self.dock_plot)
+            self._dock_original_index = max(0,self._dock_original_index-1)
+            self.main_win.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_plot)
+            self.dock_plot.setFloating(True)
+            self.dock_plot.setFloating(False)
+            self.main_layout.insertWidget(self._dock_original_index, self.dock_plot)
+    
+    @Slot(bool)
+    def _handle_videofeed_docking_changed(self,floating:bool):
+        if floating:
+            if isinstance(self.main_win, qw.QMainWindow):
+                self.main_win.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_plot)
+            self.dock_plot.setFloating(True)
+        else:
+            self.main_layout.insertWidget(self._dock_original_index, self.dock_plot)
+            self.main_layout.insertWidget(self._dock_original_index, self.dock_plot)
+            self.dock_plot.setFloating(False)
 
 class Wdg_MappingMeasurement_Plotter(qw.QWidget):
     
