@@ -52,14 +52,14 @@ class BrightfieldController(qw.QWidget,Ui_wdg_brightfield_controller):
         self._dock_index = 0
         
         # Set the initial dock location
-        self.main_win:qw.QMainWindow = self.window()
+        self.main_win:qw.QMainWindow = self.window() # pyright: ignore[reportAttributeAccessIssue] ; assume the parent is a QMainWindow
         
         self._register_videofeed_dock()
         self.dock_video.topLevelChanged.connect(self._handle_videofeed_docking_changed)
         
     def _register_videofeed_dock(self):
         # This tells the Main Window: "You are the boss of this dock now"
-        self._dock_original_index = self.main_win.layout().indexOf(self.dock_video)
+        self._dock_original_index = self.main_win.layout().indexOf(self.dock_video) # pyright: ignore[reportOptionalMemberAccess] ; assume the parent is a QMainWindow
         self._dock_original_index = max(0,self._dock_original_index-1)
             
     @Slot(bool)
@@ -832,9 +832,18 @@ class Wdg_MotionController(qw.QGroupBox):
             return
         try:
             init_exposure_time = self._camera_ctrl.get_exposure_time()
-            new_exposure_time = messagebox_request_input('Set exposure time',
-                                                        'Set exposure time in device unit',
-                                                        str(init_exposure_time))
+            new_exposure_time = messagebox_request_input(
+                parent=self,
+                title='Set exposure time',
+                message='Set exposure time in device unit',
+                default=str(init_exposure_time),
+                validator=validator_float_greaterThanZero,
+                invalid_msg='Exposure time must be a positive number',
+                loop_until_valid=True,
+            )
+            if new_exposure_time is None: 
+                qw.QMessageBox.information(self, 'Exposure time not set', 'Exposure time not changed')
+                return
             self._camera_ctrl.set_exposure_time(float(new_exposure_time))
             qw.QMessageBox.information(self, 'Exposure time set', 'Exposure time set to {} ms'.format(self._camera_ctrl.get_exposure_time()))
         except Exception as e:
