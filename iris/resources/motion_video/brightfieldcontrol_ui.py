@@ -15,8 +15,9 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QGridLayout,
-    QPushButton, QSizePolicy, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDockWidget,
+    QGridLayout, QHBoxLayout, QPushButton, QSizePolicy,
+    QVBoxLayout, QWidget)
 
 class Ui_wdg_brightfield_controller(object):
     def setupUi(self, wdg_brightfield_controller):
@@ -28,74 +29,111 @@ class Ui_wdg_brightfield_controller(object):
         sizePolicy.setVerticalStretch(1)
         sizePolicy.setHeightForWidth(wdg_brightfield_controller.sizePolicy().hasHeightForWidth())
         wdg_brightfield_controller.setSizePolicy(sizePolicy)
-        self.verticalLayoutWidget = QWidget(wdg_brightfield_controller)
-        self.verticalLayoutWidget.setObjectName(u"verticalLayoutWidget")
-        self.verticalLayoutWidget.setGeometry(QRect(110, 30, 411, 401))
-        self.lyt_main = QVBoxLayout(self.verticalLayoutWidget)
-        self.lyt_main.setObjectName(u"lyt_main")
-        self.lyt_main.setContentsMargins(0, 0, 0, 0)
-        self.wdg_video = QWidget(self.verticalLayoutWidget)
+        self.verticalLayout = QVBoxLayout(wdg_brightfield_controller)
+        self.verticalLayout.setObjectName(u"verticalLayout")
+        self.main_layout = QVBoxLayout()
+        self.main_layout.setObjectName(u"main_layout")
+        self.dock_video = QDockWidget(wdg_brightfield_controller)
+        self.dock_video.setObjectName(u"dock_video")
+        self.dock_video.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetFloatable|QDockWidget.DockWidgetFeature.DockWidgetMovable|QDockWidget.DockWidgetFeature.DockWidgetVerticalTitleBar)
+        self.dockWidgetContents = QWidget()
+        self.dockWidgetContents.setObjectName(u"dockWidgetContents")
+        self.verticalLayout_3 = QVBoxLayout(self.dockWidgetContents)
+        self.verticalLayout_3.setObjectName(u"verticalLayout_3")
+        self.verticalLayout_2 = QVBoxLayout()
+        self.verticalLayout_2.setObjectName(u"verticalLayout_2")
+        self.wdg_video = QWidget(self.dockWidgetContents)
         self.wdg_video.setObjectName(u"wdg_video")
         sizePolicy.setHeightForWidth(self.wdg_video.sizePolicy().hasHeightForWidth())
         self.wdg_video.setSizePolicy(sizePolicy)
 
-        self.lyt_main.addWidget(self.wdg_video)
+        self.verticalLayout_2.addWidget(self.wdg_video)
+
+        self.horizontalLayout_3 = QHBoxLayout()
+        self.horizontalLayout_3.setObjectName(u"horizontalLayout_3")
+        self.chk_crosshair = QCheckBox(self.dockWidgetContents)
+        self.chk_crosshair.setObjectName(u"chk_crosshair")
+        self.chk_crosshair.setChecked(True)
+
+        self.horizontalLayout_3.addWidget(self.chk_crosshair)
+
+        self.chk_scalebar = QCheckBox(self.dockWidgetContents)
+        self.chk_scalebar.setObjectName(u"chk_scalebar")
+        self.chk_scalebar.setChecked(True)
+
+        self.horizontalLayout_3.addWidget(self.chk_scalebar)
+
+
+        self.verticalLayout_2.addLayout(self.horizontalLayout_3)
+
+        self.horizontalLayout_8 = QHBoxLayout()
+        self.horizontalLayout_8.setObjectName(u"horizontalLayout_8")
+        self.chk_dockvideo = QCheckBox(self.dockWidgetContents)
+        self.chk_dockvideo.setObjectName(u"chk_dockvideo")
+        self.chk_dockvideo.setChecked(True)
+
+        self.horizontalLayout_8.addWidget(self.chk_dockvideo)
+
+        self.chk_alwaysOnTop = QCheckBox(self.dockWidgetContents)
+        self.chk_alwaysOnTop.setObjectName(u"chk_alwaysOnTop")
+        self.chk_alwaysOnTop.setChecked(True)
+
+        self.horizontalLayout_8.addWidget(self.chk_alwaysOnTop)
+
+
+        self.verticalLayout_2.addLayout(self.horizontalLayout_8)
+
+
+        self.verticalLayout_3.addLayout(self.verticalLayout_2)
+
+        self.dock_video.setWidget(self.dockWidgetContents)
+
+        self.main_layout.addWidget(self.dock_video)
 
         self.gridLayout = QGridLayout()
         self.gridLayout.setObjectName(u"gridLayout")
-        self.btn_setffgain = QPushButton(self.verticalLayoutWidget)
+        self.btn_setffgain = QPushButton(wdg_brightfield_controller)
         self.btn_setffgain.setObjectName(u"btn_setffgain")
 
         self.gridLayout.addWidget(self.btn_setffgain, 4, 0, 1, 1)
 
-        self.btn_setff = QPushButton(self.verticalLayoutWidget)
+        self.btn_setff = QPushButton(wdg_brightfield_controller)
         self.btn_setff.setObjectName(u"btn_setff")
 
         self.gridLayout.addWidget(self.btn_setff, 4, 1, 1, 1)
 
-        self.combo_image_correction = QComboBox(self.verticalLayoutWidget)
+        self.combo_image_correction = QComboBox(wdg_brightfield_controller)
         self.combo_image_correction.setObjectName(u"combo_image_correction")
 
         self.gridLayout.addWidget(self.combo_image_correction, 2, 0, 1, 2)
 
-        self.chk_scalebar = QCheckBox(self.verticalLayoutWidget)
-        self.chk_scalebar.setObjectName(u"chk_scalebar")
-        self.chk_scalebar.setChecked(True)
-
-        self.gridLayout.addWidget(self.chk_scalebar, 0, 1, 1, 1)
-
-        self.btn_loadff = QPushButton(self.verticalLayoutWidget)
+        self.btn_loadff = QPushButton(wdg_brightfield_controller)
         self.btn_loadff.setObjectName(u"btn_loadff")
 
         self.gridLayout.addWidget(self.btn_loadff, 5, 1, 1, 1)
 
-        self.btn_saveff = QPushButton(self.verticalLayoutWidget)
+        self.btn_saveff = QPushButton(wdg_brightfield_controller)
         self.btn_saveff.setObjectName(u"btn_saveff")
 
         self.gridLayout.addWidget(self.btn_saveff, 5, 0, 1, 1)
 
-        self.chk_crosshair = QCheckBox(self.verticalLayoutWidget)
-        self.chk_crosshair.setObjectName(u"chk_crosshair")
-        self.chk_crosshair.setChecked(True)
-
-        self.gridLayout.addWidget(self.chk_crosshair, 0, 0, 1, 1)
-
-        self.pushButton_2 = QPushButton(self.verticalLayoutWidget)
+        self.pushButton_2 = QPushButton(wdg_brightfield_controller)
         self.pushButton_2.setObjectName(u"pushButton_2")
 
         self.gridLayout.addWidget(self.pushButton_2, 1, 1, 1, 1)
 
-        self.btn_camera_onoff = QPushButton(self.verticalLayoutWidget)
+        self.btn_camera_onoff = QPushButton(wdg_brightfield_controller)
         self.btn_camera_onoff.setObjectName(u"btn_camera_onoff")
         self.btn_camera_onoff.setStyleSheet(u"background: 'red'")
 
         self.gridLayout.addWidget(self.btn_camera_onoff, 1, 0, 1, 1)
 
 
-        self.lyt_main.addLayout(self.gridLayout)
+        self.main_layout.addLayout(self.gridLayout)
 
-        QWidget.setTabOrder(self.chk_crosshair, self.chk_scalebar)
-        QWidget.setTabOrder(self.chk_scalebar, self.btn_camera_onoff)
+
+        self.verticalLayout.addLayout(self.main_layout)
+
         QWidget.setTabOrder(self.btn_camera_onoff, self.pushButton_2)
         QWidget.setTabOrder(self.pushButton_2, self.combo_image_correction)
         QWidget.setTabOrder(self.combo_image_correction, self.btn_setffgain)
@@ -110,12 +148,14 @@ class Ui_wdg_brightfield_controller(object):
 
     def retranslateUi(self, wdg_brightfield_controller):
         wdg_brightfield_controller.setWindowTitle(QCoreApplication.translate("wdg_brightfield_controller", u"Form", None))
+        self.chk_crosshair.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Show crosshair", None))
+        self.chk_scalebar.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Show scalebar", None))
+        self.chk_dockvideo.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Dock", None))
+        self.chk_alwaysOnTop.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Always on top", None))
         self.btn_setffgain.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Set flatfield gain", None))
         self.btn_setff.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Acquire flatfield correction", None))
-        self.chk_scalebar.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Show scalebar", None))
         self.btn_loadff.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Load flatfield correction", None))
         self.btn_saveff.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Save flatfield correction", None))
-        self.chk_crosshair.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Show crosshair", None))
         self.pushButton_2.setText(QCoreApplication.translate("wdg_brightfield_controller", u"PushButton", None))
         self.btn_camera_onoff.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Pause camera feed", None))
     # retranslateUi

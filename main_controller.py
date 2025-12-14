@@ -382,10 +382,8 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
 
 if __name__ == '__main__':
     print('>>>>> IRIS: INITIATING THE CONTROLLERS AND THE APP <<<<<')
-    # Create the Qt application first (ensures QApplication exists in main thread)
     app = qw.QApplication([])
     
-    # Now start manager / processes (avoid creating Qt objects in child processes)
     base_manager = MyManager()
     initialise_manager_raman(base_manager)
     initialise_manager_stage(base_manager)
@@ -397,8 +395,6 @@ if __name__ == '__main__':
     ramanHub.start()
     stageHub.start()
     processor = mp.Pool()
-    
-    # time.sleep(2)  # Allow some time for the controllers to initialise properly
     
     mainWindow_Controller = MainWindow_Controller(
         processor=processor,
