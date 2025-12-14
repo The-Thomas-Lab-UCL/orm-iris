@@ -27,12 +27,6 @@
        <property name="features">
         <set>QDockWidget::DockWidgetFeature::DockWidgetFloatable|QDockWidget::DockWidgetFeature::DockWidgetMovable|QDockWidget::DockWidgetFeature::DockWidgetVerticalTitleBar</set>
        </property>
-       <property name="allowedAreas">
-        <set>Qt::DockWidgetArea::NoDockWidgetArea</set>
-       </property>
-       <property name="dockLocation">
-        <enum>Qt::DockWidgetArea::NoDockWidgetArea</enum>
-       </property>
        <widget class="QWidget" name="dockWidgetContents">
         <layout class="QVBoxLayout" name="verticalLayout_3">
          <item>
@@ -63,6 +57,30 @@
               <widget class="QCheckBox" name="chk_scalebar">
                <property name="text">
                 <string>Show scalebar</string>
+               </property>
+               <property name="checked">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="horizontalLayout_8">
+             <item>
+              <widget class="QCheckBox" name="chk_dockvideo">
+               <property name="text">
+                <string>Dock</string>
+               </property>
+               <property name="checked">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QCheckBox" name="chk_alwaysOnTop">
+               <property name="text">
+                <string>Always on top</string>
                </property>
                <property name="checked">
                 <bool>true</bool>

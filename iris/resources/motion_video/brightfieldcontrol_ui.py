@@ -36,8 +36,6 @@ class Ui_wdg_brightfield_controller(object):
         self.dock_video = QDockWidget(wdg_brightfield_controller)
         self.dock_video.setObjectName(u"dock_video")
         self.dock_video.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetFloatable|QDockWidget.DockWidgetFeature.DockWidgetMovable|QDockWidget.DockWidgetFeature.DockWidgetVerticalTitleBar)
-        self.dock_video.setAllowedAreas(Qt.DockWidgetArea.NoDockWidgetArea)
-        self.dock_video.setDockLocation(Qt.DockWidgetArea.NoDockWidgetArea)
         self.dockWidgetContents = QWidget()
         self.dockWidgetContents.setObjectName(u"dockWidgetContents")
         self.verticalLayout_3 = QVBoxLayout(self.dockWidgetContents)
@@ -67,6 +65,23 @@ class Ui_wdg_brightfield_controller(object):
 
 
         self.verticalLayout_2.addLayout(self.horizontalLayout_3)
+
+        self.horizontalLayout_8 = QHBoxLayout()
+        self.horizontalLayout_8.setObjectName(u"horizontalLayout_8")
+        self.chk_dockvideo = QCheckBox(self.dockWidgetContents)
+        self.chk_dockvideo.setObjectName(u"chk_dockvideo")
+        self.chk_dockvideo.setChecked(True)
+
+        self.horizontalLayout_8.addWidget(self.chk_dockvideo)
+
+        self.chk_alwaysOnTop = QCheckBox(self.dockWidgetContents)
+        self.chk_alwaysOnTop.setObjectName(u"chk_alwaysOnTop")
+        self.chk_alwaysOnTop.setChecked(True)
+
+        self.horizontalLayout_8.addWidget(self.chk_alwaysOnTop)
+
+
+        self.verticalLayout_2.addLayout(self.horizontalLayout_8)
 
 
         self.verticalLayout_3.addLayout(self.verticalLayout_2)
@@ -135,6 +150,8 @@ class Ui_wdg_brightfield_controller(object):
         wdg_brightfield_controller.setWindowTitle(QCoreApplication.translate("wdg_brightfield_controller", u"Form", None))
         self.chk_crosshair.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Show crosshair", None))
         self.chk_scalebar.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Show scalebar", None))
+        self.chk_dockvideo.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Dock", None))
+        self.chk_alwaysOnTop.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Always on top", None))
         self.btn_setffgain.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Set flatfield gain", None))
         self.btn_setff.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Acquire flatfield correction", None))
         self.btn_loadff.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Load flatfield correction", None))

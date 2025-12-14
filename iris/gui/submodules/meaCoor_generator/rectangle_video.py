@@ -376,6 +376,7 @@ class Rect_Video(Ui_Rect_Video, qw.QWidget):
         Updates the image shown on the canvas
         """
         if not self.isVisible():
+            print('Canvas not visible, skipping update')
             return  # Do not update if the widget is not visible
         
         if not isinstance(self._imgUnit,MeaImg_Unit) or not self._imgUnit.check_calibration_exist(): return
