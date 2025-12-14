@@ -35,7 +35,7 @@ class Ui_wdg_brightfield_controller(object):
         self.main_layout.setObjectName(u"main_layout")
         self.dock_video = QDockWidget(wdg_brightfield_controller)
         self.dock_video.setObjectName(u"dock_video")
-        self.dock_video.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetFloatable|QDockWidget.DockWidgetFeature.DockWidgetMovable|QDockWidget.DockWidgetFeature.DockWidgetVerticalTitleBar)
+        self.dock_video.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetFloatable|QDockWidget.DockWidgetFeature.DockWidgetMovable)
         self.dockWidgetContents = QWidget()
         self.dockWidgetContents.setObjectName(u"dockWidgetContents")
         self.verticalLayout_3 = QVBoxLayout(self.dockWidgetContents)
@@ -66,23 +66,6 @@ class Ui_wdg_brightfield_controller(object):
 
         self.verticalLayout_2.addLayout(self.horizontalLayout_3)
 
-        self.horizontalLayout_8 = QHBoxLayout()
-        self.horizontalLayout_8.setObjectName(u"horizontalLayout_8")
-        self.chk_dockvideo = QCheckBox(self.dockWidgetContents)
-        self.chk_dockvideo.setObjectName(u"chk_dockvideo")
-        self.chk_dockvideo.setChecked(True)
-
-        self.horizontalLayout_8.addWidget(self.chk_dockvideo)
-
-        self.chk_alwaysOnTop = QCheckBox(self.dockWidgetContents)
-        self.chk_alwaysOnTop.setObjectName(u"chk_alwaysOnTop")
-        self.chk_alwaysOnTop.setChecked(True)
-
-        self.horizontalLayout_8.addWidget(self.chk_alwaysOnTop)
-
-
-        self.verticalLayout_2.addLayout(self.horizontalLayout_8)
-
 
         self.verticalLayout_3.addLayout(self.verticalLayout_2)
 
@@ -92,26 +75,6 @@ class Ui_wdg_brightfield_controller(object):
 
         self.gridLayout = QGridLayout()
         self.gridLayout.setObjectName(u"gridLayout")
-        self.btn_setffgain = QPushButton(wdg_brightfield_controller)
-        self.btn_setffgain.setObjectName(u"btn_setffgain")
-
-        self.gridLayout.addWidget(self.btn_setffgain, 4, 0, 1, 1)
-
-        self.btn_setff = QPushButton(wdg_brightfield_controller)
-        self.btn_setff.setObjectName(u"btn_setff")
-
-        self.gridLayout.addWidget(self.btn_setff, 4, 1, 1, 1)
-
-        self.combo_image_correction = QComboBox(wdg_brightfield_controller)
-        self.combo_image_correction.setObjectName(u"combo_image_correction")
-
-        self.gridLayout.addWidget(self.combo_image_correction, 2, 0, 1, 2)
-
-        self.btn_loadff = QPushButton(wdg_brightfield_controller)
-        self.btn_loadff.setObjectName(u"btn_loadff")
-
-        self.gridLayout.addWidget(self.btn_loadff, 5, 1, 1, 1)
-
         self.btn_saveff = QPushButton(wdg_brightfield_controller)
         self.btn_saveff.setObjectName(u"btn_saveff")
 
@@ -121,6 +84,26 @@ class Ui_wdg_brightfield_controller(object):
         self.pushButton_2.setObjectName(u"pushButton_2")
 
         self.gridLayout.addWidget(self.pushButton_2, 1, 1, 1, 1)
+
+        self.btn_setffgain = QPushButton(wdg_brightfield_controller)
+        self.btn_setffgain.setObjectName(u"btn_setffgain")
+
+        self.gridLayout.addWidget(self.btn_setffgain, 4, 0, 1, 1)
+
+        self.combo_image_correction = QComboBox(wdg_brightfield_controller)
+        self.combo_image_correction.setObjectName(u"combo_image_correction")
+
+        self.gridLayout.addWidget(self.combo_image_correction, 2, 0, 1, 2)
+
+        self.btn_setff = QPushButton(wdg_brightfield_controller)
+        self.btn_setff.setObjectName(u"btn_setff")
+
+        self.gridLayout.addWidget(self.btn_setff, 4, 1, 1, 1)
+
+        self.btn_loadff = QPushButton(wdg_brightfield_controller)
+        self.btn_loadff.setObjectName(u"btn_loadff")
+
+        self.gridLayout.addWidget(self.btn_loadff, 5, 1, 1, 1)
 
         self.btn_camera_onoff = QPushButton(wdg_brightfield_controller)
         self.btn_camera_onoff.setObjectName(u"btn_camera_onoff")
@@ -150,13 +133,11 @@ class Ui_wdg_brightfield_controller(object):
         wdg_brightfield_controller.setWindowTitle(QCoreApplication.translate("wdg_brightfield_controller", u"Form", None))
         self.chk_crosshair.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Show crosshair", None))
         self.chk_scalebar.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Show scalebar", None))
-        self.chk_dockvideo.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Dock", None))
-        self.chk_alwaysOnTop.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Always on top", None))
+        self.btn_saveff.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Save flatfield correction", None))
+        self.pushButton_2.setText(QCoreApplication.translate("wdg_brightfield_controller", u"PushButton", None))
         self.btn_setffgain.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Set flatfield gain", None))
         self.btn_setff.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Acquire flatfield correction", None))
         self.btn_loadff.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Load flatfield correction", None))
-        self.btn_saveff.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Save flatfield correction", None))
-        self.pushButton_2.setText(QCoreApplication.translate("wdg_brightfield_controller", u"PushButton", None))
         self.btn_camera_onoff.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Pause camera feed", None))
     # retranslateUi
 

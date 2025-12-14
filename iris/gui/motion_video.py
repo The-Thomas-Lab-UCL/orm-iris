@@ -49,31 +49,28 @@ class BrightfieldController(qw.QWidget,Ui_wdg_brightfield_controller):
         self.setupUi(self)
         self.setLayout(self.main_layout)
         
-        self.chk_dockvideo.stateChanged.connect(self._set_dock_floating)
-        self.chk_alwaysOnTop.stateChanged.connect(self._set_dock_alwaysOnTop)
+        self._dock_index = 0
         
-        self.chk_alwaysOnTop.setEnabled(False)
+        # Set the initial dock location
+        self.main_win:qw.QMainWindow = self.window()
         
-    @Slot()
-    def _set_dock_floating(self):
-        if self.chk_dockvideo.isChecked():
-            self.dock_video.setFloating(True)
-            self.chk_alwaysOnTop.setEnabled(True)
-            print('Dock video floating')
-        else:
-            self.dock_video.setFloating(False)
-            self.chk_alwaysOnTop.setEnabled(False)
-            print('Dock video docked')
+        self._register_videofeed_dock()
+        self.dock_video.topLevelChanged.connect(self._handle_videofeed_docking_changed)
+        
+    def _register_videofeed_dock(self):
+        # This tells the Main Window: "You are the boss of this dock now"
+        self._dock_original_index = self.main_win.layout().indexOf(self.dock_video)
+        self._dock_original_index = max(0,self._dock_original_index-1)
             
-    @Slot()
-    def _set_dock_alwaysOnTop(self):
-        if not self.dock_video.isFloating():
-            return
-        if self.chk_alwaysOnTop.isChecked():
-            self.dock_video.setWindowFlag(qc.Qt.WindowType.WindowStaysOnTopHint,True)
+    @Slot(bool)
+    def _handle_videofeed_docking_changed(self,floating:bool):
+        if floating:
+            self.main_win.addDockWidget(qt.DockWidgetArea.RightDockWidgetArea, self.dock_video)
+            self.dock_video.setFloating(True)
         else:
-            self.dock_video.setWindowFlag(qc.Qt.WindowType.WindowStaysOnTopHint,False)
-        self.dock_video.show()
+            self.main_layout.insertWidget(self._dock_original_index, self.dock_video)
+            self.main_layout.insertWidget(self._dock_original_index, self.dock_video)
+            self.dock_video.setFloating(False)
 
 class StageControl(qw.QWidget, Ui_stagecontrol):
     def __init__(self,parent=None):

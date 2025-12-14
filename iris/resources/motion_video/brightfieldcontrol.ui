@@ -25,7 +25,7 @@
      <item>
       <widget class="QDockWidget" name="dock_video">
        <property name="features">
-        <set>QDockWidget::DockWidgetFeature::DockWidgetFloatable|QDockWidget::DockWidgetFeature::DockWidgetMovable|QDockWidget::DockWidgetFeature::DockWidgetVerticalTitleBar</set>
+        <set>QDockWidget::DockWidgetFeature::DockWidgetFloatable|QDockWidget::DockWidgetFeature::DockWidgetMovable</set>
        </property>
        <widget class="QWidget" name="dockWidgetContents">
         <layout class="QVBoxLayout" name="verticalLayout_3">
@@ -65,30 +65,6 @@
              </item>
             </layout>
            </item>
-           <item>
-            <layout class="QHBoxLayout" name="horizontalLayout_8">
-             <item>
-              <widget class="QCheckBox" name="chk_dockvideo">
-               <property name="text">
-                <string>Dock</string>
-               </property>
-               <property name="checked">
-                <bool>true</bool>
-               </property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QCheckBox" name="chk_alwaysOnTop">
-               <property name="text">
-                <string>Always on top</string>
-               </property>
-               <property name="checked">
-                <bool>true</bool>
-               </property>
-              </widget>
-             </item>
-            </layout>
-           </item>
           </layout>
          </item>
         </layout>
@@ -97,30 +73,6 @@
      </item>
      <item>
       <layout class="QGridLayout" name="gridLayout">
-       <item row="4" column="0">
-        <widget class="QPushButton" name="btn_setffgain">
-         <property name="text">
-          <string>Set flatfield gain</string>
-         </property>
-        </widget>
-       </item>
-       <item row="4" column="1">
-        <widget class="QPushButton" name="btn_setff">
-         <property name="text">
-          <string>Acquire flatfield correction</string>
-         </property>
-        </widget>
-       </item>
-       <item row="2" column="0" colspan="2">
-        <widget class="QComboBox" name="combo_image_correction"/>
-       </item>
-       <item row="5" column="1">
-        <widget class="QPushButton" name="btn_loadff">
-         <property name="text">
-          <string>Load flatfield correction</string>
-         </property>
-        </widget>
-       </item>
        <item row="5" column="0">
         <widget class="QPushButton" name="btn_saveff">
          <property name="text">
@@ -132,6 +84,30 @@
         <widget class="QPushButton" name="pushButton_2">
          <property name="text">
           <string>PushButton</string>
+         </property>
+        </widget>
+       </item>
+       <item row="4" column="0">
+        <widget class="QPushButton" name="btn_setffgain">
+         <property name="text">
+          <string>Set flatfield gain</string>
+         </property>
+        </widget>
+       </item>
+       <item row="2" column="0" colspan="2">
+        <widget class="QComboBox" name="combo_image_correction"/>
+       </item>
+       <item row="4" column="1">
+        <widget class="QPushButton" name="btn_setff">
+         <property name="text">
+          <string>Acquire flatfield correction</string>
+         </property>
+        </widget>
+       </item>
+       <item row="5" column="1">
+        <widget class="QPushButton" name="btn_loadff">
+         <property name="text">
+          <string>Load flatfield correction</string>
          </property>
         </widget>
        </item>
