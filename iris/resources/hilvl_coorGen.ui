@@ -19,7 +19,7 @@
      <item>
       <widget class="QTabWidget" name="tab_coorGenMod">
        <property name="currentIndex">
-        <number>1</number>
+        <number>0</number>
        </property>
        <widget class="QWidget" name="tab_coorGen">
         <attribute name="title">

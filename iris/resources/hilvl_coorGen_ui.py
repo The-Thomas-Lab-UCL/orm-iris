@@ -110,7 +110,7 @@ class Ui_hilvl_coorGen(object):
 
         self.retranslateUi(hilvl_coorGen)
 
-        self.tab_coorGenMod.setCurrentIndex(1)
+        self.tab_coorGenMod.setCurrentIndex(0)
 
 
         QMetaObject.connectSlotsByName(hilvl_coorGen)

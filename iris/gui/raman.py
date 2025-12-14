@@ -2,7 +2,7 @@
 A class that manages the motion controller aspect for the Ocean Direct Raman spectrometer
 """
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QMutex, QMutexLocker, QWaitCondition
+from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QMutex, QMutexLocker, QWaitCondition, Qt
 
 import os
 import multiprocessing.pool as mpp
@@ -47,10 +47,35 @@ class Wdg_Raman(qw.QWidget, Ui_Raman):
     def __init__(self, parent:Any) -> None:
         super().__init__(parent)
         self.setupUi(self)
-        vlayout = qw.QVBoxLayout()
-        self.setLayout(vlayout)
-        vlayout.addWidget(self.groupBox_plt)
-        vlayout.addWidget(self.groupBox_params)
+        self.setLayout(self.main_layout)
+        
+        # Set the initial dock location
+        self.main_win = self.window()
+        
+        self._register_videofeed_dock()
+        self.dock_plot.installEventFilter(self)
+        self.dock_plot.topLevelChanged.connect(self._handle_videofeed_docking_changed)
+        
+    def _register_videofeed_dock(self):
+        if isinstance(self.main_win, qw.QMainWindow):
+            # This tells the Main Window: "You are the boss of this dock now"
+            self._dock_original_index = self.main_win.layout().indexOf(self.dock_plot)
+            self._dock_original_index = max(0,self._dock_original_index-1)
+            self.main_win.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_plot)
+            self.dock_plot.setFloating(True)
+            self.dock_plot.setFloating(False)
+            self.main_layout.insertWidget(self._dock_original_index, self.dock_plot)
+            
+    @Slot(bool)
+    def _handle_videofeed_docking_changed(self,floating:bool):
+        if floating:
+            if isinstance(self.main_win, qw.QMainWindow):
+                self.main_win.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_plot)
+            self.dock_plot.setFloating(True)
+        else:
+            self.main_layout.insertWidget(self._dock_original_index, self.dock_plot)
+            self.main_layout.insertWidget(self._dock_original_index, self.dock_plot)
+            self.dock_plot.setFloating(False)
 
 class Spectrometer_Control_Workers(QObject):
     """

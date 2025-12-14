@@ -125,7 +125,7 @@ class Ui_main_controller(object):
 
         self.retranslateUi(main_controller)
 
-        self.tabWidget.setCurrentIndex(3)
+        self.tabWidget.setCurrentIndex(0)
 
 
         QMetaObject.connectSlotsByName(main_controller)
