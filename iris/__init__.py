@@ -33,6 +33,8 @@ class LibraryConfigEnum(Enum):
     SPECTROMETER_CALIBRATION_PATH = dict_lib_read['spectrometer_calibration_path']
     OBJECTIVE_CALIBRATION_DIR = dict_lib_read['objective_calibration_directory']
     
+    SPECTROMETER_CALIBRATION_DIR_DEFAULT = './calibrations/spectrometers/'
+    
 ############################################################################################################
 # >>>>>> Data analysis specific parameters <<<<<<
 ############################################################################################################

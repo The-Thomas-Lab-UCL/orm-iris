@@ -269,6 +269,11 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         if not os.path.isdir(dirpath_objcal): os.makedirs(dirpath_objcal,exist_ok=True)
         self._dataHub_imgcal._load_calibration_folder(dirpath=dirpath_objcal,supp_msg=True)
         
+        # > Prepare the spectrometer calibrator directory <
+        dirpath_speccal = LibraryConfigEnum.SPECTROMETER_CALIBRATION_DIR_DEFAULT.value
+        if not os.path.isdir(dirpath_speccal): os.makedirs(dirpath_speccal,exist_ok=True)
+        
+        # > Initialise the high level controllers <
         self._hilvl_coorGen.initialise()
         self._hilvl_raman.initialise()
         print('>>>>> IRIS: INITIALISATIONS COMPLETE <<<<<')

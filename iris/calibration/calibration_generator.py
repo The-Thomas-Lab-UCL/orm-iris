@@ -279,7 +279,7 @@ class Wdg_SpectrometerCalibrationGenerator(Ui_spectrometerCalibrator, qw.QWidget
         filepath = qw.QFileDialog.getSaveFileName(
             self,
             'Save calibration file',
-            '',
+            LibraryConfigEnum.SPECTROMETER_CALIBRATION_DIR_DEFAULT.value,
             'JSON files (*.json)',
         )[0]
         if filepath == '': return
