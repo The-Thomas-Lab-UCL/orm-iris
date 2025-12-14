@@ -34,11 +34,6 @@ class Ui_wdg_objectives(object):
         self.gridLayout_2.setObjectName(u"gridLayout_2")
         self.gridLayout = QGridLayout()
         self.gridLayout.setObjectName(u"gridLayout")
-        self.btn_load = QPushButton(self.groupBox)
-        self.btn_load.setObjectName(u"btn_load")
-
-        self.gridLayout.addWidget(self.btn_load, 1, 0, 1, 1)
-
         self.btn_refresh = QPushButton(self.groupBox)
         self.btn_refresh.setObjectName(u"btn_refresh")
 
@@ -48,6 +43,16 @@ class Ui_wdg_objectives(object):
         self.combo_objective.setObjectName(u"combo_objective")
 
         self.gridLayout.addWidget(self.combo_objective, 0, 0, 1, 2)
+
+        self.btn_load = QPushButton(self.groupBox)
+        self.btn_load.setObjectName(u"btn_load")
+
+        self.gridLayout.addWidget(self.btn_load, 1, 0, 1, 1)
+
+        self.btn_objectiveSetup = QPushButton(self.groupBox)
+        self.btn_objectiveSetup.setObjectName(u"btn_objectiveSetup")
+
+        self.gridLayout.addWidget(self.btn_objectiveSetup, 2, 0, 1, 2)
 
 
         self.gridLayout_2.addLayout(self.gridLayout, 0, 0, 1, 1)
@@ -67,7 +72,8 @@ class Ui_wdg_objectives(object):
     def retranslateUi(self, wdg_objectives):
         wdg_objectives.setWindowTitle(QCoreApplication.translate("wdg_objectives", u"Form", None))
         self.groupBox.setTitle(QCoreApplication.translate("wdg_objectives", u"Objectives", None))
-        self.btn_load.setText(QCoreApplication.translate("wdg_objectives", u"Load objective folder", None))
         self.btn_refresh.setText(QCoreApplication.translate("wdg_objectives", u"Refresh objective folder", None))
+        self.btn_load.setText(QCoreApplication.translate("wdg_objectives", u"Load objective folder", None))
+        self.btn_objectiveSetup.setText(QCoreApplication.translate("wdg_objectives", u"Set up an objective", None))
     # retranslateUi
 

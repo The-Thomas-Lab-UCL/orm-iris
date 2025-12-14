@@ -25,19 +25,13 @@ from iris.data.calibration_objective import ImgMea_Cal, ImgMea_Cal_Hub
 from iris.resources.dataHub_image_ui import Ui_dataHub_image
 from iris.resources.objectives_ui import Ui_wdg_objectives
 
-class Objective_Design(Ui_wdg_objectives,qw.QWidget):
-    def __init__(self,parent):
-        super().__init__(parent)
-        self.setupUi(self)
-        self.setLayout(self.main_layout)
-
 class DataHub_Image_Design(Ui_dataHub_image,qw.QWidget):
     def __init__(self,parent):
         super().__init__(parent)
         self.setupUi(self)
         self.setLayout(self.main_layout)
 
-class Wdg_DataHub_ImgCal(qw.QWidget):
+class Wdg_DataHub_ImgCal(Ui_wdg_objectives,qw.QWidget):
     """
     GUI to show all the ImageMeasurement_Calibration objs stored in the ImageMeasurement_Calibration_Hub.
     It has a combobox to show the available calibrations in a selected folder, and a button to load the
@@ -60,13 +54,8 @@ class Wdg_DataHub_ImgCal(qw.QWidget):
             getter_ImageCalHub (Callable[[], ImageMeasurement_Calibration_Hub]): Function to get the ImageMeasurement_Calibration_Hub
         """
         super().__init__(*args, **kwargs)
-        
-        # > Main widget <
-        self._widget = Objective_Design(self)
-        lyt = qw.QVBoxLayout(self)
-        lyt.addWidget(self._widget)
-        self.setLayout(lyt)
-        wdg = self._widget
+        self.setupUi(self)
+        self.setLayout(self.main_layout)
         
         # Main attributes
         self._getter_CalHub = getter_ImageCalHub
@@ -78,12 +67,12 @@ class Wdg_DataHub_ImgCal(qw.QWidget):
         self._lastdirpath = None
         
         # Setup the combobox and button
-        self._combo_cal = wdg.combo_objective
-        self._btn_loaddir = wdg.btn_load
-        self._btn_refreshdir = wdg.btn_refresh
+        self._combo_cal = self.combo_objective
+        self._btn_loaddir = self.btn_load
+        self._btn_refreshdir = self.btn_refresh
         
         self._btn_loaddir.clicked.connect(lambda: self._load_calibration_folder())
-        self._btn_refreshdir.clicked.connect(lambda: self._refresh_calibration_folder())
+        self._btn_refreshdir.clicked.connect(self._refresh_calibration_folder)
         
         # Observers
         self._list_observer_calibrationChange:list[Callable[[],None]] = []
@@ -167,7 +156,8 @@ class Wdg_DataHub_ImgCal(qw.QWidget):
             self._combo_cal.setCurrentIndex(0)
             self._notify_observers_calibrationChange()
         
-    def _refresh_calibration_folder(self, supp_msg:bool=False) -> None:
+    @Slot()
+    def _refresh_calibration_folder(self) -> None:
         """
         Refreshes the combobox list by re-scanning the calibration folder.
         
@@ -184,12 +174,9 @@ class Wdg_DataHub_ImgCal(qw.QWidget):
             
             self._CalHub.load_calibrations(self._lastdirpath)
             self.update_combobox()
-            if not supp_msg:
-                qw.QMessageBox.information(self, 'Success', 'Calibration folder refreshed successfully.')
-            print(f'Refreshed calibration folder: {self._lastdirpath}')
+            qw.QMessageBox.information(self, 'Success', 'Calibration folder refreshed successfully.')
         except Exception as e:
-            if not supp_msg: qw.QMessageBox.critical(self, 'Error', str(e))
-            print(f'Error refreshing calibration folder: {e}')
+            qw.QMessageBox.critical(self, 'Error', str(e))
         finally:
             self._btn_refreshdir.setEnabled(True)
             self._btn_refreshdir.setText(ori_text)

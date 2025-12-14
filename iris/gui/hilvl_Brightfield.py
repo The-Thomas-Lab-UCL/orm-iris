@@ -114,6 +114,11 @@ class Wdg_HighLvlController_Brightfield(qw.QWidget):
         self._showHints = AppPlotEnum.IMGCAL_SHOWHINTS.value
         
     # >>> Capture and calibration widgets <<<
+        # Setup the calibration widget in a separate main window
+        self._main_window_calibration = qw.QMainWindow(self)
+        self._main_window_calibration.setWindowTitle('Image Calibration Setup')
+        self._main_window_calibration.setMinimumSize(800,600)
+        
         self._wdg_Calibration = Wdg_Calibration(
             parent=self,
             processor=self._processor,
@@ -122,7 +127,15 @@ class Wdg_HighLvlController_Brightfield(qw.QWidget):
             getter_coor=self._getter_coor,
             getter_cameraImage=self._getter_cameraImage,
         )
-        wdg.lyt_holder_objSetup.addWidget(self._wdg_Calibration)
+        self._main_window_calibration.setCentralWidget(self._wdg_Calibration)
+        self._dataHub_imgcal.btn_objectiveSetup.clicked.connect(
+            self._main_window_calibration.show)
+        
+        # Override the main window close event to hide the window instead of closing it
+        def closeEvent_override(event):
+            event.ignore()
+            self._main_window_calibration.hide()
+        self._main_window_calibration.closeEvent = closeEvent_override
         
     # >> Overlay frame <<
         # Heatmap plotter widgets setup
