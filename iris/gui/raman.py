@@ -585,8 +585,8 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._objective_info = DataAnalysisConfigEnum.OBJECTIVE_INFO.value
         
         # Metadata widgets
-        self._lbl_laserpower = qw.QLabel('Laser power: {} mW'.format(self._laserpower_mW))
-        self._lbl_laserwavelength = qw.QLabel('Laser wavelength: {} nm'.format(self._laserwavelength_nm))
+        self._lbl_laserpower = widget.lbl_laserpower_mW
+        self._lbl_laserwavelength = widget.lbl_laserwavelength_nm
         self._lbl_objectiveinfo = qw.QLabel('Objective info: {}'.format(self._objective_info))
         qw.QErrorMessage().showMessage('Objective info save not implemented yet!')
         
@@ -601,6 +601,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         # Bind the value change to setting the laser metadata
         self._entry_laserpower.editingFinished.connect(self._set_laserMetadata)
         self._entry_laserwavelength.editingFinished.connect(self._set_laserMetadata)
+        self._set_laserMetadata()
         
     # >>> Connections setup <<<
         # Connect the append queue observer signal to the acquisition worker
@@ -644,8 +645,8 @@ class Wdg_SpectrometerController(qw.QWidget):
             print('Setting laser metadata...')
             laserpower_mW = float(self._entry_laserpower.text())
             laserwavelength_nm = float(self._entry_laserwavelength.text())
-            self._lbl_laserpower.setText('Laser power: {} mW'.format(laserpower_mW))
-            self._lbl_laserwavelength.setText('Laser wavelength: {} nm'.format(laserwavelength_nm))
+            self._lbl_laserpower.setText(f'{laserpower_mW:.1f}')
+            self._lbl_laserwavelength.setText(f'{laserwavelength_nm:.1f}')
             
             self._laserpower_mW = laserpower_mW
             self._laserwavelength_nm = laserwavelength_nm
