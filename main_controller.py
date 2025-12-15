@@ -409,11 +409,11 @@ if __name__ == '__main__':
         z_controller=zControllerProxy,
         raman_hub=ramanHub,
         stage_hub=stageHub)
-    mainWindow_Controller.show()
     
     mainWindow_Controller.initialisations()
-    
     app.installEventFilter(mainWindow_Controller.shortcutHandler)
+    
+    mainWindow_Controller.show()
     
     app.exec()
     base_manager.shutdown()

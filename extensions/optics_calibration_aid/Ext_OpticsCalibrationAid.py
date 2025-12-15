@@ -115,7 +115,7 @@ class Ext_OpticsCalibrationAid(Extension_MainWindow):
         
     # > Initialise the plot
         self._fig, self._ax = plt.subplots()
-        self._canvas = FigureCanvas(self._fig)
+        self._canvas = FigureCanvas(figure=self._fig)
         self._wdg.lyt_plot.addWidget(self._canvas)
         self._canvas.draw_idle()
         self._init_plot()

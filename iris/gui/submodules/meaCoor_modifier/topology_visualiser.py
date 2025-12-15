@@ -116,7 +116,7 @@ class TopologyVisualiser(Ui_topology_visualiser, qw.QWidget):
         self._figsize_in = (self._figsize_pxl[1]/self._dpi,self._figsize_pxl[0]/self._dpi)
         self._fig, self._ax = plt.subplots(figsize=self._figsize_in)
         
-        self._plt_canvas = FigureCanvas(self._fig)
+        self._plt_canvas = FigureCanvas(figure=self._fig)
         self.lyt_plot.addWidget(self._plt_canvas)
         self._plt_canvas.draw()
         

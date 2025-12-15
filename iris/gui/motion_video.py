@@ -664,7 +664,7 @@ class Wdg_MotionController(qw.QGroupBox):
         """
         # > Video
         lyt = qw.QVBoxLayout()
-        self._lbl_video = ResizableQLabel(min_height=self._video_height,parent=wdg_video)    # A label to show the video feed
+        self._lbl_video = ResizableQLabel(min_height=1,parent=wdg_video)    # A label to show the video feed
 
         wdg_video.wdg_video.setLayout(lyt)
         lyt.addWidget(self._lbl_video)
@@ -827,13 +827,14 @@ class Wdg_MotionController(qw.QGroupBox):
         """
         Sets the camera exposure time in microseconds
         """
+        main_window = self.window()
         if not hasattr(self._camera_ctrl,'set_exposure_time') or not hasattr(self._camera_ctrl,'get_exposure_time'):
-            qw.QMessageBox.critical(self, 'Error', 'Camera does not support exposure time setting')
+            qw.QMessageBox.critical(main_window, 'Error', 'Camera does not support exposure time setting')
             return
         try:
             init_exposure_time = self._camera_ctrl.get_exposure_time()
             new_exposure_time = messagebox_request_input(
-                parent=self,
+                parent=main_window,
                 title='Set exposure time',
                 message='Set exposure time in device unit',
                 default=str(init_exposure_time),
@@ -842,12 +843,12 @@ class Wdg_MotionController(qw.QGroupBox):
                 loop_until_valid=True,
             )
             if new_exposure_time is None: 
-                qw.QMessageBox.information(self, 'Exposure time not set', 'Exposure time not changed')
+                qw.QMessageBox.information(main_window, 'Exposure time not set', 'Exposure time not changed')
                 return
             self._camera_ctrl.set_exposure_time(float(new_exposure_time))
-            qw.QMessageBox.information(self, 'Exposure time set', 'Exposure time set to {} ms'.format(self._camera_ctrl.get_exposure_time()))
+            qw.QMessageBox.information(main_window, 'Exposure time set', 'Exposure time set to {} ms'.format(self._camera_ctrl.get_exposure_time()))
         except Exception as e:
-            qw.QMessageBox.critical(self, 'Error', 'Failed to set exposure time:\n' + str(e))
+            qw.QMessageBox.critical(main_window, 'Error', 'Failed to set exposure time:\n' + str(e))
 
     # @thread_assign
     # def reinitialise_connection(self,unit:Literal['xy','z','camera']) -> threading.Thread:

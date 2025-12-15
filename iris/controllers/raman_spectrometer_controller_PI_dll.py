@@ -167,8 +167,11 @@ class SpectrometerController_PI(Class_SpectrometerController):
             self._cameraId = self._get_cameraId()
             self._cameraHandle = func_Picam_OpenCamera(self._cameraId)
             
-            self._cameraModel = self._cameraId.model.decode('utf-8')
-            self._cameraSerialNumber = self._cameraId.serial_number.decode('utf-8')
+            self._cameraModel = ''
+            self._cameraSerialNumber = ''
+            
+            # self._cameraModel = self._cameraId.model.decode('utf-8')
+            # self._cameraSerialNumber = self._cameraId.serial_number.decode('utf-8')
             
             # > Set the timestamp parameters
             # Enable the timestamp metadata
@@ -188,7 +191,7 @@ class SpectrometerController_PI(Class_SpectrometerController):
         self._set_ROI(row=self._roi_row, col=self._roi_col, bin_row=self._roi_bin[0])
         
         # > Set the default integration time
-        self.set_integration_time_us(100e3)
+        self.set_integration_time_us(int(100e3))
         
         # > Check the acquisition result
         # Check if the acquisition was successful
@@ -365,7 +368,7 @@ class SpectrometerController_PI(Class_SpectrometerController):
         Returns:
             tuple: A tuple containing the minimum, maximum, and increment of the integration time in [device unit] (microseconds for the QE Pro)
         """
-        return (self.integration_time_min, self.integration_time_max, self.integration_time_inc)
+        return (self.integration_time_min*1e3, self.integration_time_max*1e3, self.integration_time_inc*1e3)
     
     def get_integration_time_us(self, fromdev:bool=True) -> int:
         """
@@ -550,10 +553,13 @@ class SpectrometerController_PI(Class_SpectrometerController):
         flg = th.Event()
         th.Thread(target=offafter5sec,args=(flg.set,)).start()
         
-        # plt.ion()  # Turn on interactive mode 
-        # fig = plt.figure()  # Create a figure
-        # ax = fig.add_subplot(111)  # Create a subplot
-
+        plt.ion()  # Turn on interactive mode 
+        fig = plt.figure()  # Create a figure
+        ax = fig.add_subplot(111)  # Create a subplot
+        
+        WAVELENGTH_LABEL = DataAnalysisConfigEnum.WAVELENGTH_LABEL.value
+        INTENSITY_LABEL = DataAnalysisConfigEnum.INTENSITY_LABEL.value
+        
         while not flg.is_set():
             time1 = time.time()
             result = self.measure_spectrum()
@@ -562,23 +568,23 @@ class SpectrometerController_PI(Class_SpectrometerController):
             print("Spectrum shape: {}".format(result[0].shape))
 
             # Clear the previous plot
-            # ax.clear()  
+            ax.clear()  
 
-            # # Plot the new data
-            # ax.plot(result[0][WAVELENGTH_LABEL], result[0][INTENSITY_LABEL])
-            # ax.set_title("Measured spectrum")
-            # ax.set_xlabel(WAVELENGTH_LABEL)
-            # ax.set_ylabel(INTENSITY_LABEL)
+            # Plot the new data
+            ax.plot(result[0][WAVELENGTH_LABEL], result[0][INTENSITY_LABEL])
+            ax.set_title("Measured spectrum")
+            ax.set_xlabel(WAVELENGTH_LABEL)
+            ax.set_ylabel(INTENSITY_LABEL)
 
-            # # Update the plot
-            # fig.canvas.draw()
-            # fig.canvas.flush_events()
+            # Update the plot
+            fig.canvas.draw()
+            fig.canvas.flush_events()
 
             time2 = time.time()
             print("Measurement duration: {}ms".format((time2 - time1)*1000))
             
-        # plt.ioff()  # Turn off interactive mode
-        # plt.show()  # Keep the plot window open at the end
+        plt.ioff()  # Turn off interactive mode
+        plt.show()  # Keep the plot window open at the end
         
         print("----- Self-test completed -----")
 

@@ -21,6 +21,9 @@ class ShortcutHandler(QObject):
         'y': Qt.Key_Y, 'z': Qt.Key_Z,                               # pyright: ignore[reportAttributeAccessIssue] ; Qt.Key exists
         'up': Qt.Key_Up, 'down': Qt.Key_Down, 'left': Qt.Key_Left, 'right': Qt.Key_Right,   # pyright: ignore[reportAttributeAccessIssue] ; Qt.Key exists
         'space': Qt.Key_Space,  # pyright: ignore[reportAttributeAccessIssue] ; Qt.Key exists
+        'f1': Qt.Key_F1, 'f2': Qt.Key_F2, 'f3': Qt.Key_F3, 'f4': Qt.Key_F4, # pyright: ignore[reportAttributeAccessIssue] ; Qt.Key exists
+        'f5': Qt.Key_F5, 'f6': Qt.Key_F6, 'f7': Qt.Key_F7, 'f8': Qt.Key_F8, # pyright: ignore[reportAttributeAccessIssue] ; Qt.Key exists
+        'f9': Qt.Key_F9, 'f10': Qt.Key_F10, 'f11': Qt.Key_F11, 'f12': Qt.Key_F12, # pyright: ignore[reportAttributeAccessIssue] ; Qt.Key exists
     }
     
     _KEY_MAP_MODIFIERS:Dict[str,Qt.Key] = {
@@ -146,36 +149,46 @@ class ShortcutHandler(QObject):
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         """
         Intercepts all application events. Handles raw key press/release events.
+        Only processes events from QWidget objects to avoid issues with layout items.
         """
-        
-        # Check for KeyPress or KeyRelease events
-        if event.type() not in (QEvent.KeyPress, QEvent.KeyRelease): # pyright: ignore[reportAttributeAccessIssue] ; QEvent.Type exists
-            return super().eventFilter(watched, event)
-        
-        key_event: QKeyEvent = event # pyright: ignore[reportAssignmentType] ; event is QEvent but we know it's QKeyEvent here
-        is_release = event.type() == QEvent.KeyRelease # pyright: ignore[reportAttributeAccessIssue] ; QEvent.Type exists
-        
-        # We only process the initial press and final release events.
-        if key_event.isAutoRepeat():
-            return False 
+        try:
+            # Only process events from actual widgets, not layout items or other QObjects
+            if not isinstance(watched, qw.QWidget):
+                return False
+            
+            # Check for KeyPress or KeyRelease events
+            event_type = event.type()
+            if event_type not in (QEvent.KeyPress, QEvent.KeyRelease): # pyright: ignore[reportAttributeAccessIssue] ; QEvent.Type exists
+                return False
+            
+            key_event: QKeyEvent = event # pyright: ignore[reportAssignmentType] ; event is QEvent but we know it's QKeyEvent here
+            is_release = event_type == QEvent.KeyRelease # pyright: ignore[reportAttributeAccessIssue] ; QEvent.Type exists
+            
+            # We only process the initial press and final release events.
+            if key_event.isAutoRepeat():
+                return False 
 
-        key_code = key_event.key()
-        modifiers = key_event.modifiers()
+            key_code = key_event.key()
+            modifiers = key_event.modifiers()
 
-        if modifiers == Qt.NoModifier and key_code in self._press_callbacks: # pyright: ignore[reportAttributeAccessIssue] ; Qt.Modifier exists and is int
-            if not is_release:
-                self._press_callbacks[key_code]()
-            else:
-                self._release_callbacks.get(key_code, lambda: None)()
-            return True
-        elif (modifiers, key_code) in self._press_callbacks_modifiers:
-            if not is_release:
-                self._press_callbacks_modifiers[(modifiers, key_code)]() # pyright: ignore[reportArgumentType] ; Qt.Modifier is int
-            else:
-                self._release_callbacks_modifiers.get((modifiers, key_code), lambda: None)() # pyright: ignore[reportArgumentType, reportCallIssue] ; Qt.Modifier is int ; modifiers is int
-            return True
-                
-        return super().eventFilter(watched, event)
+            if modifiers == Qt.NoModifier and key_code in self._press_callbacks: # pyright: ignore[reportAttributeAccessIssue] ; Qt.Modifier exists and is int
+                if not is_release:
+                    self._press_callbacks[key_code]()
+                else:
+                    self._release_callbacks.get(key_code, lambda: None)()
+                return True
+            elif (modifiers, key_code) in self._press_callbacks_modifiers:
+                if not is_release:
+                    self._press_callbacks_modifiers[(modifiers, key_code)]() # pyright: ignore[reportArgumentType] ; Qt.Modifier is int
+                else:
+                    self._release_callbacks_modifiers.get((modifiers, key_code), lambda: None)() # pyright: ignore[reportArgumentType, reportCallIssue] ; Qt.Modifier is int ; modifiers is int
+                return True
+                    
+            return False
+        except Exception:
+            # If any error occurs in event filtering, just pass the event through
+            # This prevents recursive errors or crashes
+            return False
         
 if __name__ == '__main__':
     from PySide6.QtGui import QCloseEvent, QKeyEvent # <-- Import QKeyEvent

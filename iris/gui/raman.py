@@ -519,7 +519,7 @@ class Wdg_SpectrometerController(qw.QWidget):
     # Plot widget setup
         self._plotter = MeaRaman_Plotter()
         self._fig, self._ax = self._plotter.get_fig_ax()
-        self._fig_widget = FigureCanvas(self._fig)
+        self._fig_widget = FigureCanvas(figure=self._fig)
         widget.lyt_plot.addWidget(self._fig_widget)
         
     # Basic plot control widgets
@@ -599,8 +599,8 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._entry_laserwavelength.setText(str(DataAnalysisConfigEnum.LASER_WAVELENGTH_NM.value))
         
         # Bind the value change to setting the laser metadata
-        self._entry_laserpower.textChanged.connect(lambda: self._set_laserMetadata())
-        self._entry_laserwavelength.textChanged.connect(lambda: self._set_laserMetadata())
+        self._entry_laserpower.editingFinished.connect(self._set_laserMetadata)
+        self._entry_laserwavelength.editingFinished.connect(self._set_laserMetadata)
         
     # >>> Connections setup <<<
         # Connect the append queue observer signal to the acquisition worker
@@ -635,11 +635,13 @@ class Wdg_SpectrometerController(qw.QWidget):
         """
         return self._worker_acquisition
     
+    @Slot()
     def _set_laserMetadata(self):
         """
         Sets the laser metadata based on the entry widgets
         """
         try:
+            print('Setting laser metadata...')
             laserpower_mW = float(self._entry_laserpower.text())
             laserwavelength_nm = float(self._entry_laserwavelength.text())
             self._lbl_laserpower.setText('Laser power: {} mW'.format(laserpower_mW))
@@ -647,6 +649,7 @@ class Wdg_SpectrometerController(qw.QWidget):
             
             self._laserpower_mW = laserpower_mW
             self._laserwavelength_nm = laserwavelength_nm
+            print(f'Laser metadata set: {laserpower_mW} mW, {laserwavelength_nm} nm')
         except Exception as e:
             qw.QErrorMessage(self).showMessage('Invalid laser metadata input')
             self._statbar.showMessage('Invalid laser metadata input',5000)

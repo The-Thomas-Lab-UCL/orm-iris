@@ -3,7 +3,7 @@
 ################################################################################
 ## Form generated from reading UI file 'stagecontrol.ui'
 ##
-## Created by: Qt User Interface Compiler version 6.10.0
+## Created by: Qt User Interface Compiler version 6.10.1
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
@@ -15,30 +15,27 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QCheckBox, QFormLayout, QGridLayout,
-    QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QSizePolicy, QSpacerItem, QTabWidget, QVBoxLayout,
-    QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QGridLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QSizePolicy,
+    QSpacerItem, QTabWidget, QVBoxLayout, QWidget)
 
 class Ui_stagecontrol(object):
     def setupUi(self, stagecontrol):
         if not stagecontrol.objectName():
             stagecontrol.setObjectName(u"stagecontrol")
         stagecontrol.resize(828, 628)
-        self.verticalLayoutWidget_4 = QWidget(stagecontrol)
-        self.verticalLayoutWidget_4.setObjectName(u"verticalLayoutWidget_4")
-        self.verticalLayoutWidget_4.setGeometry(QRect(30, 10, 325, 294))
-        self.verticalLayout = QVBoxLayout(self.verticalLayoutWidget_4)
+        self.verticalLayout_3 = QVBoxLayout(stagecontrol)
+        self.verticalLayout_3.setObjectName(u"verticalLayout_3")
+        self.verticalLayout = QVBoxLayout()
         self.verticalLayout.setObjectName(u"verticalLayout")
-        self.verticalLayout.setContentsMargins(0, 0, 0, 0)
         self.horizontalLayout = QHBoxLayout()
         self.horizontalLayout.setObjectName(u"horizontalLayout")
-        self.label_16 = QLabel(self.verticalLayoutWidget_4)
+        self.label_16 = QLabel(stagecontrol)
         self.label_16.setObjectName(u"label_16")
 
         self.horizontalLayout.addWidget(self.label_16)
 
-        self.lbl_coor_um = QLabel(self.verticalLayoutWidget_4)
+        self.lbl_coor_um = QLabel(stagecontrol)
         self.lbl_coor_um.setObjectName(u"lbl_coor_um")
 
         self.horizontalLayout.addWidget(self.lbl_coor_um)
@@ -46,7 +43,7 @@ class Ui_stagecontrol(object):
 
         self.verticalLayout.addLayout(self.horizontalLayout)
 
-        self.tab_controls = QTabWidget(self.verticalLayoutWidget_4)
+        self.tab_controls = QTabWidget(stagecontrol)
         self.tab_controls.setObjectName(u"tab_controls")
         sizePolicy = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
         sizePolicy.setHorizontalStretch(0)
@@ -55,8 +52,8 @@ class Ui_stagecontrol(object):
         self.tab_controls.setSizePolicy(sizePolicy)
         self.tab_basic = QWidget()
         self.tab_basic.setObjectName(u"tab_basic")
-        self.formLayout = QFormLayout(self.tab_basic)
-        self.formLayout.setObjectName(u"formLayout")
+        self.verticalLayout_4 = QVBoxLayout(self.tab_basic)
+        self.verticalLayout_4.setObjectName(u"verticalLayout_4")
         self.lyt_main = QVBoxLayout()
         self.lyt_main.setObjectName(u"lyt_main")
         self.lyt_param = QGridLayout()
@@ -180,79 +177,77 @@ class Ui_stagecontrol(object):
         self.lyt_main.addLayout(self.lyt_stepmode)
 
 
-        self.formLayout.setLayout(0, QFormLayout.ItemRole.LabelRole, self.lyt_main)
+        self.verticalLayout_4.addLayout(self.lyt_main)
 
         self.tab_controls.addTab(self.tab_basic, "")
         self.tab_advanced = QWidget()
         self.tab_advanced.setObjectName(u"tab_advanced")
-        self.gridLayoutWidget_3 = QWidget(self.tab_advanced)
-        self.gridLayoutWidget_3.setObjectName(u"gridLayoutWidget_3")
-        self.gridLayoutWidget_3.setGeometry(QRect(10, 10, 288, 541))
-        self.lyt_main_grid = QGridLayout(self.gridLayoutWidget_3)
+        self.verticalLayout_2 = QVBoxLayout(self.tab_advanced)
+        self.verticalLayout_2.setObjectName(u"verticalLayout_2")
+        self.lyt_main_grid = QGridLayout()
         self.lyt_main_grid.setObjectName(u"lyt_main_grid")
-        self.lyt_main_grid.setContentsMargins(0, 0, 0, 0)
         self.horizontalSpacer_6 = QSpacerItem(40, 20, QSizePolicy.Policy.MinimumExpanding, QSizePolicy.Policy.Minimum)
 
         self.lyt_main_grid.addItem(self.horizontalSpacer_6, 4, 0, 1, 3)
 
-        self.ent_goto_x_um = QLineEdit(self.gridLayoutWidget_3)
+        self.ent_goto_x_um = QLineEdit(self.tab_advanced)
         self.ent_goto_x_um.setObjectName(u"ent_goto_x_um")
 
         self.lyt_main_grid.addWidget(self.ent_goto_x_um, 0, 1, 1, 1)
 
-        self.label_13 = QLabel(self.gridLayoutWidget_3)
+        self.label_13 = QLabel(self.tab_advanced)
         self.label_13.setObjectName(u"label_13")
 
         self.lyt_main_grid.addWidget(self.label_13, 2, 2, 1, 1)
 
-        self.label_14 = QLabel(self.gridLayoutWidget_3)
+        self.label_14 = QLabel(self.tab_advanced)
         self.label_14.setObjectName(u"label_14")
 
         self.lyt_main_grid.addWidget(self.label_14, 1, 2, 1, 1)
 
-        self.label_15 = QLabel(self.gridLayoutWidget_3)
+        self.label_15 = QLabel(self.tab_advanced)
         self.label_15.setObjectName(u"label_15")
 
         self.lyt_main_grid.addWidget(self.label_15, 0, 2, 1, 1)
 
-        self.label_8 = QLabel(self.gridLayoutWidget_3)
+        self.label_8 = QLabel(self.tab_advanced)
         self.label_8.setObjectName(u"label_8")
 
         self.lyt_main_grid.addWidget(self.label_8, 1, 0, 1, 1)
 
-        self.ent_goto_y_um = QLineEdit(self.gridLayoutWidget_3)
+        self.ent_goto_y_um = QLineEdit(self.tab_advanced)
         self.ent_goto_y_um.setObjectName(u"ent_goto_y_um")
 
         self.lyt_main_grid.addWidget(self.ent_goto_y_um, 1, 1, 1, 1)
 
-        self.ent_goto_z_um = QLineEdit(self.gridLayoutWidget_3)
+        self.ent_goto_z_um = QLineEdit(self.tab_advanced)
         self.ent_goto_z_um.setObjectName(u"ent_goto_z_um")
 
         self.lyt_main_grid.addWidget(self.ent_goto_z_um, 2, 1, 1, 1)
 
-        self.btn_goto = QPushButton(self.gridLayoutWidget_3)
+        self.btn_goto = QPushButton(self.tab_advanced)
         self.btn_goto.setObjectName(u"btn_goto")
 
         self.lyt_main_grid.addWidget(self.btn_goto, 3, 0, 1, 3)
 
-        self.label_5 = QLabel(self.gridLayoutWidget_3)
+        self.label_5 = QLabel(self.tab_advanced)
         self.label_5.setObjectName(u"label_5")
 
         self.lyt_main_grid.addWidget(self.label_5, 0, 0, 1, 1)
 
-        self.label_11 = QLabel(self.gridLayoutWidget_3)
+        self.label_11 = QLabel(self.tab_advanced)
         self.label_11.setObjectName(u"label_11")
 
         self.lyt_main_grid.addWidget(self.label_11, 2, 0, 1, 1)
 
         self.lyt_home = QHBoxLayout()
         self.lyt_home.setObjectName(u"lyt_home")
-        self.btn_home_xy = QPushButton(self.gridLayoutWidget_3)
+        self.btn_home_xy = QPushButton(self.tab_advanced)
         self.btn_home_xy.setObjectName(u"btn_home_xy")
 
         self.lyt_home.addWidget(self.btn_home_xy)
 
-        self.btn_home_z = QPushButton(self.gridLayoutWidget_3)
+        self.btn_home_z = QPushButton(self.tab_advanced)
         self.btn_home_z.setObjectName(u"btn_home_z")
 
         self.lyt_home.addWidget(self.btn_home_z)
@@ -260,9 +255,15 @@ class Ui_stagecontrol(object):
 
         self.lyt_main_grid.addLayout(self.lyt_home, 5, 0, 1, 3)
 
+
+        self.verticalLayout_2.addLayout(self.lyt_main_grid)
+
         self.tab_controls.addTab(self.tab_advanced, "")
 
         self.verticalLayout.addWidget(self.tab_controls)
+
+
+        self.verticalLayout_3.addLayout(self.verticalLayout)
 
 
         self.retranslateUi(stagecontrol)

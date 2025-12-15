@@ -115,7 +115,7 @@ class Wdg_RamanMeasurement_Peakfinder_Plotter(Ui_spectra_peak_finder, qw.QWidget
         # Plot setup
         self._fig, self._ax = self._plotter.get_fig_ax()
         
-        self._fig_canvas = FigureCanvas(self._fig)
+        self._fig_canvas = FigureCanvas(figure=self._fig)
         self.lyt_plot.addWidget(self._fig_canvas)
         self._fig_canvas.draw_idle()
         

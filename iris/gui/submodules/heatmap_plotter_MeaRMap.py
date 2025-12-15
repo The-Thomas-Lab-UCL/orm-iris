@@ -114,7 +114,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
     # >>> Plotter setup <<<
     # > Matplotlib plot setup <
         holder = wdg.lyt_heatmap_holder
-        self._canvas_widget = FigureCanvas(self._fig) # The plot widget
+        self._canvas_widget = FigureCanvas(figure=self._fig) # The plot widget
         holder.addWidget(self._canvas_widget)
         self._canvas_id_interaction = self._canvas_widget.mpl_connect('button_press_event', self._retrieve_click_idxcol) # The plot widget's canvas ID for interaction setups
         self._isplotting = False

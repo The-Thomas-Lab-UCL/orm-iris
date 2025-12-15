@@ -528,42 +528,42 @@ def test_initialise_cal_hub():
     
     return hub,app
 
-def test_calibrator():
-    """
-    Tests the calibrator
-    """
-    hub,app = test_initialise_cal_hub()
-    hub.start()
+# def test_calibrator():
+#     """
+#     Tests the calibrator
+#     """
+#     hub,app = test_initialise_cal_hub()
+#     hub.start()
     
-    # Make a toplevel to show the obtained spectrum
-    import matplotlib as mpl
-    mpl.use('Agg')
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-    import tkinter as tk
+#     # Make a toplevel to show the obtained spectrum
+#     import matplotlib as mpl
+#     mpl.use('Agg')
+#     import matplotlib.pyplot as plt
+#     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+#     import tkinter as tk
     
-    toplvl = tk.Toplevel(app)
-    fig,ax = plt.subplots()
-    canvas = FigureCanvasTkAgg(fig,master=toplvl)
-    canvas.get_tk_widget().pack()
+#     toplvl = tk.Toplevel(app)
+#     fig,ax = plt.subplots()
+#     canvas = FigureCanvasTkAgg(fig)
+#     canvas.get_tk_widget().pack()
     
-    def update_plot():
-        """
-        Updates the plot
-        """
-        while True:
-            ts = get_timestamp_us_int()
-            list_ts,list_mea,_ = hub.get_measurement(timestamp_start=ts,WaitForMeasurement=False)
-            mea = list_mea[-1]
-            ax.clear()
-            ax.plot(mea[DataAnalysisConfigEnum.WAVELENGTH_LABEL.value],mea[DataAnalysisConfigEnum.INTENSITY_LABEL.value])
-            canvas.draw()
+#     def update_plot():
+#         """
+#         Updates the plot
+#         """
+#         while True:
+#             ts = get_timestamp_us_int()
+#             list_ts,list_mea,_ = hub.get_measurement(timestamp_start=ts,WaitForMeasurement=False)
+#             mea = list_mea[-1]
+#             ax.clear()
+#             ax.plot(mea[DataAnalysisConfigEnum.WAVELENGTH_LABEL.value],mea[DataAnalysisConfigEnum.INTENSITY_LABEL.value])
+#             canvas.draw()
             
-            time.sleep(0.1)
+#             time.sleep(0.1)
     
-    threading.Thread(target=update_plot).start()
+#     threading.Thread(target=update_plot).start()
     
-    app.mainloop()
+#     app.mainloop()
 
 def test():
     hub,app = test_initialise_cal_hub()
@@ -636,5 +636,5 @@ def test():
     hub.join()
     print('Test completed')
     
-if __name__ == '__main__':
-    test_calibrator()
+# if __name__ == '__main__':
+    # test_calibrator()
