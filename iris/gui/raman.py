@@ -413,7 +413,7 @@ class Wdg_SpectrometerController(qw.QWidget):
     
     _sig_request_mea_sngl = Signal(AcquisitionParams)
     _sig_request_mea_cont = Signal(AcquisitionParams)
-    _sig_request_mea_stop = Signal()
+    sig_request_mea_stop = Signal()
     
     _sig_request_lastmea = Signal() # Signal to request the last measurement from the acquisition worker
     _sig_append_queue_observer = Signal(queue.Queue, threading.Event)    # Signal to append a queue observer to the acquisition worker
@@ -549,7 +549,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._btn_cont_mea = widget.btn_contmea
         
         self._btn_sngl_mea.clicked.connect(self._perform_single_measurement)
-        self._btn_cont_mea.clicked.connect(self._perform_continuous_measurement)
+        self._btn_cont_mea.clicked.connect(self.perform_continuous_measurement)
         
     # Add buttons and labels for device parameter setups
         ## Label to notify the users of the current device parameters
@@ -773,7 +773,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         # Connection to the acquisition worker
         self._sig_request_mea_sngl.connect(self._worker_acquisition.acquire_single_measurement)
         self._sig_request_mea_cont.connect(self._worker_acquisition.acquire_continuous_measurement)
-        self._sig_request_mea_stop.connect(self._worker_acquisition.stop_acquisition)
+        self.sig_request_mea_stop.connect(self._worker_acquisition.stop_acquisition)
         
         self._sig_request_mea_sngl.connect(self.disable_widgets)
         self._sig_request_mea_cont.connect(lambda: self.disable_widgets(exclude_cont=True))
@@ -817,7 +817,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._entry_ymax.setText('')
     
     @Slot()
-    def _perform_continuous_measurement(self):
+    def perform_continuous_measurement(self):
         """
         Perform continuous measurement until stopped.
         """
@@ -829,7 +829,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._btn_cont_mea.clicked.disconnect()
         self._btn_cont_mea.setText('STOP')
         self._btn_cont_mea.setStyleSheet("background-color: red;")
-        self._btn_cont_mea.clicked.connect(self._sig_request_mea_stop.emit)
+        self._btn_cont_mea.clicked.connect(self.sig_request_mea_stop.emit)
         
         # Sets the integration time and accumulation
         self.update_label_device_parameters(accum=self._accumulation)
@@ -915,9 +915,9 @@ class Wdg_SpectrometerController(qw.QWidget):
         )
         self._fig_widget.draw()
         
-        try: print(f'Gap between plots: {(time.time()-self._t1)*1e3:.0f} ms')
-        except: pass
-        self._t1 = time.time()
+        # try: print(f'Gap between plots: {(time.time()-self._t1)*1e3:.0f} ms')
+        # except: pass
+        # self._t1 = time.time()
         
     def initialise_spectrometer_n_analyser(self):
         """
@@ -959,7 +959,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._btn_cont_mea.clicked.disconnect()
         self._btn_cont_mea.setText('Continuous measurement')
         self._btn_cont_mea.setStyleSheet("")
-        self._btn_cont_mea.clicked.connect(self._perform_continuous_measurement)
+        self._btn_cont_mea.clicked.connect(self.perform_continuous_measurement)
         self._btn_cont_mea.setEnabled(True)
         
     def terminate(self):

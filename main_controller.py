@@ -46,6 +46,10 @@ from iris.utils.general import *
 
 from main_analyser import main_analyser
 
+from extensions.extension_intermediary import Ext_DataIntermediary
+from extensions.extension_template import Extension_MainWindow
+from extensions.optics_calibration_aid.Ext_OpticsCalibrationAid import Ext_OpticsCalibrationAid
+
 # NOTE: controller classes and enums imported lazily inside MainWindow_Controller.__init__
 # to avoid importing hardware SDKs / creating OS handles at module import time
 # (which breaks multiprocessing spawn on Windows).
@@ -139,21 +143,20 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
             coorHub=self._coorHub)
         self.lytBrightfield.addWidget(self._hilvl_brightfield)
         
-    # # >> Set up the data manager <<
-    #     if flg_import_extension:
-    #         self._extension_intermediary = Ext_DataIntermediary(
-    #             raman_controller=raman_controller,
-    #             camera_controller=self._stageHub.get_camera_controller(),
-    #             xy_controller=xy_controller,
-    #             z_controller=z_controller,
-    #             frm_motion_controller=self._motion,
-    #             frm_raman_controller=self._raman,
-    #             frm_highlvl_raman=self._hilvl_raman,
-    #             frm_highlvl_brightfield=self._hilvl_brightfield,
-    #             frm_datahub_mapping=self._dataHub_map,
-    #             frm_datahub_image=self._dataHub_img,
-    #             frm_datahub_imgcal=self._dataHub_imgcal,
-    #             )
+    # >> Set up the data manager <<
+        self._extension_intermediary = Ext_DataIntermediary(
+            raman_controller=raman_controller,
+            camera_controller=self._stageHub.get_camera_controller(),
+            xy_controller=xy_controller,
+            z_controller=z_controller,
+            frm_motion_controller=self._motion,
+            frm_raman_controller=self._raman,
+            frm_highlvl_raman=self._hilvl_raman,
+            frm_highlvl_brightfield=self._hilvl_brightfield,
+            frm_datahub_mapping=self._dataHub_map,
+            frm_datahub_image=self._dataHub_img,
+            frm_datahub_imgcal=self._dataHub_imgcal,
+            )
         
     # >> Set up the calibration generator <<
         self._spectrometer_calibrator = MainWindow_SpectrometerCalibrationGenerator(
@@ -181,15 +184,13 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         menu_analyser.addAction('Show "Main analyser"',self._main_analyser.show)
         # menu_analyser.addAction('Create a new [destructible] "analyser
         
-    # # >> Set up the extensions <<
-    #     self._list_extensions_toplevel:list[Extension_TopLevel] = []
+    # >> Set up the extensions <<
+        self._list_extensions_toplevel:list[Extension_MainWindow] = []
         
-    #     if flg_import_extension: self._set_extensions()
-    #     menu_extensions = tk.Menu(self._menubar,tearoff=0)
-    #     for i,ext in enumerate(self._list_extensions_toplevel):
-    #         ext:tk.Toplevel
-    #         menu_extensions.add_command(label='Show "{}"'.format(ext.title()),command=ext.deiconify)
-    #     self._menubar.add_cascade(label='Extensions',menu=menu_extensions)
+        self._set_extensions()
+        for i,ext in enumerate(self._list_extensions_toplevel):
+            ext:Extension_MainWindow
+            menu_extensions.addAction('Show "{}"'.format(ext.windowTitle()),ext.show)
         
     # >> Set up the controllers menubar <<
         menu_controllers.addAction('Set camera exposure time',self._motion.set_camera_exposure)
@@ -295,24 +296,21 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         event.accept()
         
         
-    # def _set_extensions(self):
-    #     """
-    #     Add the extensions to the main controller
-    #     """
-    #     # > Optics calibration extension
-    #     optics_calibration_extension = Ext_OpticsCalibrationAid(
-    #         master=self,
-    #         intermediary=self._extension_intermediary)
+    def _set_extensions(self):
+        """
+        Add the extensions to the main controller
+        """
+        # > Optics calibration extension
+        optics_calibration_extension = Ext_OpticsCalibrationAid(
+            master=self,
+            intermediary=self._extension_intermediary)
         
-    #     self._list_extensions_toplevel.append(optics_calibration_extension)
+        self._list_extensions_toplevel.append(optics_calibration_extension)
         
-    #     for ext in self._list_extensions_toplevel:
-    #         ext:Extension_TopLevel
-    #         ext.initialise()
-    #         ext.withdraw()
-            
-    #         # Override the close button for the extension to minimise
-    #         ext.protocol("WM_DELETE_WINDOW",ext.withdraw)
+        for ext in self._list_extensions_toplevel:
+            ext:Extension_MainWindow
+            ext.initialise()
+            ext.hide()
         
     # def _set_IRIS_analyser(self):
     #     """
