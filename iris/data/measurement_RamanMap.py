@@ -13,6 +13,8 @@ from copy import deepcopy
 
 import threading
 import queue
+from dataclasses import dataclass
+from typing import TypedDict
 
 import dill
 import sqlite3 as sql
@@ -724,7 +726,7 @@ class MeaRMap_Unit():
             self._dflabel_intensity: intensities
         })
         return df_result
-
+    
     def add_observer(self, observer: Callable) -> None:
         """
         Adds an observer to the list of observers.
@@ -1917,7 +1919,8 @@ class MeaRMap_Handler():
         savepath = os.path.join(savedirpath,savename+'.db')
         thread = self.save_MappingHub_database(hub,savedirpath=savedirpath,savename=savename)
         thread.join()
-        mapping_measurement_loaded = self.load_MappingMeasurementHub_database(savepath)
+        hub = MeaRMap_Hub()
+        mapping_measurement_loaded = self.load_MappingMeasurementHub_database(hub,savepath)
         
         savename2 = 'test - Copy2'
         thread = self.save_MappingHub_database(mapping_measurement_loaded,savedirpath=savedirpath,savename=savename2)
@@ -1977,10 +1980,47 @@ class PlotterOptions(Enum):
     """
     Enum class for the plotter options
     """
-    interp = 'Triangle interpolation'
-    scatt = 'Scatter plot'
+    interpolation = 'Triangle interpolation'
+    scattering = 'Scatter plot'
     empty = 'Empty plot'
-    scatt_kw_size = 'size'
+    
+@dataclass
+class PlotterExtraParamsBase:
+    """
+    Base dataclass for the plotter parameters
+    """
+    pass
+
+@dataclass
+class PlotterExtParams_Scattering(PlotterExtraParamsBase):
+    """
+    Dataclass for the scattering plotter parameters
+    """
+    marker_size:float = 20.0
+    
+@dataclass
+class PlotterExtParams_Empty(PlotterExtraParamsBase):
+    """
+    Dataclass for the empty plotter parameters
+    """
+    pass
+
+@dataclass
+class PlotterExtParams_Interpolation(PlotterExtraParamsBase):
+    """
+    Dataclass for the interpolation plotter parameters
+    """
+    pass
+    
+@dataclass
+class PlotterParams():
+    """
+    Dataclass for the plotter parameters
+    """
+    mapping_unit:MeaRMap_Unit|None=None
+    wavelength:float|None=None
+    clim:tuple[float|None,float|None]|None=None
+    title = '2D Mapping'
     
 class MeaRMap_Plotter:
     """
@@ -1990,20 +2030,6 @@ class MeaRMap_Plotter:
         self._fig, self._ax = plt.subplots()
         self._cbar:Colorbar|None = None
         
-        self.dict_plotter_options = {
-            PlotterOptions.interp.value: self.plot_heatmap_interp,
-            PlotterOptions.scatt.value: self.plot_heatmap_scatter,
-            PlotterOptions.empty.value: self.plot_heatmap_nothing
-        }
-        
-        self.dict_plotter_kwargs = {
-            PlotterOptions.interp.value: {},
-            PlotterOptions.scatt.value: {
-                PlotterOptions.scatt_kw_size.value: (float,'Size of the scatter plot')
-            },
-            PlotterOptions.empty.value: {}
-        }
-        
     def get_figure_axes(self) -> tuple[Figure,Axes]:
         """
         Returns the figure and axes of the plotter
@@ -2012,54 +2038,43 @@ class MeaRMap_Plotter:
             tuple[Figure,Axes]: figure and axes of the plotter
         """
         return (self._fig,self._ax)
-        
-    def get_plotter_options(self) -> tuple[dict,dict]:
-        """
-        Returns the plotter options
-        
-        Returns:
-            tuple: dictionary of plotter options and dictionary of plotter kwargs
-            
-        Note:
-            - The plotter options are the plotter functions corresponding to the plotter options
-            - The plotter kwargs are the arguments to be passed to the plotter options containing
-                a dict of tuples of (arg_name,arg_type) for each argument, and the key is the plotter option
-                corresponding to the plotter option in the plotter options dictionary
-        """
-        return (self.dict_plotter_options,self.dict_plotter_kwargs)
-
-    def plot_typehinting(
-        self,
-        mapping_unit:MeaRMap_Unit|None=None,
-        wavelength:float|None=None,
-        clim:tuple[float|None,float|None]|None=None,
-        title = '2D Mapping'
-        ) -> None:
-        """
-        DOES NOTHING but to show the type hinting for the plotter functions
-        
-        Plots a heatmap plot from a mapping unit, given its coordinates, and labels indicating the data column info.
-        
-        Note:
-            - not providing the mapping_unit will plot and return an empty heatmap
-            - providing a figure and axis will plot the heatmap on the given figure and axis. BOTH fig and ax should be provided.
-            - providing a colorbar will reset the colorbar. If no fig and ax are provided, this option is ignored.
-            
-        Args:
-            mapping_unit (MappingMeasurement_Unit): MappingMeasurement_Unit object to plot
-            wavelength (float): wavelength to plot the heatmap
-            clim (tuple[float,float], optional): color limit for the heatmap. Defaults to None.
-            title (str, optional): title of the resulting graph. Defaults to '2D Mapping'.
-        """
-        raise NotImplementedError('plot_typehinting: This function is only for typehinting.')
     
-    def plot_heatmap_nothing(
-        self,
-        mapping_unit:MeaRMap_Unit|None=None,
-        wavelength:float|None=None,
-        clim:tuple[float,float]|None=None,
-        title = '2D Mapping',
-        ) -> None:
+    def get_plotter_params(self, plotter:PlotterOptions) -> PlotterExtraParamsBase:
+        """
+        Returns the parameter dataclass for the given plotter option
+
+        Args:
+            plotter (PlotterOptions): Plotter to get the parameters for
+        """
+        if plotter == PlotterOptions.scattering:
+            return PlotterExtParams_Scattering()
+        elif plotter == PlotterOptions.interpolation:
+            return PlotterExtParams_Interpolation()
+        elif plotter == PlotterOptions.empty:
+            return PlotterExtParams_Empty()
+    
+    def initialise_empty_plot(self) -> None:
+        """
+        Initialises an empty plot
+        """
+        empty_params = PlotterParams()
+        self._plot_heatmap_empty(empty_params)
+    
+    def plot_heatmap(self, plotter:PlotterOptions, params:PlotterParams, params_extra:PlotterExtraParamsBase|None = None) -> None:
+        """
+        Plots a heatmap plot from a mapping unit, given its coordinates, and labels indicating the data column info.
+        """
+        if plotter == PlotterOptions.interpolation:
+            self._plot_heatmap_interp(params)
+        elif plotter == PlotterOptions.scattering:
+            params_extra = params_extra if isinstance(params_extra,PlotterExtParams_Scattering) else PlotterExtParams_Scattering()
+            self._plot_heatmap_scatter(params, params_extra)
+        elif plotter == PlotterOptions.empty:
+            self._plot_heatmap_empty(params)
+        else:
+            raise ValueError('plot_heatmap: The plotter option is not recognised: {}'.format(plotter))
+    
+    def _plot_heatmap_empty(self,params:PlotterParams,*args, **kwargs) -> None:
         """
         Plots nothing but returns the figure, axis, and colorbar
 
@@ -2069,6 +2084,9 @@ class MeaRMap_Plotter:
             clim (tuple[float,float], optional): color limit for the heatmap. Defaults to None.
             title (str, optional): title of the resulting graph. Defaults to '2D Mapping'.
         """
+        mapping_unit = params.mapping_unit
+        wavelength = params.wavelength
+        title = params.title
         try: x_val, y_val, _ = self._retrieve_heatmap_data(mapping_unit, wavelength)
         except ValueError:
             x_val = [0,1]
@@ -2091,13 +2109,7 @@ class MeaRMap_Plotter:
         self._ax.set_xlim(x_min,x_max)
         self._ax.set_ylim(y_min,y_max)
     
-    def plot_heatmap_interp(
-        self,
-        mapping_unit:MeaRMap_Unit|None=None,
-        wavelength:float|None=None,
-        clim:tuple[float,float]|None=None,
-        title = '2D Mapping',
-        ) -> None:
+    def _plot_heatmap_interp(self, params:PlotterParams, *args, **kwargs) -> None:
         """
         Plots a heatmap plot from a mapping unit, given its coordinates, and labels indicating the data column info.
         
@@ -2114,6 +2126,11 @@ class MeaRMap_Plotter:
         """
         # Do the calculation first for a lower figure off time
         # (i.e., when the ax is cleared and not yet reassigned)
+        mapping_unit = params.mapping_unit
+        wavelength = params.wavelength
+        clim = params.clim
+        title = params.title
+        
         try: x_val, y_val, intensity = self._retrieve_heatmap_data(mapping_unit, wavelength)
         except ValueError as e: pass; return
         except Exception as e: print(f'Error in plot_heatmap_interp: {e}'); return
@@ -2150,7 +2167,7 @@ class MeaRMap_Plotter:
                 list(clim).sort()
             self._cbar.mappable.set_clim(vmin=clim[0],vmax=clim[1])
 
-    def _retrieve_heatmap_data(self, mapping_unit, wavelength):
+    def _retrieve_heatmap_data(self, mapping_unit:MeaRMap_Unit|None, wavelength:float|None):
         if isinstance(mapping_unit,MeaRMap_Unit) and wavelength is not None:    
             # Retrieve the measurement data
             df_plot:pd.DataFrame = mapping_unit.get_heatmap_table(wavelength)
@@ -2168,14 +2185,7 @@ class MeaRMap_Plotter:
         else: raise ValueError('_retrieve_heatmap_data: Invalid mapping_unit or wavelength input.')
         return x_val,y_val,intensity
     
-    def plot_heatmap_scatter(
-        self,
-        mapping_unit:MeaRMap_Unit|None=None,
-        wavelength:float|None=None,
-        clim:tuple[float,float]|None=None,
-        title = '2D Mapping',
-        size:float|None=None,
-        ) -> None:
+    def _plot_heatmap_scatter(self, params:PlotterParams, params_extra:PlotterExtParams_Scattering|None, *args, **kwargs) -> None:
         """
         Plots a heatmap plot from a mapping unit, given its coordinates, and labels indicating the data column info.
         
@@ -2191,6 +2201,12 @@ class MeaRMap_Plotter:
             title (str, optional): title of the resulting graph. Defaults to '2D Mapping'.
             size (float, optional): size of the scatter plot. Defaults to None.
         """
+        mapping_unit = params.mapping_unit
+        wavelength = params.wavelength
+        clim = params.clim
+        title = params.title
+        size = params_extra.marker_size
+        
         try: x_val, y_val, intensity = self._retrieve_heatmap_data(mapping_unit, wavelength)
         except ValueError as e: print(f'Error in plot_heatmap_scatter: {e}'); return
         

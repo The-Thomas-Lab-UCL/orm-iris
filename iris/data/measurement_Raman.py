@@ -30,6 +30,8 @@ import queue
 import os
 from typing import Self, Literal
 
+from dataclasses import dataclass
+
 import bisect
 
 from glob import glob
@@ -651,7 +653,7 @@ class MeaRaman_Plotter():
         """
         return self._fig, self._ax
     
-    def plot_RamanMeasurement_new(
+    def plot(
         self,
         measurement:MeaRaman,
         title='Spectra',
@@ -690,108 +692,8 @@ class MeaRaman_Plotter():
         ax.set_title(title)
         ax.set_xlim(limits[0], limits[1])
         ax.set_ylim(limits[2], limits[3])
-    
-    def plot_RamanMeasurement(
-        self,
-        measurement:MeaRaman|None=None,
-        title='Spectra',
-        showplot=False,
-        plt_size:list|None=None,
-        flg_plot_ramanshift=False,
-        plot_raw:bool=False,
-        limits:tuple[float,float,float,float]|tuple[None,None,None,None]=(None,None,None,None),
-        ) -> np.ndarray:
-        """
-        Plots a given spectra.
-        
-        Args:
-            measurement (RamanMeasurement): Measurement instance to plot.
-            title (str, optional): Title of the plot. Defaults to 'Spectra'.
-            showplot (bool, optional): Show the plot with a matplotlib window. Defaults to False.
-            plt_size (list, optional): Manually change the plot size, [y-pixel, x-pixel].
-            flg_plot_ramanshift (bool, optional): Plot the Raman shift instead of the wavelength. Defaults to False.
-            plot_raw (bool, optional): Plot the raw data instead of the analysed data. Defaults to False.
-            limits (tuple[float,float,float,float], optional): Limits of the plot (xmin,xmax,ymin,ymax). Defaults to (None,None,None,None).
-        
-        Returns:
-            ndarray: The resized image of the plot.
-        
-        Note:
-            - If the given 'spectra' variable is not a pandas DataFrame, a white image will be returned.
-            - The plot will be resized based on the specified plt_size or the default plt_size if not provided.
-            - Raman shift will be plot if flg_plot_ramanshift is True.
-        """
-        if isinstance(plt_size,type(None)):
-            plt_size = self.plt_size
-        
-        # Check if the given 'spectra' variable is a measurement. Otherwise, returns an white image
-        if not isinstance(measurement,MeaRaman): return np.full((plt_size[0],plt_size[1], 3), 255, dtype=np.uint8)
-        
-        # Initialises the plot
-        if not plot_raw: df = measurement.get_analysed()
-        else: df = measurement.get_raw_list()[-1]
-        list_wavelength = df[measurement.label_wavelength]
-        list_intensity = df[measurement.label_intensity]
-        
-        dpi = plt.rcParams['figure.dpi']
-        plt_size_in = [int(plt_size[0]/dpi),int(plt_size[1]/dpi)]
-        fig = plt.figure(figsize=plt_size_in,constrained_layout=True)
-        # plt.tight_layout(h_pad=0.5,w_pad=0.5)
-        
-        if flg_plot_ramanshift:
-            laser_wavelength = measurement.get_laser_params()[1]
-            list_raman_shift = [convert_wavelength_to_ramanshift(wavelength,laser_wavelength) for wavelength in list_wavelength]
-            list_spectralposition = list_raman_shift
-            xlabel = self.ramanshift_name
-        else:
-            list_spectralposition = list_wavelength
-            xlabel = self.wavelength_name
-        # Slice the list spectral position based on the given x limits
-        if isinstance(limits[0],float):
-            idx_start = bisect.bisect_left(list_spectralposition,limits[0])
-            list_spectralposition = list_spectralposition[idx_start:]
-            list_intensity = list_intensity[idx_start:]
-        if isinstance(limits[1],float):
-            idx_end = bisect.bisect_right(list_spectralposition,limits[1])
-            list_spectralposition = list_spectralposition[:idx_end]
-            list_intensity = list_intensity[:idx_end]
-        
-        plt.plot(list_spectralposition, list_intensity)
-        plt.xlabel(xlabel)
-        plt.ylabel(self.intensity_name)
-        plt.title(title)
-        
-        xmin = float(limits[0]) if isinstance(limits[0],(float,int)) else None
-        xmax = float(limits[1]) if isinstance(limits[1],(float,int)) else None
-        ymin = float(limits[2]) if isinstance(limits[2],(float,int)) else None
-        ymax = float(limits[3]) if isinstance(limits[3],(float,int)) else None
 
-        plt.xlim(xmin,xmax)
-        plt.ylim(ymin,ymax)
-        
-        # Get the plot as a NumPy array directly
-        fig = plt.gcf()  # Get the current figure
-        fig.canvas.draw()  # Force a draw 
-
-        renderer = fig.canvas.get_renderer()
-
-        # Extract pixel data as RGBA and convert to BGRA
-        rgba_data = renderer.buffer_rgba()
-        img = np.frombuffer(rgba_data, dtype=np.uint8).reshape(fig.canvas.get_width_height()[::-1] + (4,))
-
-        # Remove alpha channel (OpenCV expects BGR)
-        img = img[..., :3]
-
-        # Resize the image
-        img_resized = cv2.resize(img, (plt_size[0], plt_size[1]))
-        
-        if showplot:
-            plt.show()
-        else:
-            plt.close()
-        return img_resized
-
-    def plot_with_scatter_RamanMeasurement(
+    def plot_scatter(
             self,
             measurement:MeaRaman|None,
             title='Spectra',

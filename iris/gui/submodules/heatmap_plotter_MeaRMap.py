@@ -2,16 +2,19 @@
 A class to control the plot for SERS mapping measurements. To be used inside the high level controller module.
 """
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QTimer, QCoreApplication, Qt
+from PySide6.QtCore import Signal, Slot, QTimer, QCoreApplication, Qt, QObject, QThread
 
 import matplotlib
 import matplotlib.backend_bases
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from matplotlib.axes import Axes
 matplotlib.use('Agg')   # Force matplotlib to use the backend to prevent memory leak
 
 import threading
 import queue
 from typing import Any
+from dataclasses import dataclass, fields
 
 if __name__ == '__main__':
     import sys
@@ -20,7 +23,7 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
 
 from iris.utils.general import *
-from iris.data.measurement_RamanMap import MeaRMap_Hub,MeaRMap_Unit, MeaRMap_Plotter
+from iris.data.measurement_RamanMap import MeaRMap_Hub,MeaRMap_Unit, MeaRMap_Plotter, PlotterOptions, PlotterParams, PlotterExtraParamsBase
 
 from iris.resources.heatmap_plotter_ui import Ui_HeatmapPlotter
 
@@ -58,6 +61,56 @@ class HeatmapPlotter_Design(Ui_HeatmapPlotter, qw.QWidget):
             self.main_layout.insertWidget(self._dock_original_index, self.dock_plot)
             self.dock_plot.setFloating(False)
 
+@dataclass
+class XYLimits:
+    x_min:float|None = None
+    x_max:float|None = None
+    y_min:float|None = None
+    y_max:float|None = None
+
+class HeatmapPlotter_Worker(QObject):
+    
+    sig_plotready = Signal()  # Signal emitted when the plot is ready to be drawn in the main thread
+    sig_finished_plotting = Signal()  # Signal emitted when the plotting is finished
+
+    def __init__(self, plotter:MeaRMap_Plotter):
+        super().__init__()
+        self._plotter = plotter
+        
+    @Slot(PlotterOptions, PlotterParams, PlotterExtraParamsBase, XYLimits)
+    def plot_heatmap(self, option:PlotterOptions, params:PlotterParams, extra_params:PlotterExtraParamsBase,
+                     limits_xy:XYLimits) -> None:
+        """
+        Extracts the necessary measurement data to make the heatmap plot and then pass it onto the
+        plotting queue
+        """
+        mappingUnit = params.mapping_unit
+        if not isinstance(mappingUnit, MeaRMap_Unit) or not mappingUnit.check_measurement_and_metadata_exist():
+            self.sig_finished_plotting.emit()
+            return
+        
+        wavelength = params.wavelength
+        if isinstance(wavelength, (int,float)):
+            ramanshift = mappingUnit.convert(wavelength=wavelength) # pyright: ignore[reportAssignmentType] ; In this case wavelength is guaranteed to be float
+            ramanshift_str = '{:.1f}'.format(ramanshift)
+        else:
+            ramanshift_str = 'N/A'
+        
+        title = f'{mappingUnit.get_unit_name()}\n{ramanshift_str}cm⁻¹ [{wavelength}nm]'
+        params.title = title
+        self._plotter.plot_heatmap(
+            plotter=option,
+            params=params,
+            params_extra=extra_params,
+        )
+        ax = self._plotter.get_figure_axes()[1]
+        
+        ax.set_xlim(limits_xy.x_min, limits_xy.x_max)
+        ax.set_ylim(limits_xy.y_min, limits_xy.y_max)
+        
+        self.sig_plotready.emit()
+        self.sig_finished_plotting.emit()
+
 class Wdg_MappingMeasurement_Plotter(qw.QWidget):
     
     sig_plotclicked_id = Signal(str)  # Signal emitted when the plot is clicked, sends (mappingUnit_ID (str))
@@ -66,6 +119,8 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
     
     _sig_request_update_plot = Signal()  # Signal to update the plot in the main thread
     _sig_request_update_comboboxes = Signal()  # Signal to update the comboboxes in the main thread
+    
+    _sig_udpate_plot = Signal(PlotterOptions, PlotterParams, PlotterExtraParamsBase, XYLimits)  # Signal to update the plot in the worker thread
     
     def __init__(
         self,
@@ -99,8 +154,8 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
     # >>> Plot widgets and parameters set up <<<
     # > Parameters <
         # Analysers for data analysis:
-        self._mapping_Plotter = MeaRMap_Plotter()
-        self._fig, self._ax = self._mapping_Plotter.get_figure_axes()
+        self._plotter = MeaRMap_Plotter()
+        self._fig, self._ax = self._plotter.get_figure_axes()
         
         # Latest measurement data storage for plotting purposes only
         self._eve_plot_req = threading.Event()  # Event to request a plot update
@@ -119,9 +174,8 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         self._canvas_id_interaction = self._canvas_widget.mpl_connect('button_press_event', self._retrieve_click_idxcol) # The plot widget's canvas ID for interaction setups
         self._isplotting = False
         self._isupdating_comboboxes = False
-        
-        # Initialise the plot with a dummy plot
-        self._func_current_plotter()
+        self._plotter.initialise_empty_plot()
+        self._canvas_widget.draw_idle()
         
     # > Plot control widgets <
         # Subframes
@@ -146,7 +200,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
     # > Set the connections <<
         # Plot update timer
         # self._sig_request_update_plot.connect(lambda: self.plot_heatmap())
-        self._sig_request_update_plot.connect(lambda: self.request_plot_heatmap())
+        self._sig_request_update_plot.connect(self.request_plot_heatmap)
         self._timer_plot = QTimer(self)
         self._timer_plot.setInterval(200)
         self._timer_plot.timeout.connect(self._process_plot_request)
@@ -164,6 +218,22 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         
     # > Reset button <
         self._widget.btn_plotterreset.clicked.connect(lambda: self.reinitialise_plotter())
+        
+        self._init_worker_thread()
+        
+    def _init_worker_thread(self):
+        """
+        Initializes the worker thread for plotting
+        """
+        self._thread_plotter = QThread()
+        self._worker_plotter = HeatmapPlotter_Worker(plotter=self._plotter)
+        self._worker_plotter.moveToThread(self._thread_plotter)
+        self._thread_plotter.start()
+        
+        # Connect the signals
+        self._sig_udpate_plot.connect(self._worker_plotter.plot_heatmap)
+        self._worker_plotter.sig_plotready.connect(self.on_plotter_worker_plotready)
+        self._worker_plotter.sig_finished_plotting.connect(self.on_plotter_worker_finished)
         
     def _init_plot_control_widgets(self):
         """
@@ -218,13 +288,17 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         """
         Initialize the plotter option widgets
         """
-        self._func_current_plotter = self._mapping_Plotter.plot_typehinting
-        self._dict_plotter_kwargs_widgets = {}  # Dictionary to store the plotter options
-        self._dict_plotter_opts, self._dict_plotter_opts_kwargs = self._mapping_Plotter.get_plotter_options()
+        self._dict_plotter_opts = {option.value: option for option in PlotterOptions}
+        self._dict_plotter_opts_kwargs = {
+            option.value: self._plotter.get_plotter_params(option)
+            for option in PlotterOptions
+        }
+        self._dict_plotter_kwargs_widgets:dict[str,qw.QLineEdit] = {}
         
         self._combo_plotter = self._widget.combo_plotoption
         self._combo_plotter.addItems(list(self._dict_plotter_opts.keys()))
-        self._combo_plotter.currentTextChanged.connect(lambda chosen_option: self._setup_plotter_options(chosen_option))
+        self._combo_plotter.currentTextChanged.connect(self._setup_plotter_options)
+        self._combo_plotter.setCurrentIndex(0)
         
         self._setup_plotter_options()
         
@@ -235,64 +309,13 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         print('Reinitialising plotter... (not yet implemented)')
         self._update_comboboxes()
         
-    # @thread_assign
-    # def _reinitialise_auto_plot(self) -> threading.Thread: # pyright: ignore[reportReturnType]
-    #     """
-    #     Initialise the auto plot for the mapping plot
-    #     """
-    #     # Destroy the previous canvas plot and widget to prevent memory leak
-    #     try:
-    #         if isinstance(self._plt_cbar,matplotlib.colorbar.Colorbar):
-    #             self._plt_cbar.remove()
-    #     except Exception as e: print('_reinitialise_auto_plot',e)
-        
-    #     try:
-    #         if isinstance(self._plt_ax,matplotlib.axes.Axes):
-    #             self._plt_ax.clear()
-    #     except Exception as e: print('_reinitialise_auto_plot',e)
-        
-    #     try:
-    #         if isinstance(self._plt_fig,matplotlib.figure.Figure) and isinstance(self._canvas_id_interaction,int):
-    #             self._plt_fig.canvas.mpl_disconnect(self._canvas_id_interaction)
-    #     except Exception as e: print('_reinitialise_auto_plot',e)
-        
-    #     try: plt.close(fig=self._plt_fig)
-    #     except Exception as e: print('_reinitialise_auto_plot',e)
-        
-    #     # Reset the plot    
-    #     self._plt_fig,self._plt_ax = plt.subplots(1,1,figsize=self._figsize_in)
-        
-    #     # Reset the combo boxes
-    #     self._reset_plot_combobox()
-        
-    #     # Destroy the previous canvas plot and widget
-    #     if not isinstance(self._canvas_id_interaction,type(None)):
-    #         self._plt_fig.canvas.mpl_disconnect(self._canvas_id_interaction)
-    #     self._canvas_widget.destroy()
-        
-    #     # Reset the canvas plot and widget
-    #     self._canvas_widget = FigureCanvasTkAgg(self._plt_fig,master=self._frm_plot)
-    #     self._canvas_widget = self._canvas_widget.get_tk_widget()
-        
-    #     row,col,rowspan,colspan = self._canvas_grid_loc
-    #     self._canvas_widget.grid(row=row,column=col,rowspan=rowspan,columnspan=colspan)
-        
-    #     # Reset the label for the clicked coordinates
-    #     self._lbl_coordinates.setText(self._lbl_coordinates_ori)
-        
-    #     # Reset the click event for the plot
-    #     self._canvas_id_interaction = self._canvas_widget.mpl_connect('button_press_event',self._retrieve_click_idxcol)
-        
-    #     self.refresh_comboboxes()
-        
-    @Slot(str)
-    def _setup_plotter_options(self, chosen_option:str|None = None):
+    @Slot()
+    def _setup_plotter_options(self):
         """
         Set up the plotter options for the current mapping plot
         """
-        if chosen_option is None: chosen_option = list(self._dict_plotter_opts.keys())[0]
-        self._func_current_plotter = self._dict_plotter_opts[chosen_option]
-        kwargs = self._dict_plotter_opts_kwargs[chosen_option]
+        chosen_option = self._combo_plotter.currentText()
+        self._plotter_extra_params:PlotterExtraParamsBase= self._dict_plotter_opts_kwargs[chosen_option]
         
         # Destroy the previous widgets
         holder = self._widget.lyt_plot_params # Form layout
@@ -302,7 +325,9 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         
         # Auto generate widgets for the plotter options
         self._dict_plotter_kwargs_widgets.clear()
-        for i,key in enumerate(kwargs.keys()):
+
+        for field in fields(self._plotter_extra_params):
+            key = field.name
             entry = qw.QLineEdit()
             entry.editingFinished.connect(lambda: self._sig_request_update_plot.emit())
             holder.addRow(f'{key}:',entry)
@@ -343,7 +368,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
             "the mappingUnit set must be obtained from the internal self._mappingHub."
         self._current_mappingUnit = mappingUnit
         self._current_mappingUnit.add_observer(self._sig_request_update_plot.emit)
-
+        
     def _set_combobox_closest_value(self, new_val:str):
         """
         Set the combobox to the closest wavelength to the entered value
@@ -469,6 +494,38 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         self._combo_plot_SpectralPosition.blockSignals(False)
         self._isupdating_comboboxes = False
         
+    def _get_plotter_option(self) -> PlotterOptions:
+        """
+        Get the current plotter option from the combobox
+        
+        Returns:
+            PlotterOptions: The current plotter option
+        """
+        chosen_option = self._combo_plotter.currentText()
+        return self._dict_plotter_opts[chosen_option]
+        
+    def _get_plotter_extra_params(self) -> PlotterExtraParamsBase:
+        """
+        Get the current plotter extra parameters from the widgets
+        
+        Returns:
+            PlotterExtraParamsBase: The current plotter extra parameters
+        """
+        for field in fields(self._plotter_extra_params):
+            key = field.name
+            entry = self._dict_plotter_kwargs_widgets[key]
+            val_type = field.type
+            try:
+                if val_type == float:
+                    setattr(self._plotter_extra_params, key, float(entry.text()))
+                elif val_type == int:
+                    setattr(self._plotter_extra_params, key, int(float(entry.text())))
+                else:
+                    setattr(self._plotter_extra_params, key, entry.text())
+            except:
+                setattr(self._plotter_extra_params, key, field.default)
+        return self._plotter_extra_params
+        
     @Slot()
     def request_plot_heatmap(self) -> None:
         """
@@ -520,6 +577,20 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
             self._current_mappingUnit.add_observer(self._sig_request_update_plot.emit)
         
         self._sig_request_update_comboboxes.emit()
+        
+    @Slot()
+    def on_plotter_worker_finished(self) -> None:
+        """
+        Slot called when the plotter worker has finished plotting
+        """
+        self._isplotting = False
+        
+    @Slot()
+    def on_plotter_worker_plotready(self) -> None:
+        """
+        Slot called when the plotter worker has finished plotting and the plot is ready to be drawn
+        """
+        self._canvas_widget.draw_idle()
     
     def plot_heatmap(self):
         """
@@ -538,7 +609,17 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         if wavelength is None: return
         
         self._isplotting = True
-        ramanshift:float = mappingUnit.convert(wavelength=wavelength) # pyright: ignore[reportAssignmentType] ; In this case wavelength is guaranteed to be float
+        self._current_mappingUnit = mappingUnit
+        
+        #PlotterOptions, PlotterParams, PlotterExtraParamsBase, XYLimits
+        options = self._get_plotter_option()
+        params = PlotterParams(
+            mapping_unit=mappingUnit,
+            wavelength=wavelength,
+            clim=None,
+        )
+        params_extra = self._get_plotter_extra_params()
+        limits_xy = self._get_plot_xylim()
         
         try: clim_min = float(self._entry_plot_clim_min.text())
         except: clim_min = None
@@ -546,20 +627,15 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         except: clim_max = None
         clim = (clim_min,clim_max)
         if self._chk_auto_clim.isChecked(): clim = (None,None)
-
-        title = mappingUnit.get_unit_name()+'\n{:.0f}cm⁻¹ [{:.1f}nm]'.format(ramanshift,wavelength)
-        kwargs = self._get_plotter_kwargs()
-        self._func_current_plotter(
-            mapping_unit=mappingUnit,
-            wavelength=wavelength,
-            clim=clim,
-            title=title,
-            **kwargs
-        )
-        self._set_plot_xylim()
-        self._canvas_widget.draw_idle()
+        params.clim = clim
         
-        self._current_mappingUnit = mappingUnit
+        self._sig_udpate_plot.emit(
+            options,
+            params,
+            params_extra,
+            limits_xy,
+        )
+        
         self._isplotting = False
         
     @thread_assign
@@ -605,12 +681,15 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
             df.to_csv(filepath)
             qw.QMessageBox.information(self, 'Save data', 'Data saved successfully')
         except Exception as e: print('save_plot_data',e); return
+    
+    def _get_plot_xylim(self) -> XYLimits:
+        """
+        Gets the x and y limits of the plot using the values in the widgets
         
-    def _set_plot_xylim(self):
+        Returns:
+            XYLimits: The x and y limits of the plot
         """
-        Sets the x and y limits of the plot using the values in the widgets
-        """
-        # Set the x and y limits
+        # Get the x and y limits
         try: xlim_min = float(self._entry_plot_xlim_min.text())
         except: xlim_min = None
         try: xlim_max = float(self._entry_plot_xlim_max.text())
@@ -620,10 +699,12 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         try: ylim_max = float(self._entry_plot_ylim_max.text())
         except: ylim_max = None
         
-        try:
-            self._ax.set_xlim(xlim_min,xlim_max)
-            self._ax.set_ylim(ylim_min,ylim_max)
-        except: pass
+        return XYLimits(
+            x_min=xlim_min,
+            x_max=xlim_max,
+            y_min=ylim_min,
+            y_max=ylim_max,
+        )
     
     def get_current_wavelength(self) -> float|None:
         """

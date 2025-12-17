@@ -405,6 +405,83 @@ class RamanMeasurement_Worker(QObject):
             try: q.put(measurement)
             except Exception as e: print(f'Error in _notify_queue_observers: {e}')
 
+class RamanMeasurement_Plotter(QObject):
+    """
+    A class defining the Raman measurement plotter worker.
+    """
+    sig_plot_ready = Signal()
+    
+    class PlotRequest(TypedDict):
+        measurement: MeaRaman
+        title: str
+        plot_Raman: bool
+        limits: tuple
+    
+    def __init__(self, plotter:MeaRaman_Plotter) -> None:
+        super().__init__()
+        self._is_plotting = False
+        self._pending_data = None
+        self._lock = threading.Lock()
+        self._plotter = plotter
+        
+    def plot_measurement(self, data: PlotRequest) -> None:
+        """
+        Plots the given Raman measurement
+        
+        Args:
+            data (PlotRequest): The plot request data
+        """
+        measurement = data['measurement']
+        title = data['title']
+        plot_Raman = data['plot_Raman']
+        limits = data['limits']
+        
+        self._plotter.plot(
+            measurement=measurement,
+            title=title,
+            flg_plot_ramanshift=plot_Raman,
+            plot_raw=True,
+            limits=limits,
+        )
+        self.sig_plot_ready.emit()
+        
+        QTimer.singleShot(1, self._check_pending)
+        
+    @Slot(MeaRaman, str, bool, tuple)
+    def request_plot(self, measurement:MeaRaman, title:str, plot_Raman:bool, limits:tuple):
+        """
+        Plots the given Raman measurement
+        
+        Args:
+            measurement (MeaRaman): The Raman measurement to be plotted
+            title (str): The title of the plot
+            plot_Raman (bool): Whether to plot in Raman shift or wavelength
+            limits (tuple): The limits for the plot (xmin, xmax, ymin, ymax)
+        """
+        data = self.PlotRequest(
+            measurement=measurement,
+            title=title,
+            plot_Raman=plot_Raman,
+            limits=limits,
+        )
+        with self._lock:
+            if self._is_plotting:
+                self._pending_data = data
+                return
+            
+            # If not busy, mark as busy and proceed
+            self._is_plotting = True
+        self.plot_measurement(data)
+        
+    def _check_pending(self):
+        with self._lock:
+            if self._pending_data is not None:
+                data = self._pending_data
+                self._pending_data = None
+                self.plot_measurement(data)
+            else:
+                self._is_plotting = False
+        
 class Wdg_SpectrometerController(qw.QWidget):
     """
     A class defining the app subwindow for the Raman spectrometer.
@@ -418,6 +495,8 @@ class Wdg_SpectrometerController(qw.QWidget):
     _sig_request_lastmea = Signal() # Signal to request the last measurement from the acquisition worker
     _sig_append_queue_observer = Signal(queue.Queue, threading.Event)    # Signal to append a queue observer to the acquisition worker
     _sig_remove_queue_observer = Signal(queue.Queue)    # Signal to remove a queue observer from the acquisition worker
+    
+    _sig_update_plot = Signal(MeaRaman, str, bool, tuple)  # Signal to update the plotter worker with new data
     
     def __init__(
         self,
@@ -472,7 +551,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._thread_acquisition.finished.connect(self._worker_acquisition.deleteLater)
         self._thread_acquisition.finished.connect(self._thread_acquisition.deleteLater)
         self._thread_acquisition.start()
-
+        
     # >> Connection setups <<
         self._init_request_integration_time_connection()
         self._init_btn_measurements_connection()
@@ -501,7 +580,6 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._cont_measurement:MeaRaman = MeaRaman(reconstruct=True)    # continuous measurement
         
         # Plotter setup
-        self._plotter = MeaRaman_Plotter()
         self._q_plt_mea = queue.Queue() # Queue for plotting measurements (will plot the latest measurement only)
         self._plt_timer = QTimer()
         self._plt_timer.timeout.connect(self._auto_update_plot)
@@ -519,8 +597,9 @@ class Wdg_SpectrometerController(qw.QWidget):
     # Plot widget setup
         self._plotter = MeaRaman_Plotter()
         self._fig, self._ax = self._plotter.get_fig_ax()
-        self._fig_widget = FigureCanvas(figure=self._fig)
-        widget.lyt_plot.addWidget(self._fig_widget)
+        self._canvas = FigureCanvas(figure=self._fig)
+        widget.lyt_plot.addWidget(self._canvas)
+        self._init_worker_plotter()
         
     # Basic plot control widgets
         # Add widgets for additional plot options
@@ -617,6 +696,23 @@ class Wdg_SpectrometerController(qw.QWidget):
     # >>> Finalise the setup <<<
         # Update the statusbar
         self._statbar.showMessage("Raman controller ready")
+    
+    def _init_worker_plotter(self) -> None:
+        """
+        Initialises the Raman measurement plotter worker.
+        """
+        self._thread_plotter = QThread(self)
+        self._worker_plotter = RamanMeasurement_Plotter(plotter=self._plotter)
+        self._worker_plotter.moveToThread(self._thread_plotter)
+        self.destroyed.connect(self._thread_plotter.quit)
+        self._thread_plotter.finished.connect(self._worker_plotter.deleteLater)
+        self._thread_plotter.finished.connect(self._thread_plotter.deleteLater)
+        self._thread_plotter.start()
+        
+        @Slot()
+        def on_plot_ready(): self._canvas.draw_idle()
+        self._sig_update_plot.connect(self._worker_plotter.request_plot)
+        self._worker_plotter.sig_plot_ready.connect(on_plot_ready)
     
     def get_syncer_acquisition(self) -> Syncer_Raman:
         """
@@ -910,14 +1006,8 @@ class Wdg_SpectrometerController(qw.QWidget):
 
     def _update_plot(self, measurement:MeaRaman|None, title='Single Raman Measurement',):
         if measurement is None or not measurement.check_measurement_exist(): return
-        self._plotter.plot_RamanMeasurement_new(
-            measurement=measurement,
-            title=title,
-            flg_plot_ramanshift=self._bool_PlotRamanShift.isChecked(),
-            plot_raw=True,
-            limits=self._get_plot_limits(),
-        )
-        self._fig_widget.draw()
+        
+        self._sig_update_plot.emit(measurement,title, self._bool_PlotRamanShift.isChecked(), self._get_plot_limits())
         
         # try: print(f'Gap between plots: {(time.time()-self._t1)*1e3:.0f} ms')
         # except: pass
@@ -929,7 +1019,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         """
         # Configure the integration time config
         intTime_min, intTime_max, intTime_inc = self._controller.get_integration_time_limits_us()
-        self._spin_inttime.setRange(int(intTime_min/1000), int(intTime_max)/1000)
+        self._spin_inttime.setRange(int(intTime_min/1000), int(intTime_max/1000))
 
         # Set and get the current device integration time
         self._request_integration_time(self.integration_time_ms)

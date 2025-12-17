@@ -77,7 +77,7 @@ class PeakFinderPlotter_Worker(QObject):
             list_peak_wavelength_str = ['{:1f}'.format(list_wavelength[i]) for i in peaks_idx]
             
             # Update the treeview
-            self._plotter.plot_with_scatter_RamanMeasurement(
+            self._plotter.plot_scatter(
                 measurement=mea,
                 title='Raman spectra of {}'.format(str(mea.get_latest_timestamp())),
                 list_scatter_wavelength=peak_wavelength,
