@@ -202,7 +202,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         # self._sig_request_update_plot.connect(lambda: self.plot_heatmap())
         self._sig_request_update_plot.connect(self.request_plot_heatmap)
         self._timer_plot = QTimer(self)
-        self._timer_plot.setInterval(200)
+        self._timer_plot.setInterval(100)
         self._timer_plot.timeout.connect(self._process_plot_request)
         self.destroyed.connect(self._timer_plot.stop)
         self._timer_plot.start()

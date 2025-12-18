@@ -121,7 +121,7 @@ class MeaRMap_Unit():
             self._label_avemea: pd.DataFrame
         }
         
-        self._lock_measurement = threading.Lock()
+        self._lock_measurement = threading.RLock()
         
         assert all([key in self._dict_measurement_types.keys() for key in self._dict_measurement.keys()]),\
             'mapping_measurement_unit: The measurement keys are not the same as the measurement types.'
@@ -214,14 +214,18 @@ class MeaRMap_Unit():
         
         if self.check_measurement_and_metadata_exist(): self._notify_observers()
         
-    def get_dict_measurements(self) -> dict:
+    def get_dict_measurements(self, copy:bool=False) -> dict:
         """
         Returns the measurement data stored in the object.
         
         Returns:
             dict: dictionary of the measurement data
         """
-        return self._dict_measurement
+        if copy:
+            with self._lock_measurement:
+                return {key: list(val) for key, val in self._dict_measurement.items()}
+        else:
+            return self._dict_measurement
         
     def get_dict_types(self) -> tuple[dict,dict]:
         """
@@ -309,7 +313,8 @@ class MeaRMap_Unit():
         Returns:
             int: number of measurements
         """
-        return len(self._dict_measurement[self._label_ts])
+        with self._lock_measurement:
+            return len(self._dict_measurement[self._label_ts])
     
     def get_dict_measurement_metadata(self) -> dict:
         """
@@ -568,9 +573,10 @@ class MeaRMap_Unit():
         # assert self._flg_measurement_exist, 'get_list_wavelengths: The measurement data does not exist.'
         if not self._flg_measurement_exist: return []
         
-        df:pd.DataFrame = self._dict_measurement[self._label_avemea][-1]
-        list_wavelengths = df[self._dflabel_wavelength].tolist()
-        return list_wavelengths
+        with self._lock_measurement:
+            df:pd.DataFrame = self._dict_measurement[self._label_avemea][-1]
+            list_wavelengths = df[self._dflabel_wavelength].tolist()
+            return list_wavelengths
     
     def get_list_Raman_shift(self) -> list[float]:
         """
@@ -684,48 +690,42 @@ class MeaRMap_Unit():
         """
         return (self._label_x,self._label_y,self._label_z,self._dflabel_wavelength,self._dflabel_intensity)
     
-    def get_heatmap_table(self,wavelength:float) -> pd.DataFrame:
-        """
-        Returns the coordinates and intensities of all measurements at the requested wavelength
-        
-        Args:
-            wavelength (float): wavelength to be retrieved (closest wavelength will be used)
-        
-        Returns:
-            pd.DataFrame: dataframe of the coordinates and intensities, according to the internal labels
-        
-        Note:
-            The labels can be retrieved using the get_labels() method
-        """
-        assert self._flg_measurement_exist, 'get_coor_intensity: The measurement data does not exist.'
-        
-        def find_nearest(array, value):
-            array = np.asarray(array)
-            idx = np.argmin(np.abs(array - value))
-            return array[idx]
-        
-        closest_wavelength = find_nearest(self.get_list_wavelengths(),wavelength)
-        
-        df:pd.DataFrame = self._dict_measurement[self._label_avemea][-1]
-        wavelength_idx = df[self._dflabel_wavelength].tolist().index(closest_wavelength)
-        
-        df_result = pd.DataFrame(columns=[self._label_x,self._label_y,self._label_z,
-                                          self._dflabel_wavelength,self._dflabel_intensity])
-        
+    def get_heatmap_table(self, wavelength: float) -> pd.DataFrame:
+        # 1. Use a local reference to the lock
         with self._lock_measurement:
-            x_coor = self._dict_measurement[self._label_x].copy()
-            y_coor = self._dict_measurement[self._label_y].copy()
-            z_coor = self._dict_measurement[self._label_z].copy()
-            intensities = [df.iloc[wavelength_idx, df.columns.get_loc(self._dflabel_intensity)] for df in self._dict_measurement[self._label_avemea].copy()]
-        
-        df_result = pd.DataFrame({
+            # Check if we even have data
+            if not self._dict_measurement[self._label_avemea]:
+                return pd.DataFrame()
+
+            # 2. Get the index once
+            # Note: Using RLock allows this nested call to get_list_wavelengths
+            wvl_list = self.get_list_wavelengths() 
+            closest_wavelength = wvl_list[np.argmin(np.abs(np.array(wvl_list) - wavelength))]
+            
+            # Assume all DFs have same wavelength structure, get index from the last one
+            sample_df = self._dict_measurement[self._label_avemea][-1]
+            wavelength_idx = sample_df[self._dflabel_wavelength].tolist().index(closest_wavelength)
+
+            # 3. Fast extraction
+            # We take a snapshot of the lists while locked
+            x_coor = list(self._dict_measurement[self._label_x])
+            y_coor = list(self._dict_measurement[self._label_y])
+            z_coor = list(self._dict_measurement[self._label_z])
+            
+            # Grab the specific intensity value from each DataFrame
+            # This is the heavy part; we do it while locked to ensure consistency
+            intensities = [df.iat[wavelength_idx, df.columns.get_loc(self._dflabel_intensity)] 
+                        for df in self._dict_measurement[self._label_avemea]]
+
+        # 4. Construct the DataFrame OUTSIDE the lock
+        # This keeps the lock held for the minimum time possible
+        return pd.DataFrame({
             self._label_x: x_coor,
             self._label_y: y_coor,
             self._label_z: z_coor,
-            self._dflabel_wavelength: closest_wavelength,  # Constant value
+            self._dflabel_wavelength: closest_wavelength,
             self._dflabel_intensity: intensities
         })
-        return df_result
     
     def add_observer(self, observer: Callable) -> None:
         """

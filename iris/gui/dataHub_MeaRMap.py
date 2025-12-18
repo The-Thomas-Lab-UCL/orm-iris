@@ -756,7 +756,7 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         if self._mappingUnit is None: return
         
         dict_metadata = self._mappingUnit.get_dict_measurement_metadata()
-        dict_measurement = self._mappingUnit.get_dict_measurements()
+        dict_measurement = self._mappingUnit.get_dict_measurements(copy=True)
         mea_id_key, coorx_key, coory_key, coorz_key, _, _ = self._mappingUnit.get_keys_dict_measurement()
         
         list_timestamp = dict_measurement[mea_id_key]

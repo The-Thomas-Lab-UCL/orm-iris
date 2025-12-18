@@ -336,7 +336,7 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
             """Correct the mapping measurement coordinates to match the image measurement
             coordinates."""
             label_x,label_y,_,_,_ = mapping_unit.get_labels()
-            dict_measurement = mapping_unit.get_dict_measurements()
+            dict_measurement = mapping_unit.get_dict_measurements(copy=True)
             
             list_coorx:list = dict_measurement[label_x]
             list_coory:list = dict_measurement[label_y]

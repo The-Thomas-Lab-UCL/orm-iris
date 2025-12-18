@@ -124,6 +124,7 @@ class Hilvl_MeasurementStorer_Worker(QObject):
             if self._isrunning or not self._queue_measurement.empty():
                 QTimer.singleShot(1, self._schedule_next_autosave)
             else:
+                print('Autosaver finished all measurements.')
                 self.sig_finished.emit()
     
     @Slot()
@@ -142,16 +143,21 @@ class Hilvl_MeasurementStorer_Worker(QObject):
             try:
                 result:MeaRaman|tuple[MeaRaman,tuple]=self._queue_measurement.get(timeout=0.05)
                 self.sig_gotmea.emit()
-            except queue.Empty: return
-            except Exception as e: self.sig_error.emit(f'Error in autosaver: {e}'); return
+            except queue.Empty:
+                return
+            except Exception as e:
+                self.sig_error.emit(f'Error in autosaver: {e}')
+                return
             
             try:
                 if isinstance(result,MeaRaman):
                     mea = result
+                    # mea = mea.copy()
                     ts = mea.get_latest_timestamp()
                     coor = self._ds_stage.get_coordinates_interpolate(ts)
                 else:
                     mea, coor = result
+                    # mea = mea.copy()
                     ts = mea.get_latest_timestamp()
                 assert coor is not None, 'No stage coordinates found for the measurement timestamp'
                 
@@ -161,7 +167,8 @@ class Hilvl_MeasurementStorer_Worker(QObject):
                     coor=coor,
                     measurement=mea
                 )
-            except Exception as e: self.sig_error.emit(f'Error in autosaver: {e}')
+            except Exception as e:
+                self.sig_error.emit(f'Error in autosaver: {e}')
             
     @Slot(str)
     def relay_finished_message(self, msg:str):
@@ -188,6 +195,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     """
     sig_progress_update = Signal(int)   # Signal to update progress (number of points measured)
     
+    sig_error_during_mea = Signal(str)  # Signal emitted when an error occurs during measurement
     sig_mea_done = Signal() # Signal emitted when measurement is done (no differentiation between success, cancelled, or error)
     sig_mea_done_msg = Signal(str)  # Signal emitted when measurement is done with a message
     
@@ -258,6 +266,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 )
                 # print('Waiting for movement to complete...')
                 event_finish.wait(10)
+                if not event_finish.is_set(): raise TimeoutError('Failed to reach the target coordinate. Movement to coordinates timed out.')
                 # print('Movement wait finished. Event set:', event_finish.is_set())
                 
                 # Trigger the acquisition and wait for the return queue to be filled
@@ -269,7 +278,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 q_mea_out.put((mea, coor))
                 
             except Exception as e:
-                self.emit_finish_signals(self.msg_mea_error + str(e))
+                self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
                 print('Error in run_scan_discrete:',e)
         
         self._event_isacquiring.clear()
@@ -637,6 +646,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.sig_stop_measurement.connect(self._event_isacquiring.clear)
         self.sig_run_scan_discrete.connect(self._worker_hilvlacq.run_scan_discrete)
         self.sig_run_scan_continuous.connect(self._worker_hilvlacq.run_scan_continuous)
+        self._worker_hilvlacq.sig_error_during_mea.connect(self.handle_error_during_mapping)
         self._worker_hilvlacq.sig_mea_done_msg.connect(self._worker_autoMeaStorer.relay_finished_message)
         
         # Connection: Thread and worker management
@@ -656,6 +666,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.sig_set_autosaver.connect(self._worker_autoMeaStorer.set_save_params)
         
         # Finish signal
+        self._worker_autoMeaStorer.sig_error.connect(self.handle_error_during_mapping)
         self._worker_autoMeaStorer.sig_finished_relay_msg.connect(self.handle_mapping_completion)
         
         # Signal to delete the thread and worker when finished
@@ -1007,6 +1018,14 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self._last_mappingmethod = method
         
         self._perform_mapping(method=method)
+        
+    @Slot(str)
+    def handle_error_during_mapping(self, msg:str):
+        """
+        Handles errors during the mapping measurement
+        """
+        self.statbar.showMessage(msg,5000)
+        self.statbar.setStyleSheet("QStatusBar { background-color : red; color : white; }")
         
     @Slot(str)
     def handle_mapping_completion(self, msg:str):
