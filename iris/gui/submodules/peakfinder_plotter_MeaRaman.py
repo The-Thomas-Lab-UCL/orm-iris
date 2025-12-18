@@ -138,10 +138,10 @@ class Wdg_RamanMeasurement_Peakfinder_Plotter(Ui_spectra_peak_finder, qw.QWidget
         Initialises the workers and signals for the peak finder plotter.
         """
         # Worker setup
-        # self._worker_thread = QThread()
+        self._worker_thread = QThread()
         self._worker = PeakFinderPlotter_Worker(self._plotter)
-        # self._worker.moveToThread(self._worker_thread)
-        # self._worker_thread.start()
+        self._worker.moveToThread(self._worker_thread)
+        self._worker_thread.start(QThread.Priority.LowPriority)
         
         # Signals setup
         self._worker.sig_peaks.connect(self._update_treeview_peaks)

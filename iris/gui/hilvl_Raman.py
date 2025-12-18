@@ -319,51 +319,12 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         # >>> Perform the mapping measurement <<<
         self._event_isacquiring.set()
         for i, coor in enumerate(mapping_coordinates_ends):
-            if not self._event_isacquiring.is_set():
-                self.emit_finish_signals(self.msg_mea_cancelled)
-                break   # Stops the measurement immediately when required.
-            
-            event_finish_setvel.clear()
-            if i == 0:
-                print('Moving to start position...')
-                self._syncer.set_notready()
-                q_trig.put(EnumTrig.START)
-                event_finish_setvel.set()
-                print('Reached start position.')
-            elif i%2 == 0:
-                print('Moving to next line end position (odd line)...')
-                self._syncer.set_notready()
-                q_trig.put(EnumTrig.IGNORE)
-                self._sig_setvelrel.emit(mapping_speed_rel, -1.0, event_finish_setvel)   # Set actual speed to move between x-coordinates
-                print('Reached line end position.')
-            else:
-                print('Moving to next line end position (even line)...')
-                q_trig.put(EnumTrig.STORE)
-                self._sig_setvelrel.emit(100.0, -1.0, event_finish_setvel) # Set actual speed to move between x-coordinates
-                print('Reached line end position.')
-            self._syncer.wait_ready()
-            event_finish_setvel.wait()
-            
-            # Check the autosave queue size and wait if necessary to prevent overflow
-            q_size = q_mea_out.qsize()
-            if q_size > AppRamanEnum.CONTINUOUS_MEASUREMENT_BUFFER_SIZE.value:
-                while not q_mea_out.empty():
-                    print(f'Measurement buffer full:\nAdjust [APP - RAMAN MEASUREMENT CONTROLLER] "continuous_measurement_buffer_size"\nin the config.ini file to adjust the buffer size')
-                    time.sleep(0.1)
-                    print(f'Waiting for the measurement buffer to clear... Current size: {q_mea_out.qsize()}')
-                q_trig.put(EnumTrig.IGNORE)
-                
-            while not self._q_mea_acq.empty():
-                mea:MeaRaman = self._q_mea_acq.get()
-                q_mea_out.put(mea)
-                
-            # Go to the requested coordinates
-            event_finish_goto.clear()
-            self._sig_gotocor.emit(
-                (float(coor[0]),float(coor[1]),float(coor[2])),
-                event_finish_goto
-            )
-            event_finish_goto.wait()
+            try:
+                flg_continue = self._execute_scan_continuous_step(mapping_speed_rel, q_mea_out, event_finish_setvel, event_finish_goto, q_trig, i, coor)
+                if not flg_continue: break
+            except Exception as e:
+                self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
+                print('Error in run_scan_continuous:',e)
         
         # Stop raman frame's continuous measurement and store the final measurements
         q_trig.put(EnumTrig.STORE)
@@ -372,6 +333,86 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         self._event_isacquiring.clear()
         self._sig_remove_queue_mea.emit(self._q_mea_acq)
         self.emit_finish_signals(self.msg_mea_finished)
+
+    def _execute_scan_continuous_step(
+        self,
+        mapping_speed_rel:float,
+        q_mea_out:queue.Queue,
+        event_finish_setvel:threading.Event,
+        event_finish_goto:threading.Event,
+        q_trig:queue.Queue,
+        coor_idx:int,
+        coor:tuple,
+        ) -> bool:
+        """
+        Executes a single step in the continuous mapping measurement.
+
+        Args:
+            mapping_speed_rel (float): The relative speed to move between the coordinates
+            q_mea_out (queue.Queue): The queue to store the measurement data
+            event_finish_setvel (threading.Event): Event to signal the completion of setting velocity
+            event_finish_goto (threading.Event): Event to signal the completion of going to coordinates
+            q_trig (queue.Queue): Queue to send the measurement trigger commands
+            i (int): The index of the current coordinate
+            coor (tuple): The target coordinate
+            
+        Returns:
+            bool: True if the step was executed successfully, False if the measurement was cancelled
+        """
+        
+        if not self._event_isacquiring.is_set():
+            self.emit_finish_signals(self.msg_mea_cancelled)
+            return False
+                
+        event_finish_setvel.clear()
+        if coor_idx == 0:
+            print('Moving to start position...')
+            self._syncer.set_notready()
+            q_trig.put(EnumTrig.START)
+            event_finish_setvel.set()
+            print('Reached start position.')
+        elif coor_idx%2 == 0:
+            print('Moving to next line end position (odd line)...')
+            self._syncer.set_notready()
+            q_trig.put(EnumTrig.IGNORE)
+            self._sig_setvelrel.emit(mapping_speed_rel, -1.0, event_finish_setvel)   # Set actual speed to move between x-coordinates
+            print('Reached line end position.')
+        else:
+            print('Moving to next line end position (even line)...')
+            q_trig.put(EnumTrig.STORE)
+            self._sig_setvelrel.emit(100.0, -1.0, event_finish_setvel) # Set actual speed to move between x-coordinates
+            print('Reached line end position.')
+        self._syncer.wait_ready()
+        event_finish_setvel.wait()
+                
+                # Check the autosave queue size and wait if necessary to prevent overflow
+        q_size = q_mea_out.qsize()
+        if q_size > AppRamanEnum.CONTINUOUS_MEASUREMENT_BUFFER_SIZE.value:
+            while not q_mea_out.empty():
+                print(f'Measurement buffer full:\nAdjust [APP - RAMAN MEASUREMENT CONTROLLER] "continuous_measurement_buffer_size"\nin the config.ini file to adjust the buffer size')
+                time.sleep(0.1)
+                print(f'Waiting for the measurement buffer to clear... Current size: {q_mea_out.qsize()}')
+            q_trig.put(EnumTrig.IGNORE)
+                    
+        while not self._q_mea_acq.empty():
+            try:
+                mea:MeaRaman = self._q_mea_acq.get()
+                q_mea_out.put(mea)
+            except queue.Empty:
+                break
+            except Exception as e:
+                self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
+                print('Error in run_scan_continuous (autosave):',e)
+                continue
+                    
+                # Go to the requested coordinates
+        event_finish_goto.clear()
+        self._sig_gotocor.emit(
+                    (float(coor[0]),float(coor[1]),float(coor[2])),
+                    event_finish_goto
+                )
+        event_finish_goto.wait()
+        return True
         
     @Slot(str)
     def emit_finish_signals(self,msg:str):
@@ -655,7 +696,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.destroyed.connect(self._thread_hilvlacq.quit)
         self.destroyed.connect(self._thread_hilvlacq.deleteLater)
         self.destroyed.connect(self._worker_hilvlacq.deleteLater)
-        self._thread_hilvlacq.start()
+        self._thread_hilvlacq.start(QThread.Priority.HighestPriority)
         
     # >>> Autosaver worker setup <<<
         # Signal to stop the autosaver
@@ -676,7 +717,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.destroyed.connect(self._worker_autoMeaStorer.deleteLater)
         self.destroyed.connect(self._thread_autoMeaStorer.deleteLater)
         
-        self._thread_autoMeaStorer.start()
+        self._thread_autoMeaStorer.start(QThread.Priority.HighestPriority)
         
     def _init_autoMeaStorer_worker(self, mapping_unit:MeaRMap_Unit) -> queue.Queue:
         q_storage = queue.Queue()

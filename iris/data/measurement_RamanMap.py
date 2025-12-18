@@ -692,20 +692,20 @@ class MeaRMap_Unit():
     
     def get_heatmap_table(self, wavelength: float) -> pd.DataFrame:
         # 1. Use a local reference to the lock
+        # Check if we even have data
+        if not self._dict_measurement[self._label_avemea]:
+            return pd.DataFrame()
+
+        # 2. Get the index once
+        # Note: Using RLock allows this nested call to get_list_wavelengths
+        wvl_list = self.get_list_wavelengths() 
+        closest_wavelength = wvl_list[np.argmin(np.abs(np.array(wvl_list) - wavelength))]
+        
+        # Assume all DFs have same wavelength structure, get index from the last one
+        sample_df = self._dict_measurement[self._label_avemea][-1]
+        wavelength_idx = sample_df[self._dflabel_wavelength].tolist().index(closest_wavelength)
+        
         with self._lock_measurement:
-            # Check if we even have data
-            if not self._dict_measurement[self._label_avemea]:
-                return pd.DataFrame()
-
-            # 2. Get the index once
-            # Note: Using RLock allows this nested call to get_list_wavelengths
-            wvl_list = self.get_list_wavelengths() 
-            closest_wavelength = wvl_list[np.argmin(np.abs(np.array(wvl_list) - wavelength))]
-            
-            # Assume all DFs have same wavelength structure, get index from the last one
-            sample_df = self._dict_measurement[self._label_avemea][-1]
-            wavelength_idx = sample_df[self._dflabel_wavelength].tolist().index(closest_wavelength)
-
             # 3. Fast extraction
             # We take a snapshot of the lists while locked
             x_coor = list(self._dict_measurement[self._label_x])

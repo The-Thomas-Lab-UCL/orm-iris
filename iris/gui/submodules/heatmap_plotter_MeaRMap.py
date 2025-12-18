@@ -228,7 +228,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         self._thread_plotter = QThread()
         self._worker_plotter = HeatmapPlotter_Worker(plotter=self._plotter)
         self._worker_plotter.moveToThread(self._thread_plotter)
-        self._thread_plotter.start()
+        self._thread_plotter.start(QThread.Priority.NormalPriority)
         
         # Connect the signals
         self._sig_udpate_plot.connect(self._worker_plotter.plot_heatmap)
