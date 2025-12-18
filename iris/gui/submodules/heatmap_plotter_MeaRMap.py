@@ -202,7 +202,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         # self._sig_request_update_plot.connect(lambda: self.plot_heatmap())
         self._sig_request_update_plot.connect(self.request_plot_heatmap)
         self._timer_plot = QTimer(self)
-        self._timer_plot.setInterval(100)
+        self._timer_plot.setInterval(1000)
         self._timer_plot.timeout.connect(self._process_plot_request)
         self.destroyed.connect(self._timer_plot.stop)
         self._timer_plot.start()
@@ -439,10 +439,6 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         if set_unit_name is None: set_unit_name = self._combo_plot_mappingUnitName.currentText()
         set_wavelength = self.get_current_wavelength()
         
-        # Clear the comboboxes
-        self._combo_plot_mappingUnitName.clear()
-        self._combo_plot_SpectralPosition.clear()
-        
         # Check if there are any measurements in the mappingHub for the refresh. Returns if not
         if not self._mappingHub.check_measurement_exist():
             self._isupdating_comboboxes = False
@@ -474,21 +470,36 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         if self._chk_plot_in_RamanShift.isChecked(): list_spectral_position = mappingUnit.get_list_Raman_shift()
         else: list_spectral_position = mappingUnit.get_list_wavelengths()
         idx_spectral_position = mappingUnit.get_wavelength_idx(set_wavelength)
-        list_spectral_position = [str(pos) for pos in list_spectral_position]
+        list_spectral_position = [f'{pos:.2f}' for pos in list_spectral_position]
         
-        # Set the obtained lists
-        self._combo_plot_mappingUnitName.addItems(list_names)
-        self._combo_plot_SpectralPosition.addItems(list_spectral_position)
-
-        # Set the original values
+        # Check if the new list is different from the current one
+        flg_update_name = False
+        flg_update_specpos = False
+        if self._combo_plot_mappingUnitName.count() != len(list_names):
+            flg_update_name = True
+        elif not all(self._combo_plot_mappingUnitName.itemText(i) == list_names[i] for i in range(len(list_names))):
+            flg_update_name = True
+        if self._combo_plot_SpectralPosition.count() != len(list_spectral_position):
+            flg_update_specpos = True
+        elif not all(self._combo_plot_SpectralPosition.itemText(i) == list_spectral_position[i] for i in range(len(list_spectral_position))):
+            flg_update_specpos = True
+        
+        if flg_update_name:
+            self._combo_plot_mappingUnitName.clear()
+            self._combo_plot_mappingUnitName.addItems(list_names)
         self._combo_plot_mappingUnitName.setCurrentText(unit_name)
+        
+        if flg_update_specpos:
+            self._combo_plot_SpectralPosition.clear()
+            self._combo_plot_SpectralPosition.addItems(list_spectral_position)
         self._combo_plot_SpectralPosition.setCurrentIndex(idx_spectral_position)
         
         # Store the values
         self._current_mappingUnit = mappingUnit
         
         # Plot the changes
-        self._sig_request_update_plot.emit()
+        if flg_update_name or flg_update_specpos:
+            self._sig_request_update_plot.emit()
         
         self._combo_plot_mappingUnitName.blockSignals(False)
         self._combo_plot_SpectralPosition.blockSignals(False)
