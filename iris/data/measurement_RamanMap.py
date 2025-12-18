@@ -691,34 +691,40 @@ class MeaRMap_Unit():
         return (self._label_x,self._label_y,self._label_z,self._dflabel_wavelength,self._dflabel_intensity)
     
     def get_heatmap_table(self, wavelength: float) -> pd.DataFrame:
-        # 1. Use a local reference to the lock
-        # Check if we even have data
+        """
+        Returns a dataframe containing the x, y, z coordinates and the intensity
+        values at the specified wavelength for all measurements.
+        
+        Args:
+            wavelength (float): Wavelength to extract the intensity values from.
+        """
         if not self._dict_measurement[self._label_avemea]:
             return pd.DataFrame()
 
-        # 2. Get the index once
-        # Note: Using RLock allows this nested call to get_list_wavelengths
+        # 1. Get metadata needed for indexing (usually safe without lock if immutable)
         wvl_list = self.get_list_wavelengths() 
         closest_wavelength = wvl_list[np.argmin(np.abs(np.array(wvl_list) - wavelength))]
         
-        # Assume all DFs have same wavelength structure, get index from the last one
-        sample_df = self._dict_measurement[self._label_avemea][-1]
-        wavelength_idx = sample_df[self._dflabel_wavelength].tolist().index(closest_wavelength)
-        
+        # 2. THE SNAPSHOT: Hold lock for microseconds only
         with self._lock_measurement:
-            # 3. Fast extraction
-            # We take a snapshot of the lists while locked
+            # We copy the references to the lists. 
+            # The DataFrames themselves aren't copied, just the "list of pointers"
+            ave_mea_snapshot = list(self._dict_measurement[self._label_avemea])
             x_coor = list(self._dict_measurement[self._label_x])
             y_coor = list(self._dict_measurement[self._label_y])
             z_coor = list(self._dict_measurement[self._label_z])
-            
-            # Grab the specific intensity value from each DataFrame
-            # This is the heavy part; we do it while locked to ensure consistency
-            intensities = [df.iat[wavelength_idx, df.columns.get_loc(self._dflabel_intensity)] 
-                        for df in self._dict_measurement[self._label_avemea]]
 
-        # 4. Construct the DataFrame OUTSIDE the lock
-        # This keeps the lock held for the minimum time possible
+        # --- LOCK RELEASED HERE --- 
+        # The hardware can now append to the internal lists while we process the snapshot
+
+        # 3. Heavy Extraction (Outside the lock)
+        sample_df = ave_mea_snapshot[-1]
+        wvl_idx = sample_df[self._dflabel_wavelength].tolist().index(closest_wavelength)
+        int_col_idx = sample_df.columns.get_loc(self._dflabel_intensity)
+        
+        # This loop takes time, but it doesn't block the hardware anymore!
+        intensities = [df.iat[wvl_idx, int_col_idx] for df in ave_mea_snapshot]
+
         return pd.DataFrame({
             self._label_x: x_coor,
             self._label_y: y_coor,
