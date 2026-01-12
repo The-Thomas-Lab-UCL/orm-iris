@@ -721,11 +721,15 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         Returns:
             RamanMeasurement: The selected RamanMeasurement
         """
-        selections = self._tree_unit.selectedItems()
-        if not isinstance(self._mappingUnit, MeaRMap_Unit): return None
-        if len(selections) == 0: return None
-        mea_id = selections[0].text(0)
-        return self._mappingUnit.get_RamanMeasurement(mea_id)
+        try:
+            selections = self._tree_unit.selectedItems()
+            if not isinstance(self._mappingUnit, MeaRMap_Unit): return None
+            if len(selections) == 0: return None
+            mea_id = selections[0].text(0)
+            return self._mappingUnit.get_RamanMeasurement(mea_id)
+        except Exception as e:
+            print(f"Error getting selected RamanMeasurement: {e}")
+            return None
         
     @Slot()
     def _set_mappingUnit(self):
@@ -751,8 +755,13 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         self._lbl_statusbar.setText("Updating the Data Hub Plus. Interactive features not ready.")
         self._lbl_statusbar.setStyleSheet("background-color: yellow")
         
+        # Block signals to prevent crashes during tree update
+        self._tree_unit.blockSignals(True)
+        
         self._tree_unit.clear()
-        if self._mappingUnit is None: return
+        if self._mappingUnit is None:
+            self._tree_unit.blockSignals(False)
+            return
         
         dict_metadata = self._mappingUnit.get_dict_measurement_metadata()
         dict_measurement = self._mappingUnit.get_dict_measurements(copy=False)
@@ -767,7 +776,10 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         for ts, x, y, z, meta in zip(list_timestamp, list_coorx, list_coory, list_coorz, list_metadata):
             qw.QTreeWidgetItem(self._tree_unit,
                 [str(ts), str(x), str(y), str(z), meta])
-            
+        
+        # Unblock signals after tree update is complete
+        self._tree_unit.blockSignals(False)
+        
         self._lbl_statusbar.setText("Data Hub Plus updated. Ready.")
         self._lbl_statusbar.setStyleSheet("")
     
