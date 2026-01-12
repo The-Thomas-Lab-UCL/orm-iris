@@ -608,6 +608,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         Extracts the necessary measurement data to make the heatmap plot and then pass it onto the
         plotting queue
         """
+        if not self._widget.dock_plot.isVisible(): return
         if self._isplotting: return
         assert isinstance(self._mappingHub,MeaRMap_Hub),\
             "plot_heatmap: Measurement data is not of the correct type. Expected: MappingMeasurement_Hub"

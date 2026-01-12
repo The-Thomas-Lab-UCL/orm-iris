@@ -264,6 +264,7 @@ class Wdg_RamanMeasurement_Peakfinder_Plotter(Ui_spectra_peak_finder, qw.QWidget
         """
         self.plot_spectra(**self._dict_replot_params)
         
+    @Slot(MeaRaman)
     def plot_spectra(self,mea:MeaRaman|None=None) -> None:
         """
         Plots the Raman spectra.

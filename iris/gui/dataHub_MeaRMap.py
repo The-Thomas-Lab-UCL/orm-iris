@@ -638,10 +638,6 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         
         # Storage parameters setup
         self._mappingUnit:MeaRMap_Unit|None = None
-        self._lock_dict_RMid_treeid = threading.Lock()
-        self._dict_RMid_treeid = {}     # Dict to map: RamanMeasurement ID -> treeview item ID
-        self._lock_dict_RMid_RM = threading.Lock()
-        self._dict_RMid_RM = {}     # Dict to map: RamanMeasurement -> RamanMeasurement ID
         
         # Unit tree setup
         columns = ("Timestamp", "Coor-x", "Coor-y", "Coor-z", "Metadata")
@@ -655,7 +651,7 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         
         # Interactive widget setup
         self._sig_modify_tree.connect(self.update_tree_unit)
-        self._dataHub.sig_tree_selection.connect(self._set_unit_dataHub)
+        self._dataHub.sig_tree_selection.connect(self._set_mappingUnit)
         self._tree_unit.itemSelectionChanged.connect(self._emit_signal_selection)
         
         self._sig_emit_selection_changed.connect(self._emit_signal_selection)
@@ -730,9 +726,9 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         if len(selections) == 0: return None
         mea_id = selections[0].text(0)
         return self._mappingUnit.get_RamanMeasurement(mea_id)
-            
+        
     @Slot()
-    def _set_unit_dataHub(self):
+    def _set_mappingUnit(self):
         """
         Sets the unit based on the dataHub selection.
         If there is no selection, nothing happens and if there are multiple selections, the first one is selected
@@ -749,6 +745,9 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         """
         Refreshes the unit treeview with the data in the MappingMeasurement_Unit
         """
+        # If the widget is not visible, do not update
+        if not self.isVisible(): return
+        
         self._lbl_statusbar.setText("Updating the Data Hub Plus. Interactive features not ready.")
         self._lbl_statusbar.setStyleSheet("background-color: yellow")
         
@@ -756,7 +755,7 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         if self._mappingUnit is None: return
         
         dict_metadata = self._mappingUnit.get_dict_measurement_metadata()
-        dict_measurement = self._mappingUnit.get_dict_measurements(copy=True)
+        dict_measurement = self._mappingUnit.get_dict_measurements(copy=False)
         mea_id_key, coorx_key, coory_key, coorz_key, _, _ = self._mappingUnit.get_keys_dict_measurement()
         
         list_timestamp = dict_measurement[mea_id_key]

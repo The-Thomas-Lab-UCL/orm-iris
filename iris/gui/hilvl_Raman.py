@@ -8,7 +8,6 @@ from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, Qt as qc
 import queue
 from enum import Enum
 
-
 import math
 import random
 
@@ -34,7 +33,6 @@ from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 
 from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam
 from iris.multiprocessing.dataStreamer_Raman import DataStreamer_Raman
-
 
 from iris.gui import AppRamanEnum
 
@@ -231,7 +229,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         
         self._q_mea_acq:queue.Queue = queue.Queue() # Queue for the acquisition to store the measurement data
     
-    def _calculate_time_remaining(self, points_done:int, total_points:int, time_elapsed:float) -> float:
+    def _calculate_time_remaining(self, points_done:int, total_points:int, time_elapsed:float) -> str:
         """
         Calculates the estimated time remaining for the measurement.
 
@@ -244,7 +242,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             str: The estimated time remaining (auto converted to hours, minutes, seconds)
         """
         if points_done == 0:
-            return float('inf')
+            return "Waiting for first point..."
         time_per_point = time_elapsed / points_done
         points_remaining = total_points - points_done
         time_remaining = time_per_point * points_remaining
