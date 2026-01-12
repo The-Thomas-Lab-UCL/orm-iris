@@ -193,7 +193,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         sig_mea_cancelled: Signal emitted when measurement is cancelled
         sig_mea_done: Signal emitted when measurement is done
     """
-    sig_progress_update = Signal(int)   # Signal to update progress (number of points measured)
+    sig_progress_update_str = Signal(str)  # Signal to update progress (string message)
     
     sig_error_during_mea = Signal(str)  # Signal emitted when an error occurs during measurement
     sig_mea_done = Signal() # Signal emitted when measurement is done (no differentiation between success, cancelled, or error)
@@ -231,6 +231,46 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         
         self._q_mea_acq:queue.Queue = queue.Queue() # Queue for the acquisition to store the measurement data
     
+    def _calculate_time_remaining(self, points_done:int, total_points:int, time_elapsed:float) -> float:
+        """
+        Calculates the estimated time remaining for the measurement.
+
+        Args:
+            points_done (int): The number of points already measured
+            total_points (int): The total number of points to be measured
+            time_elapsed (float): The time elapsed since the start of the measurement in seconds
+            
+        Returns:
+            str: The estimated time remaining (auto converted to hours, minutes, seconds)
+        """
+        if points_done == 0:
+            return float('inf')
+        time_per_point = time_elapsed / points_done
+        points_remaining = total_points - points_done
+        time_remaining = time_per_point * points_remaining
+        return self._convert_time_to_hms(time_remaining)
+        
+    def _convert_time_to_hms(self, time_remaining:float) -> str:
+        """
+        Converts time in seconds to a string in hours, minutes, and seconds.
+        
+        Args:
+            time_remaining (float): The time remaining in seconds
+        
+        Returns:
+            str: The time remaining in "Xh Ym Zs" format
+        """
+        hours = int(time_remaining // 3600)
+        minutes = int((time_remaining % 3600) // 60)
+        seconds = int(time_remaining % 60)
+        
+        if hours > 0:
+            return f"{hours}h {minutes}m {seconds}s"
+        elif minutes > 0:
+            return f"{minutes}m {seconds}s"
+        else:
+            return f"{seconds}s"
+    
     @Slot(AcquisitionParams, list, queue.Queue)
     def run_scan_discrete(
         self,
@@ -249,8 +289,11 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         event_append_done = threading.Event()
         self._sig_append_queue_mea.emit(self._q_mea_acq, event_append_done)
         event_append_done.wait()
+        
+        time_start = time.time()
+        total_points = len(mapping_coordinates)
         self._event_isacquiring.set()
-        for coor in mapping_coordinates:
+        for i, coor in enumerate(mapping_coordinates):
             try:
                 if not self._event_isacquiring.is_set():
                     self.emit_finish_signals(self.msg_mea_cancelled)
@@ -275,11 +318,20 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 mea:MeaRaman = self._q_mea_acq.get(timeout=int_time/1000 * 10) # Waits up to 10x the integration time for the measurement
                 
                 # Send the measurement data to the autosaver
-                q_mea_out.put((mea, coor))
+                if i == 0: continue  # Skip the zeroth measurement to avoid initialisation artifacts
+                q_mea_out.put(mea)
                 
             except Exception as e:
                 self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
                 print('Error in run_scan_discrete:',e)
+                
+            finally:
+                # Update progress
+                points_done = i + 1
+                time_elapsed = time.time() - time_start
+                time_remaining_str = self._calculate_time_remaining(points_done, total_points, time_elapsed)
+                progress_msg = f'Measured {points_done}/{total_points} points. Estimated time remaining: {time_remaining_str}. Elapsed time: {self._convert_time_to_hms(time_elapsed)}.'
+                self.sig_progress_update_str.emit(progress_msg)
         
         self._event_isacquiring.clear()
         self._sig_remove_queue_mea.emit(self._q_mea_acq)
@@ -317,6 +369,8 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         
         print('Acquisition started, moving to start position...')
         # >>> Perform the mapping measurement <<<
+        time_start = time.time()
+        total_points = len(mapping_coordinates_ends)
         self._event_isacquiring.set()
         for i, coor in enumerate(mapping_coordinates_ends):
             try:
@@ -325,6 +379,13 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             except Exception as e:
                 self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
                 print('Error in run_scan_continuous:',e)
+            finally:
+                # Update progress
+                points_done = i + 1
+                time_elapsed = time.time() - time_start
+                time_remaining_str = self._calculate_time_remaining(points_done, total_points, time_elapsed)
+                progress_msg = f'Measured {points_done}/{total_points} lines. Estimated time remaining: {time_remaining_str}. Elapsed time: {self._convert_time_to_hms(time_elapsed)}.'
+                self.sig_progress_update_str.emit(progress_msg)
         
         # Stop raman frame's continuous measurement and store the final measurements
         q_trig.put(EnumTrig.STORE)
@@ -396,6 +457,9 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                     
         while not self._q_mea_acq.empty():
             try:
+                if coor_idx == 0: # Skip the first measurement to avoid initialisation artifacts
+                    self._q_mea_acq.get()
+                    continue
                 mea:MeaRaman = self._q_mea_acq.get()
                 q_mea_out.put(mea)
             except queue.Empty:
@@ -698,6 +762,9 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.destroyed.connect(self._worker_hilvlacq.deleteLater)
         self._thread_hilvlacq.start(QThread.Priority.HighestPriority)
         
+        # Message update handling
+        self._worker_hilvlacq.sig_progress_update_str.connect(self.handle_message_update)
+        
     # >>> Autosaver worker setup <<<
         # Signal to stop the autosaver
         self._worker_hilvlacq.sig_mea_done.connect(self._worker_autoMeaStorer.stop_autosaver)
@@ -724,6 +791,16 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.sig_set_autosaver.emit(mapping_unit, q_storage)
         self.sig_start_autosaver.emit()
         return q_storage
+    
+    @Slot(str)
+    def handle_message_update(self, msg:str):
+        """
+        Handles message updates from workers
+
+        Args:
+            msg (str): The message to display
+        """
+        self.statbar.showMessage(msg)
     
     def _get_scan_options(self) -> tuple[str,str]:
         """
@@ -1077,6 +1154,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.motion_controller.enable_widgets()
         self.enable_widgets()
         self.statbar.showMessage('Mapping measurement complete')
+        self.statbar.setStyleSheet("") # Reset to default
         
         if msg == self._worker_hilvlacq.msg_mea_cancelled:
             self._list_sel_mapCoor.clear()
