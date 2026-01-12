@@ -537,7 +537,8 @@ class Wdg_SpectrometerController(qw.QWidget):
         self.destroyed.connect(self._thread_controller.quit)
         self._thread_controller.finished.connect(self._worker_controller.deleteLater)
         self._thread_controller.finished.connect(self._thread_controller.deleteLater)
-        self._thread_controller.start()
+        # Defer thread start until after initialization is complete
+        QTimer.singleShot(0, self._thread_controller.start)
         
     # >> Acquisition <<
         self._syncer_acquisition = Syncer_Raman()
@@ -550,7 +551,8 @@ class Wdg_SpectrometerController(qw.QWidget):
         self.destroyed.connect(self._thread_acquisition.quit)
         self._thread_acquisition.finished.connect(self._worker_acquisition.deleteLater)
         self._thread_acquisition.finished.connect(self._thread_acquisition.deleteLater)
-        self._thread_acquisition.start()
+        # Defer thread start until after initialization is complete
+        QTimer.singleShot(0, self._thread_acquisition.start)
         
     # >> Connection setups <<
         self._init_request_integration_time_connection()
@@ -708,12 +710,14 @@ class Wdg_SpectrometerController(qw.QWidget):
         self.destroyed.connect(self._thread_plotter.quit)
         self._thread_plotter.finished.connect(self._worker_plotter.deleteLater)
         self._thread_plotter.finished.connect(self._thread_plotter.deleteLater)
-        self._thread_plotter.start()
         
         @Slot()
         def on_plot_ready(): self._canvas.draw_idle()
         self._sig_update_plot.connect(self._worker_plotter.request_plot)
         self._worker_plotter.sig_plot_ready.connect(on_plot_ready)
+        
+        # Defer thread start until after initialization is complete
+        QTimer.singleShot(0, self._thread_plotter.start)
     
     def get_syncer_acquisition(self) -> Syncer_Raman:
         """

@@ -410,7 +410,8 @@ if __name__ == '__main__':
         raman_hub=ramanHub,
         stage_hub=stageHub)
     
-    mainWindow_Controller.initialisations()
+    # Defer initialisations until after the event loop starts to prevent crashes
+    QTimer.singleShot(0, mainWindow_Controller.initialisations)
     app.installEventFilter(mainWindow_Controller.shortcutHandler)
     
     mainWindow_Controller.show()

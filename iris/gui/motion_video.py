@@ -715,7 +715,8 @@ class Wdg_MotionController(qw.QGroupBox):
         self._thread_coor_report.started.connect(self._worker_coor_report.start)
         self._thread_coor_report.finished.connect(self._worker_coor_report.deleteLater)
         self._thread_coor_report.finished.connect(self._thread_coor_report.deleteLater)
-        self._thread_coor_report.start()
+        # Defer thread start until after initialization is complete
+        QTimer.singleShot(0, self._thread_coor_report.start)
         self.destroyed.connect(self._thread_coor_report.quit)
         
         # For _worker_get_coordinates_closest_mm
@@ -724,7 +725,8 @@ class Wdg_MotionController(qw.QGroupBox):
         self._worker_getcoorclosest.moveToThread(self._thread_getcoorclosest)
         self._thread_getcoorclosest.finished.connect(self._worker_getcoorclosest.deleteLater)
         self._thread_getcoorclosest.finished.connect(self._thread_getcoorclosest.deleteLater)
-        self._thread_getcoorclosest.start()
+        # Defer thread start until after initialization is complete
+        QTimer.singleShot(0, self._thread_getcoorclosest.start)
         self.destroyed.connect(self._thread_getcoorclosest.quit)
         
         # For _worker_go_to_coordinates
@@ -739,7 +741,8 @@ class Wdg_MotionController(qw.QGroupBox):
         self._worker_gotocoor.moveToThread(self._thread_gotocoor)
         self._thread_gotocoor.finished.connect(self._worker_gotocoor.deleteLater)
         self._thread_gotocoor.finished.connect(self._thread_gotocoor.deleteLater)
-        self._thread_gotocoor.start()
+        # Defer thread start until after initialization is complete
+        QTimer.singleShot(0, self._thread_gotocoor.start)
         self.destroyed.connect(self._thread_gotocoor.quit)
         
         # self.destroyed.connect(self.terminate)

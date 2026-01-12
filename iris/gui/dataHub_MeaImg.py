@@ -352,7 +352,8 @@ class Wdg_DataHub_Image(qw.QWidget):
         self._thread.finished.connect(self._thread.deleteLater)
         self._thread.finished.connect(self._worker.deleteLater)
         
-        self._thread.start()
+        # Defer thread start until after initialization is complete
+        QTimer.singleShot(0, self._thread.start)
         
         # Signals
         self.sig_updateTree.connect(self.update_tree)

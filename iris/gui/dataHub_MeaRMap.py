@@ -197,7 +197,8 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self.destroyed.connect(self._thread_save.quit)
         self.destroyed.connect(self._save_worker.deleteLater)
         self.destroyed.connect(self._thread_save.deleteLater)
-        self._thread_save.start()
+        # Defer thread start until after initialization is complete
+        QTimer.singleShot(0, self._thread_save.start)
         
         # Button connection setup
         self._btn_save_ext.clicked.connect(self._save_unit_ext)

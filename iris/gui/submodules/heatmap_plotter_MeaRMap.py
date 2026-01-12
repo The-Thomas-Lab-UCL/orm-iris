@@ -161,7 +161,8 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         self._eve_plot_req = threading.Event()  # Event to request a plot update
         self._eve_combo_req = threading.Event()  # Event to request a combobox update
         self._current_mappingUnit:MeaRMap_Unit = MeaRMap_Unit()
-        self._current_mappingUnit.add_observer(self._sig_request_update_plot.emit)
+        # Defer observer registration to prevent signals during initialization
+        QTimer.singleShot(0, lambda: self._current_mappingUnit.add_observer(self._sig_request_update_plot.emit))
         
     # >>> Plotter selection setup <<<
         self._init_plotter_options_widgets()
@@ -191,11 +192,11 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         assert isinstance(lineedit_specpos, qw.QLineEdit), "lineedit_specpos must be a QLineEdit"
         lineedit_specpos.editingFinished.connect(lambda: self._set_combobox_closest_value(lineedit_specpos.text()))
         
-        # Set the callbacks
-        self._mappingHub.add_observer(lambda:
+        # Set the callbacks - defer to prevent signals during initialization
+        QTimer.singleShot(0, lambda: self._mappingHub.add_observer(lambda:
             self._update_currentMappingUnit_observer(
             mappingUnit_name=self._current_mappingUnit.get_unit_name()
-        ))
+        )))
         
     # > Set the connections <<
         # Plot update timer
@@ -230,12 +231,14 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         self._thread_plotter = QThread()
         self._worker_plotter = HeatmapPlotter_Worker(plotter=self._plotter)
         self._worker_plotter.moveToThread(self._thread_plotter)
-        self._thread_plotter.start(QThread.Priority.NormalPriority)
         
         # Connect the signals
         self._sig_udpate_plot.connect(self._worker_plotter.plot_heatmap)
         self._worker_plotter.sig_plotready.connect(self.on_plotter_worker_plotready)
         self._worker_plotter.sig_finished_plotting.connect(self.on_plotter_worker_finished)
+        
+        # Defer thread start until after initialization is complete
+        QTimer.singleShot(0, lambda: self._thread_plotter.start(QThread.Priority.NormalPriority))
         
     def _init_plot_control_widgets(self):
         """
