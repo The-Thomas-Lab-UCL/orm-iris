@@ -208,7 +208,8 @@ class Motion_AutoCoorReport_Worker(QObject):
         self._timer = QTimer(self)
         self._timer.setInterval(100)
         self._timer.timeout.connect(self._emit_coor)
-        self._timer.start()
+        # Defer timer start to ensure event loop is running
+        QTimer.singleShot(0, self._timer.start)
         
     def _emit_coor(self):
         timestamp_req = get_timestamp_us_int()

@@ -205,7 +205,8 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         self._timer_plot.setInterval(1000)
         self._timer_plot.timeout.connect(self._process_plot_request)
         self.destroyed.connect(self._timer_plot.stop)
-        self._timer_plot.start()
+        # Defer timer start until after event loop is running
+        QTimer.singleShot(0, self._timer_plot.start)
         
         # Combobox update timer
         # self._sig_request_update_comboboxes.connect(lambda: self._update_comboboxes())
@@ -214,7 +215,8 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         self._timer_combobox.setInterval(1000)
         self._timer_combobox.timeout.connect(self._process_combobox_request)
         self.destroyed.connect(self._timer_combobox.stop)
-        self._timer_combobox.start()
+        # Defer timer start until after event loop is running
+        QTimer.singleShot(0, self._timer_combobox.start)
         
     # > Reset button <
         self._widget.btn_plotterreset.clicked.connect(lambda: self.reinitialise_plotter())

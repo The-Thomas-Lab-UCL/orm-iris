@@ -157,7 +157,8 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         # Storage to store the data
         if isinstance(mappingHub, MeaRMap_Hub): self._MappingHub = mappingHub
         else: self._MappingHub = MeaRMap_Hub()
-        self._MappingHub.add_observer(self._sig_modify_tree.emit)
+        # Defer observer registration to prevent signals during initialization
+        QTimer.singleShot(0, lambda: self._MappingHub.add_observer(self._sig_modify_tree.emit))
         
         # Save parameters
         self._sessionid = get_timestamp_us_str()
@@ -661,8 +662,10 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         """
         Emits the selection changed signals with the selected RamanMeasurement
         """
-        # Process the previous events first
-        QCoreApplication.processEvents()
+        # Only process events if the widget is fully initialized and visible
+        # This prevents crashes during initialization
+        if self.isVisible():
+            QCoreApplication.processEvents()
         
         self.sig_selection_changed.emit()
         mea = self.get_selected_RamanMeasurement()

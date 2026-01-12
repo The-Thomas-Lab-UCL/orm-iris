@@ -585,7 +585,8 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._plt_timer.timeout.connect(self._auto_update_plot)
         self._plt_timer.setSingleShot(True)
         self._plt_timer.setInterval(50) # Update every 50 ms (will be dynamically adjusted later)
-        self._plt_timer.start()
+        # Defer timer start to ensure event loop is running
+        QTimer.singleShot(0, self._plt_timer.start)
         
 # >>> Control frames setup <<<
         # Initialise the statusbar
