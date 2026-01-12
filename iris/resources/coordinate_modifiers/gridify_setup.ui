@@ -536,6 +536,37 @@
    </item>
   </layout>
  </widget>
+ <tabstops>
+  <tabstop>combo_roi</tabstop>
+  <tabstop>spin_tl_x</tabstop>
+  <tabstop>spin_tl_y</tabstop>
+  <tabstop>spin_tl_z</tabstop>
+  <tabstop>spin_tr_x</tabstop>
+  <tabstop>spin_tr_y</tabstop>
+  <tabstop>spin_tr_z</tabstop>
+  <tabstop>spin_bl_x</tabstop>
+  <tabstop>spin_bl_y</tabstop>
+  <tabstop>spin_bl_z</tabstop>
+  <tabstop>spin_br_x</tabstop>
+  <tabstop>spin_br_y</tabstop>
+  <tabstop>spin_br_z</tabstop>
+  <tabstop>btn_currcoor_tl</tabstop>
+  <tabstop>btn_currcoor_tr</tabstop>
+  <tabstop>btn_currcoor_bl</tabstop>
+  <tabstop>btn_currcoor_br</tabstop>
+  <tabstop>combo_tl_xy</tabstop>
+  <tabstop>combo_tl_z</tabstop>
+  <tabstop>combo_tr_xy</tabstop>
+  <tabstop>combo_tr_z</tabstop>
+  <tabstop>combo_bl_xy</tabstop>
+  <tabstop>combo_bl_z</tabstop>
+  <tabstop>combo_br_xy</tabstop>
+  <tabstop>combo_br_z</tabstop>
+  <tabstop>spin_row</tabstop>
+  <tabstop>spin_col</tabstop>
+  <tabstop>btn_finalise</tabstop>
+  <tabstop>btn_instructions</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

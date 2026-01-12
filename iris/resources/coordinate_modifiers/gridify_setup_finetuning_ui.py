@@ -123,6 +123,12 @@ class Ui_gridify_setup_finetuning(object):
         self.verticalLayout_2.addLayout(self.verticalLayout)
 
         gridify_setup_finetuning.setCentralWidget(self.centralwidget)
+        QWidget.setTabOrder(self.tree_roi, self.combo_xy)
+        QWidget.setTabOrder(self.combo_xy, self.combo_z)
+        QWidget.setTabOrder(self.combo_z, self.btn_set_currcoor)
+        QWidget.setTabOrder(self.btn_set_currcoor, self.btn_nextROI)
+        QWidget.setTabOrder(self.btn_nextROI, self.btn_cancel)
+        QWidget.setTabOrder(self.btn_cancel, self.btn_finish)
 
         self.retranslateUi(gridify_setup_finetuning)
 

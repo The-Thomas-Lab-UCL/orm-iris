@@ -128,6 +128,15 @@ Double-click on an ROI to automatically go to its coordinate.</string>
    </layout>
   </widget>
  </widget>
+ <tabstops>
+  <tabstop>tree_roi</tabstop>
+  <tabstop>combo_xy</tabstop>
+  <tabstop>combo_z</tabstop>
+  <tabstop>btn_set_currcoor</tabstop>
+  <tabstop>btn_nextROI</tabstop>
+  <tabstop>btn_cancel</tabstop>
+  <tabstop>btn_finish</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

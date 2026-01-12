@@ -150,6 +150,14 @@
    </layout>
   </widget>
  </widget>
+ <tabstops>
+  <tabstop>rad_rowcol</tabstop>
+  <tabstop>rad_colrow</tabstop>
+  <tabstop>ent_separator</tabstop>
+  <tabstop>btn_example</tabstop>
+  <tabstop>btn_finalise</tabstop>
+  <tabstop>btn_cancel</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

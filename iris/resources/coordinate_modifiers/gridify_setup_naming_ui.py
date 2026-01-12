@@ -136,6 +136,11 @@ class Ui_gridify_setup_naming(object):
         self.verticalLayout_2.addLayout(self.horizontalLayout_2)
 
         gridify_setup_naming.setCentralWidget(self.centralwidget)
+        QWidget.setTabOrder(self.rad_rowcol, self.rad_colrow)
+        QWidget.setTabOrder(self.rad_colrow, self.ent_separator)
+        QWidget.setTabOrder(self.ent_separator, self.btn_example)
+        QWidget.setTabOrder(self.btn_example, self.btn_finalise)
+        QWidget.setTabOrder(self.btn_finalise, self.btn_cancel)
 
         self.retranslateUi(gridify_setup_naming)
 
