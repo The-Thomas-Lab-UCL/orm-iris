@@ -3,9 +3,9 @@ A GUI module to modify a mapping coordinates list by translating
 the coordinates in the X, Y and Z direction.
 """
 
-import tkinter as tk
-from tkinter import ttk
-from tkinter import messagebox
+from PySide6.QtGui import QCloseEvent
+import PySide6.QtWidgets as qw
+from PySide6.QtCore import Signal, Slot, QTimer, QThread, QObject, QModelIndex
 
 from typing import Self
 from enum import Enum
@@ -13,7 +13,7 @@ import threading
 from queue import Queue, Empty
 
 import numpy as np
-from PIL import Image, ImageTk
+from PIL import Image, ImageQt
 
 if __name__ == '__main__':
     import sys
@@ -21,11 +21,15 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.gui.motion_video import Wdg_MotionController
+from iris.gui.motion_video import Wdg_MotionController, Motion_GoToCoor_Worker, ResizableQLabel
 from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 
 from iris.utils.general import *
 from iris.utils.gridify import generate_warped_grid
+
+from iris.resources.coordinate_modifiers.gridify_setup_ui import Ui_gridify_setup
+from iris.resources.coordinate_modifiers.gridify_setup_naming_ui import Ui_gridify_setup_naming
+from iris.resources.coordinate_modifiers.gridify_setup_finetuning_ui import Ui_gridify_setup_finetuning
 
 class Enums_RefXY(Enum):
     """Enumeration for the reference location of the mapping coordinates"""
@@ -130,7 +134,7 @@ def calculate_coordinatesCenter(ref_coor:np.ndarray, mappingCoor:MeaCoor_mm,
         
     return [x_final, y_final, z_final]
     
-class Gridify(tk.Frame):
+class Gridify(Ui_gridify_setup, qw.QWidget):
     def __init__(
         self,
         parent,
@@ -146,65 +150,27 @@ class Gridify(tk.Frame):
             motion_controller (Frm_MotionController): The motion controller to use for the mapping
         """
         super().__init__(parent)
+        self.setupUi(self)
+        self.setLayout(self.main_layout)
+        
         self._coorHub = mappingCoorHub
         self._motion_controller = motion_controller
         
-    # >>> Top level frame <<<
-        frm_instruction = tk.Frame(self)
-        frm_mapUnit_selection = tk.Frame(self)
-        self._frm_modifier = tk.LabelFrame(self, text='Multi-coordinates generation (Gridify')
-        self._frm_refCoor = tk.LabelFrame(self, text='Reference coordinates')
-        self._frm_rowCol = tk.LabelFrame(self, text='Row/Column setup')
-        frm_options = tk.Frame(self)
-        
-        row=0; col_curr=0
-        frm_instruction.grid(row=row, column=0, sticky='nsew', padx=5, pady=5); row+=1
-        frm_mapUnit_selection.grid(row=row, column=0, sticky='nsew', padx=5, pady=5); row+=1
-        self._frm_modifier.grid(row=row, column=0, sticky='nsew', padx=5, pady=5); row+=1
-        self._frm_refCoor.grid(row=row, column=0, sticky='nsew', padx=5, pady=5); row+=1
-        self._frm_rowCol.grid(row=row, column=0, sticky='nsew', padx=5, pady=5); row+=1
-        frm_options.grid(row=row, column=0, sticky='nsew', padx=5, pady=5)
-        
-        [self.grid_rowconfigure(i, weight=1) for i in range(row+1)]
-        [self.grid_columnconfigure(i, weight=1) for i in range(col_curr+1)]
-        
     # >>> Information widget <<<
-        btn_instructions = tk.Button(frm_instruction, text='Show instructions', command=self._show_instructions)
-        
-        row=0; col_curr=0
-        btn_instructions.grid(row=0, column=0, sticky='ew', padx=5, pady=5)
-        
-        [frm_instruction.grid_rowconfigure(i, weight=0) for i in range(row+1)]
-        [frm_instruction.grid_columnconfigure(i, weight=1) for i in range(col_curr+1)]
-        
-    # >>> Selection widget <<<
-        self._combo_mapUnit = ttk.Combobox(frm_mapUnit_selection, state='readonly')
-        
-        row=0; col_curr=0
-        self._combo_mapUnit.grid(row=row, column=0, sticky='ew', padx=5, pady=5)
-        
-        [frm_mapUnit_selection.grid_rowconfigure(i, weight=0) for i in range(row+1)]
-        [frm_mapUnit_selection.grid_columnconfigure(i, weight=1) for i in range(col_curr+1)]
+        self.btn_instructions.clicked.connect(self._show_instructions)
         
     # >>> Reference coordinates widget <<<
         # Parameters setup
         self._dict_refFourCorners = {
-            Enums_RefFourCorners.top_left: None,
-            Enums_RefFourCorners.top_right: None,
-            Enums_RefFourCorners.bottom_left: None,
-            Enums_RefFourCorners.bottom_right: None,
+            Enums_RefFourCorners.top_left: dict(),
+            Enums_RefFourCorners.top_right: dict(),
+            Enums_RefFourCorners.bottom_left: dict(),
+            Enums_RefFourCorners.bottom_right: dict(),
         }
         self._init_refFourCorners_widgets()
         
-    # >>> Row/Column setup widget <<<
-        # Parameters setup
-        self._str_noOfRows = tk.StringVar(value='2')
-        self._str_noOfCols = tk.StringVar(value='2')
-        self._init_rowCol_widgets()
-        
     # >>> Options frame <<<
-        self._btn_setupGrid = tk.Button(frm_options, text='Fine-tune grid', command=self._run_gridSetup)
-        self._btn_setupGrid.grid(row=0, column=0, sticky='ew', padx=5, pady=5)
+        self.btn_finalise.clicked.connect(self._run_gridSetup)
         
     # >>> Parameters for the mapping coordinates modification <<<
         self._dict_mapUnit = {}  # Dictionary to store mapping units
@@ -215,279 +181,270 @@ class Gridify(tk.Frame):
         
     def _init_refFourCorners_widgets(self):
         """Initializes the reference four corners for the mapping coordinates"""
+        # >> Setup the widgets <<
+        list_combo_xy = [self.combo_tl_xy, self.combo_tr_xy, self.combo_bl_xy, self.combo_br_xy]
+        list_combo_z = [self.combo_tl_z, self.combo_tr_z, self.combo_bl_z, self.combo_br_z]
         
-        sfrm_topleft = tk.LabelFrame(self._frm_refCoor, text=Enums_RefFourCorners.top_left.value)
-        sfrm_topright = tk.LabelFrame(self._frm_refCoor, text=Enums_RefFourCorners.top_right.value)
-        sfrm_bottomleft = tk.LabelFrame(self._frm_refCoor, text=Enums_RefFourCorners.bottom_left.value)
-        sfrm_bottomright = tk.LabelFrame(self._frm_refCoor, text=Enums_RefFourCorners.bottom_right.value)
+        [combo_xy.addItems([e.value for e in Enums_RefXY]) for combo_xy in list_combo_xy]
+        [combo_z.addItems([e.value for e in Enums_RefZ]) for combo_z in list_combo_z]
         
-        sfrm_topleft.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
-        sfrm_topright.grid(row=0, column=1, sticky='nsew', padx=5, pady=5)
-        sfrm_bottomleft.grid(row=1, column=0, sticky='nsew', padx=5, pady=5)
-        sfrm_bottomright.grid(row=1, column=1, sticky='nsew', padx=5, pady=5)
+        [combo_xy.setCurrentText(Enums_RefXY.center_center.value) for combo_xy in list_combo_xy]
+        [combo_z.setCurrentText(Enums_RefZ.bottom.value) for combo_z in list_combo_z]
         
-        dict_sfrm = {
-            Enums_RefFourCorners.top_left: sfrm_topleft,
-            Enums_RefFourCorners.top_right: sfrm_topright,
-            Enums_RefFourCorners.bottom_left: sfrm_bottomleft,
-            Enums_RefFourCorners.bottom_right: sfrm_bottomright,
+        self.btn_currcoor_tl.clicked.connect(lambda: self._insert_current_coordinate(self.spin_tl_x, self.spin_tl_y, self.spin_tl_z))
+        self.btn_currcoor_tr.clicked.connect(lambda: self._insert_current_coordinate(self.spin_tr_x, self.spin_tr_y, self.spin_tr_z))
+        self.btn_currcoor_bl.clicked.connect(lambda: self._insert_current_coordinate(self.spin_bl_x, self.spin_bl_y, self.spin_bl_z))
+        self.btn_currcoor_br.clicked.connect(lambda: self._insert_current_coordinate(self.spin_br_x, self.spin_br_y, self.spin_br_z))
+        
+        # >> Setup the dictionary <<
+        self._dict_refFourCorners[Enums_RefFourCorners.top_left] = {
+            Enums_RefCornerDict.x: self.spin_tl_x,
+            Enums_RefCornerDict.y: self.spin_tl_y,
+            Enums_RefCornerDict.z: self.spin_tl_z,
+            Enums_RefCornerDict.loc_xy: self.combo_tl_xy,
+            Enums_RefCornerDict.loc_z: self.combo_tl_z,
+        }
+        self._dict_refFourCorners[Enums_RefFourCorners.top_right] = {
+            Enums_RefCornerDict.x: self.spin_tr_x,
+            Enums_RefCornerDict.y: self.spin_tr_y,
+            Enums_RefCornerDict.z: self.spin_tr_z,
+            Enums_RefCornerDict.loc_xy: self.combo_tr_xy,
+            Enums_RefCornerDict.loc_z: self.combo_tr_z,
+        }
+        self._dict_refFourCorners[Enums_RefFourCorners.bottom_left] = {
+            Enums_RefCornerDict.x: self.spin_bl_x,
+            Enums_RefCornerDict.y: self.spin_bl_y,
+            Enums_RefCornerDict.z: self.spin_bl_z,
+            Enums_RefCornerDict.loc_xy: self.combo_bl_xy,
+            Enums_RefCornerDict.loc_z: self.combo_bl_z,
+        }
+        self._dict_refFourCorners[Enums_RefFourCorners.bottom_right] = {
+            Enums_RefCornerDict.x: self.spin_br_x,
+            Enums_RefCornerDict.y: self.spin_br_y,
+            Enums_RefCornerDict.z: self.spin_br_z,
+            Enums_RefCornerDict.loc_xy: self.combo_br_xy,
+            Enums_RefCornerDict.loc_z: self.combo_br_z,
         }
         
-        for corner in self._dict_refFourCorners:
-            frm = dict_sfrm[corner]
-            self._dict_refFourCorners[corner] = {
-                Enums_RefCornerDict.x: tk.StringVar(value='0.0'),
-                Enums_RefCornerDict.y: tk.StringVar(value='0.0'),
-                Enums_RefCornerDict.z: tk.StringVar(value='0.0'),
-                Enums_RefCornerDict.loc_xy: tk.StringVar(value=Enums_RefXY.center_center.value),
-                Enums_RefCornerDict.loc_z: tk.StringVar(value=Enums_RefZ.bottom.value),
-            }
-            
-            lbl_xyz = tk.Label(frm, text=f'Ref. coor (X,Y,Z) [μm]:')
-            entry_x = tk.Entry(frm, textvariable=self._dict_refFourCorners[corner][Enums_RefCornerDict.x], width=10)
-            entry_y = tk.Entry(frm, textvariable=self._dict_refFourCorners[corner][Enums_RefCornerDict.y], width=10)
-            entry_z = tk.Entry(frm, textvariable=self._dict_refFourCorners[corner][Enums_RefCornerDict.z], width=10)
-            btn_insert = tk.Button(frm, text='Insert current coor (X,Y,Z)', command=lambda
-                x=self._dict_refFourCorners[corner][Enums_RefCornerDict.x],
-                y=self._dict_refFourCorners[corner][Enums_RefCornerDict.y],
-                z=self._dict_refFourCorners[corner][Enums_RefCornerDict.z]: self._insert_current_coordinate(x, y, z))
-            
-            sfrm = tk.Frame(frm)
-            lbl_loc = tk.Label(sfrm, text='Location (XY,Z):')
-            combo_xy = ttk.Combobox(sfrm, textvariable=self._dict_refFourCorners[corner][Enums_RefCornerDict.loc_xy],
-                                    values=[e.value for e in Enums_RefXY], state='readonly', width=15)
-            combo_z = ttk.Combobox(sfrm, textvariable=self._dict_refFourCorners[corner][Enums_RefCornerDict.loc_z],
-                                   values=[e.value for e in Enums_RefZ], state='readonly', width=10)
-            combo_xy.set(Enums_RefXY.center_center.value)  # Default to center-center
-            combo_z.set(Enums_RefZ.bottom.value)  # Default to center
-            
-            # Layout
-            lbl_xyz.grid(row=0, column=0, sticky='w', padx=5, pady=5)
-            entry_x.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
-            entry_y.grid(row=0, column=2, sticky='ew', padx=5, pady=5)
-            entry_z.grid(row=0, column=3, sticky='ew', padx=5, pady=5)
-            btn_insert.grid(row=1, column=0, columnspan=4, sticky='ew', padx=5, pady=5)
-            sfrm.grid(row=2, column=0, columnspan=4, sticky='ew', padx=5, pady=5)
-            
-            lbl_loc.grid(row=0, column=0, sticky='w', padx=5, pady=5)
-            combo_xy.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
-            combo_z.grid(row=0, column=2, sticky='ew', padx=5, pady=5)
-            
-    def _init_rowCol_widgets(self):
-        """Initializes the row/column setup widgets"""
-        frm = tk.Frame(self._frm_rowCol)
-        frm.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
+    def _insert_current_coordinate(self, ent_x:qw.QDoubleSpinBox, ent_y:qw.QDoubleSpinBox, ent_z:qw.QDoubleSpinBox):
+        """
+        Inserts the current coordinates from the motion controller into the reference coordinates
         
-        lbl_noOfRows = tk.Label(frm, text='Number of rows:')
-        lbl_noOfCols = tk.Label(frm, text='Number of columns:')
-        
-        entry_noOfRows = tk.Entry(frm, textvariable=self._str_noOfRows, width=5)
-        entry_noOfCols = tk.Entry(frm, textvariable=self._str_noOfCols, width=5)
-        
-        lbl_noOfRows.grid(row=0, column=0, sticky='w', padx=5, pady=5)
-        entry_noOfRows.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
-        
-        lbl_noOfCols.grid(row=1, column=0, sticky='w', padx=5, pady=5)
-        entry_noOfCols.grid(row=1, column=1, sticky='ew', padx=5, pady=5)
-
-    def _insert_current_coordinate(self,strvar_x:tk.StringVar,strvar_y:tk.StringVar,strvar_z:tk.StringVar):
-        """Inserts the current coordinates from the motion controller into the reference coordinates"""
+        Args:
+            ent_x (QDoubleSpinBox): The spinbox for the X coordinate
+            ent_y (QDoubleSpinBox): The spinbox for the Y coordinate
+            ent_z (QDoubleSpinBox): The spinbox for the Z coordinate
+        """
         coor = self._motion_controller.get_coordinates_closest_mm()
-        coorx_um = coor[0] * 1e3
-        coory_um = coor[1] * 1e3
-        coorz_um = coor[2] * 1e3
+        if any(c is None for c in coor):
+            qw.QMessageBox.warning(self, "Warning", "Failed to get current coordinates from the motion controller.")
+            return
         
-        strvar_x.set(f'{coorx_um:.2f}')
-        strvar_y.set(f'{coory_um:.2f}')
-        strvar_z.set(f'{coorz_um:.2f}')
-
+        coorx_um = coor[0] * 1e3    # pyright: ignore[reportOptionalOperand] ; coor is checked for None above
+        coory_um = coor[1] * 1e3    # pyright: ignore[reportOptionalOperand] ; coor is checked for None above
+        coorz_um = coor[2] * 1e3    # pyright: ignore[reportOptionalOperand] ; coor is checked for None above
+        
+        ent_x.setValue(coorx_um)
+        ent_y.setValue(coory_um)
+        ent_z.setValue(coorz_um)
+        
+    @Slot()
     def _show_instructions(self):
         instructions = (
             "This module takes an existing mapping coordinates list and creates a grid layout based on the specified parameters.\n"
             "NOTE: Make sure that the XY stage coordinate increases when the XY stage physically moves to the left and bottom.\n"
             "And the Z coordinate increases when the objective's stage moves closer to the sample."
         )
-        messagebox.showinfo("Instructions", instructions)
+        qw.QMessageBox.information(self, "Instructions", instructions)
     
     def _update_list_units(self):
         """Updates the list of mapping units in the combobox"""
         self._dict_mapUnit.clear()  # Clear the existing dictionary
         self._dict_mapUnit = {unit.mappingUnit_name: unit for unit in self._coorHub}
         
-        self._combo_mapUnit.configure(
-            values=list(self._dict_mapUnit.keys()),
-            state='readonly'
-        )
-
-    @thread_assign
+        selection = self.combo_roi.currentText()
+        self.combo_roi.clear()
+        list_roi_names = list(self._dict_mapUnit.keys())
+        self.combo_roi.addItems(list_roi_names)
+        
+        if selection in list_roi_names: self.combo_roi.setCurrentText(selection)
+        
+    @Slot()
+    def reset_and_handle_cancellation(self):
+        """
+        Resets the finalise button to enabled state
+        """
+        self.btn_finalise.setEnabled(True)
+        
+    @Slot()
     def _run_gridSetup(self):
         """
         Runs the modification of the z-coordinates of the selected mapping coordinates
         """
-        def reset(): self._btn_setupGrid.config(state='normal')
-        self._btn_setupGrid.config(state='disabled')
+        self.btn_finalise.setEnabled(False)
         
     # > Retrieve the selected mapping unit from the combobox and check it <
-        selected_unit_name = self._combo_mapUnit.get()
+        selected_unit_name = self.combo_roi.currentText()
         if not selected_unit_name:
-            messagebox.showwarning("Warning", "Please select a mapping unit to modify.")
-            reset()
+            qw.QMessageBox.warning(self, "Warning", "Please select a mapping unit to modify.")
+            self.reset_and_handle_cancellation()
             return
         
         if selected_unit_name not in self._dict_mapUnit:
-            messagebox.showerror("Error", f"Mapping unit '{selected_unit_name}' not found.")
-            reset()
+            qw.QMessageBox.warning(self, "Error", f"Mapping unit '{selected_unit_name}' not found.")
+            self.reset_and_handle_cancellation()
             return
         
         # Get the current mapping coordinates
         mapping_coordinates = self._dict_mapUnit[selected_unit_name]
         
         if not isinstance(mapping_coordinates, MeaCoor_mm):
-            messagebox.showerror("Error", "Invalid mapping coordinates type.")
+            qw.QMessageBox.warning(self, "Error", "Invalid mapping coordinates type.")
+            self.reset_and_handle_cancellation()
             return
         
     # > Calculate the center of the four corners coordinates <
         corner_coords = []
         for corner in self._dict_refFourCorners:
-            x_mm = float(self._dict_refFourCorners[corner][Enums_RefCornerDict.x].get())/1e3
-            y_mm = float(self._dict_refFourCorners[corner][Enums_RefCornerDict.y].get())/1e3
-            z_mm = float(self._dict_refFourCorners[corner][Enums_RefCornerDict.z].get())/1e3
+            x_mm = float(self._dict_refFourCorners[corner][Enums_RefCornerDict.x].value())/1e3
+            y_mm = float(self._dict_refFourCorners[corner][Enums_RefCornerDict.y].value())/1e3
+            z_mm = float(self._dict_refFourCorners[corner][Enums_RefCornerDict.z].value())/1e3
             ctr_x, ctr_y, ctr_z = calculate_coordinatesCenter(
                 ref_coor=np.array([x_mm, y_mm, z_mm]),
                 mappingCoor=mapping_coordinates,
-                loc_xy=Enums_RefXY(self._dict_refFourCorners[corner][Enums_RefCornerDict.loc_xy].get()),
-                loc_z=Enums_RefZ(self._dict_refFourCorners[corner][Enums_RefCornerDict.loc_z].get())
+                loc_xy=Enums_RefXY(self._dict_refFourCorners[corner][Enums_RefCornerDict.loc_xy].currentText()),
+                loc_z=Enums_RefZ(self._dict_refFourCorners[corner][Enums_RefCornerDict.loc_z].currentText())
             )
             corner_coords.append(np.array([ctr_x, ctr_y, ctr_z]))
             
     # > Get the number of rows and columns from the entry fields <
         try:
-            num_rows = int(self._str_noOfRows.get())
-            num_cols = int(self._str_noOfCols.get())
+            num_rows = self.spin_row.value()
+            num_cols = self.spin_col.value()
             if num_rows < 2 or num_cols < 2:
                 raise ValueError("Number of rows and columns must be at least 2.")
         except ValueError as e:
-            messagebox.showerror("Error", f"Invalid input: {e}")
-            reset()
+            qw.QMessageBox.critical(self, "Error", f"Invalid input: {e}")
+            self.reset_and_handle_cancellation()
             return
         
         mapping_coor = mapping_coordinates.copy()
         
     # > Open the grid setup dialog <
-        queue_result = Queue()
-        TopLevel_GridSetup(
-            parent=self,
+        self._mw_naming = Gridify_NamingSetup(
+            gridify_main=self,
             corner_coords=corner_coords,
             num_rows=num_rows,
             num_cols=num_cols,
             mapping_coor=mapping_coor,
             ctrl_motion_video=self._motion_controller,
-            queue_result=queue_result
         )
+        self._mw_naming.show()
         
-        while True:
-            try: res = queue_result.get_nowait()
-            except Empty: time.sleep(0.1); continue
+    def initialise_Gridify_Finetune(self, list_mapping_coor:list[MeaCoor_mm],
+        list_loc:list[tuple[int,int]]) -> None:
+        """
+        Initialises the fine-tune gridify window.
+
+        Args:
+            list_mapping_coor (list[MeaCoor_mm]): List of mapping coordinates to fine-tune
+            list_loc (list[tuple[int,int]]): List of (row, column) locations for each mapping coordinate
+        """
+        self._mw_finetune = Gridify_Finetune(
+            gridify_main=self,
+            list_mapping_coor=list_mapping_coor,
+            list_loc=list_loc,
+            ctrl_motion_video=self._motion_controller,
+        )
+        self._mw_finetune.show()
+        
+    @Slot(list)
+    def handle_gridify_completion(self, res:list[MeaCoor_mm]):
+        list_newMapCoor = []
+        for mapcoor in res:
+            mapcoor:MeaCoor_mm
+            list_coor = [(float(coor[0]), float(coor[1]), float(coor[2])) for coor in mapcoor.mapping_coordinates.copy()]
+            new_mapcoor = MeaCoor_mm(
+                mappingUnit_name=mapcoor.mappingUnit_name,
+                mapping_coordinates=list_coor
+            )
+            list_newMapCoor.append(new_mapcoor)
             
-            if res is None:
-                reset()
-                break
-            try:
-                list_newMapCoor = []
-                for mapcoor in res:
-                    mapcoor:MeaCoor_mm
-                    list_coor = [(float(coor[0]), float(coor[1]), float(coor[2])) for coor in mapcoor.mapping_coordinates.copy()]
-                    new_mapcoor = MeaCoor_mm(
-                        mappingUnit_name=mapcoor.mappingUnit_name,
-                        mapping_coordinates=list_coor
-                    )
-                    list_newMapCoor.append(new_mapcoor)
-                self._coorHub.extend(list_newMapCoor)
-                reset()
-                break
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to update mapping coordinates: {e}")
-                reset()
-                return
+        if len(list_newMapCoor) > 0:
+            self._coorHub.extend(list_newMapCoor)
+        self.reset_and_handle_cancellation()
     
-class TopLevel_GridSetup(tk.Toplevel):
-    def __init__(self, parent, corner_coords: list[np.ndarray],
+class Gridify_NamingSetup(Ui_gridify_setup_naming, qw.QMainWindow):
+    sig_cancelled = Signal()
+    
+    def __init__(self, gridify_main:Gridify, corner_coords: list[np.ndarray],
                  num_rows: int, num_cols: int, mapping_coor: MeaCoor_mm,
-                 ctrl_motion_video: Wdg_MotionController, queue_result: Queue, *args, **kwargs):
-        super().__init__(parent, *args, **kwargs)
-        self.title("Gridify Setup")
+                 ctrl_motion_video: Wdg_MotionController, *args, **kwargs):
+        super().__init__(gridify_main, *args, **kwargs)
+        self.setupUi(self)
         
     # >>> Store the parameters <<<
-        self._parent = parent
+        self._gridify_main = gridify_main
         self._corner_coords = corner_coords
         self._num_rows = num_rows
         self._num_cols = num_cols
         self._mapping_coor = mapping_coor
         self._ctrl_motion_video = ctrl_motion_video
-        self._queue_result = queue_result
-        
-    # >>> Layout setup <<<
-        self._frm_rowSetup = tk.LabelFrame(self, text='Row name setup\n(top to bottom)')
-        self._frm_colSetup = tk.LabelFrame(self, text='Column name setup\n(left to right)')
-        self._frm_namingScheme = tk.LabelFrame(self, text='Naming scheme setup')
-        frm_finalise = tk.Frame(self)
-        
-        self._frm_rowSetup.grid(row=0, column=0, rowspan=2, sticky='nsew', padx=5, pady=5)
-        self._frm_colSetup.grid(row=0, column=1, rowspan=2, sticky='nsew', padx=5, pady=5)
-        self._frm_namingScheme.grid(row=0, column=2, sticky='nsew', padx=5, pady=5)
-        frm_finalise.grid(row=1, column=2, sticky='nsew', padx=5, pady=5)
         
     # >>> Create the gridify interface <<<
         # Parameters setup
-        self._list_rowNames = []
-        self._list_colNames = []
-        self._naming_scheme = tk.StringVar(value=Enums_NamingScheme.row_col.value)
-        self._separator = tk.StringVar(value='_')
+        self._list_rowNames:list[qw.QLineEdit] = []
+        self._list_colNames:list[qw.QLineEdit] = []
         self._init_rowColSetup_widgets()
         self._init_namingScheme_widgets()
         
     # >>> Finalise button <<<
-        self._btn_finetune = tk.Button(frm_finalise, text='Fine-tune grid', command=self._run_gridFinetune)
-        self._btn_cancel = tk.Button(frm_finalise, text='Cancel', command=self._terminate)
+        self.btn_finalise.clicked.connect(self._run_gridFinetune)
+        self.btn_cancel.clicked.connect(self.close)
         
-        self._btn_finetune.grid(row=0, column=0, sticky='ew', padx=5, pady=5)
-        self._btn_cancel.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
+    # >> Signals <<<
+        self._programmatic_close = False
+        self.sig_cancelled.connect(self._gridify_main.reset_and_handle_cancellation)
         
-        # Override the window close button to prevent accidental closure
-        self.protocol("WM_DELETE_WINDOW", self._terminate)
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._programmatic_close:
+            event.accept()
+            return
+        
+        cancel = qw.QMessageBox.question(
+            self,
+            "Confirm Close",
+            "Are you sure you want to close the gridify naming setup? This will cancel the operation.",
+            qw.QMessageBox.Yes | qw.QMessageBox.No, # pyright: ignore[reportAttributeAccessIssue]
+            qw.QMessageBox.No # pyright: ignore[reportAttributeAccessIssue]
+        )
+        if cancel == qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue]
+            self.sig_cancelled.emit()
+            event.accept()
+        else:
+            event.ignore()
     
     def _init_rowColSetup_widgets(self):
         """Initializes the row and column setup widgets"""
         for i in range(self._num_rows):
-            row_name = tk.StringVar(value=f'Row {i+1}')
-            entry_row = tk.Entry(self._frm_rowSetup, textvariable=row_name)
-            entry_row.grid(row=i, column=0, sticky='ew', padx=5, pady=5)
-            self._list_rowNames.append(row_name)
-
+            lbl_row = qw.QLabel(f'Row {i+1}:')
+            entry_row = qw.QLineEdit(f'Row {i+1}')
+            self.lyt_row.addRow(lbl_row, entry_row)
+            self._list_rowNames.append(entry_row)
+            
         for j in range(self._num_cols):
-            col_name = tk.StringVar(value=f'Col {j+1}')
-            entry_col = tk.Entry(self._frm_colSetup, textvariable=col_name)
-            entry_col.grid(row=j, column=0, sticky='ew', padx=5, pady=5)
-            self._list_colNames.append(col_name)
+            lbl_col = qw.QLabel(f'Col {j+1}:')
+            entry_col = qw.QLineEdit(f'Col {j+1}')
+            self.lyt_col.addRow(lbl_col, entry_col)
+            self._list_colNames.append(entry_col)
         
     def _init_namingScheme_widgets(self):
         """Initializes the naming scheme setup widgets"""
         # Create radio buttons for naming scheme selection
-        for i, scheme in enumerate(Enums_NamingScheme):
-            rb = tk.Radiobutton(self._frm_namingScheme, text=scheme.value, variable=self._naming_scheme, value=scheme.value)
-            rb.grid(row=i, column=0, sticky='w', padx=5, pady=5)
-
-        lbl_separator = tk.Label(self._frm_namingScheme, text='Separator:')
-        entry_separator = tk.Entry(self._frm_namingScheme, textvariable=self._separator, width=5)
-        btn_example = tk.Button(self._frm_namingScheme, text='Show example', command=self._show_example_names)
-        
-        lbl_separator.grid(row=len(Enums_NamingScheme), column=0, sticky='w', padx=5, pady=5)
-        entry_separator.grid(row=len(Enums_NamingScheme), column=1, sticky='ew', padx=5, pady=5)
-        btn_example.grid(row=len(Enums_NamingScheme), column=2, sticky='ew', padx=5, pady=5)
+        self.btn_example.clicked.connect(self._show_example_names)
         
     def _show_example_names(self):
-        messagebox.showinfo("Example", f"Example naming: {self._generate_names()[0] if self._generate_names() else 'No names could be generated'}")
-        self.lift()
+        qw.QMessageBox.information(self, "Example", f"Example naming: {self._generate_names()[0][:5] if self._generate_names() else 'No names could be generated'}")
         
     def _generate_names(self) -> tuple[list[str], list[tuple[int, int]]]:
         """
@@ -495,26 +452,26 @@ class TopLevel_GridSetup(tk.Toplevel):
         
         Returns:
             tuple: A tuple containing two lists:
-            list: A list of names generated based on the naming scheme and row/column names in 
+            list: of names generated based on the naming scheme and row/column names in 
                 the order of rows first then columns (u then v, e.g., (row1,col1),(row2,col1),...,(row1,col2),...)
                 the order of columns first then rows (u then v, e.g., (col1,row1),(col1,row2),...,(col2,row1),...)
-            list: A list of tuples containing the (row, column) indices for each name.
+            list: of tuples containing the (row, column) indices for each name.
                 """
-        naming_scheme = Enums_NamingScheme(self._naming_scheme.get())
-        separator = self._separator.get()
+        separator = self.ent_separator.text()
         
-        names = []
-        loc = []
+        list_name = []
+        list_loc = []
         # Generate the rows in the reverse order
         for j in range(self._num_cols):
             for i in reversed(range(self._num_rows)):
-                if naming_scheme == Enums_NamingScheme.row_col:
-                    name = f"{self._list_rowNames[i].get()}{separator}{self._list_colNames[j].get()}"
-                elif naming_scheme == Enums_NamingScheme.col_row:
-                    name = f"{self._list_colNames[j].get()}{separator}{self._list_rowNames[i].get()}"
-                names.append(name)
-                loc.append((i, j))
-        return names, loc
+                if self.rad_rowcol.isChecked():
+                    name = f"{self._list_rowNames[i].text()}{separator}{self._list_colNames[j].text()}"
+                else:
+                    name = f"{self._list_colNames[j].text()}{separator}{self._list_rowNames[i].text()}"
+                    
+                list_name.append(name)
+                list_loc.append((i, j))
+        return list_name, list_loc
 
     def _generate_coordinates(self):
         """Generates the coordinates for the gridified mapping coordinates"""
@@ -563,12 +520,13 @@ class TopLevel_GridSetup(tk.Toplevel):
         
         return mappingCoor
         
+    @Slot()
     def _run_gridFinetune(self):
         """
         Performs the gridify operation by generating the mapping coordinates based on the specified parameters.
         """
-        self._btn_finetune.config(state='disabled')
-        self._btn_cancel.config(state='disabled')
+        self.btn_finalise.setEnabled(False)
+        self.btn_cancel.setEnabled(False)
         
         list_names, list_loc = self._generate_names()
         coordinates = self._generate_coordinates()
@@ -586,163 +544,137 @@ class TopLevel_GridSetup(tk.Toplevel):
         # Make sure that all the names are unique
         unique_names = set(list_names)
         if len(unique_names) < len(list_names):
-            messagebox.showerror("Error", "Duplicate names found in the generated mapping coordinates. Please ensure unique names.")
+            qw.QMessageBox.warning(self, "Warning", "Duplicate names found in the generated mapping coordinates. Please ensure unique names.")
+            self.btn_finalise.setEnabled(True)
+            self.btn_cancel.setEnabled(True)
             return
-
-        TopLevel_FineTuneGridify(
-            parent=self._parent,
+        
+        self._gridify_main.initialise_Gridify_Finetune(
             list_mapping_coor=list_mapping_coor,
             list_loc=list_loc,
-            ctrl_motion_video=self._ctrl_motion_video,
-            queue_result=self._queue_result
         )
-        self.destroy()
         
-    def _terminate(self):
-        self._queue_result.put(None)  # Signal termination
-        self.destroy()  # Close the window
-        pass
+        self._programmatic_close = True
+        self.close()
+        
+class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
+    sig_gotocoor = Signal(tuple, threading.Event)
+    sig_list_modified_ROI = Signal(list)
+    sig_cancelled = Signal()
     
-class TopLevel_FineTuneGridify(tk.Toplevel):
-    def __init__(self, parent, list_mapping_coor:list[MeaCoor_mm],
+    def __init__(self, gridify_main:Gridify, list_mapping_coor:list[MeaCoor_mm],
                  list_loc:list[tuple[int, int]], ctrl_motion_video:Wdg_MotionController,
-                 queue_result:Queue,*args, **kwargs):
+                 *args, **kwargs):
         """
         Initializes the fine-tune gridify window.
-
+        
         Args:
             parent (tk.Tk): The parent window.
             list_mapping_coor (list[MappingCoordinates_mm]): The list of mapping coordinates.
             list_loc (list[tuple[int, int]]): The list of (row, column) locations.
             ctrl_motion_video (Frm_MotionController): The motion controller for the video feed.
         """
-        super().__init__(parent, *args, **kwargs)
-        self.title("Fine-tune Gridify")
+        super().__init__(gridify_main, *args, **kwargs)
+        self.setupUi(self)
         
     # >>> Store the parameters <<<
+        self._gridify_main = gridify_main
         self._list_mapping_coor = list_mapping_coor
         self._list_loc = list_loc
         self._ctrl_motion_video = ctrl_motion_video
-        self._queue_result = queue_result
+        
+    # >> Connect signals <<<
+        self.sig_gotocoor.connect(self._ctrl_motion_video.get_goto_worker().work)
+        self.sig_list_modified_ROI.connect(self._gridify_main.handle_gridify_completion)
+        self.sig_cancelled.connect(self._gridify_main.reset_and_handle_cancellation)
         
     # >>> Initialise the parameters <<<
         self._list_mod = [False] * len(self._list_mapping_coor)  # List to track modified coordinates
         
     # >>> Layout setup <<<
-        self._frm_video = tk.LabelFrame(self, text='Video feed')
-        self._frm_finetune = tk.LabelFrame(self, text='Fine-tune coordinates')
-        
-        self._frm_video.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
-        self._frm_finetune.grid(row=1, column=0, sticky='nsew', padx=5, pady=5)
-        
-        self.grid_rowconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
-        self.grid_columnconfigure(0, weight=1)
-        
         self._init_finetune_widgets()
         
     # >>> Initialize the video feed parameters <<<
         self._flg_video_feed = threading.Event()
-        self._vid_size = (640, 480)  # Default video size
-        self._lbl_vid = tk.Label(self._frm_video, image=ImageTk.PhotoImage(Image.new('RGB', self._vid_size, color='black')))
-        self._lbl_vid.pack(fill=tk.BOTH, expand=True)
-        self._thread_video = self._auto_video_updater()
         
-        # Override the window close button to prevent accidental closure
-        self.protocol("WM_DELETE_WINDOW", self._terminate)
+        self._lbl_vid = ResizableQLabel(min_height=1)
+        self.lyt_video.addWidget(self._lbl_vid)
         
-    @thread_assign
+    # >>> Start a qtimer to update the video feed <<<
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._auto_video_updater)
+        self._timer.start(20)  # Update every 20 ms
+        self._flg_video_feed.set()  # Set the flag to start the video feed
+        self._last_imgqt = None
+        QTimer.singleShot(0, self._auto_video_updater)  # Initial call to start the video feed immediately
+        
+    # >>> Others <<<
+        self._programmatic_close = False
+        
+    @Slot()
     def _auto_video_updater(self):
         """Automatically updates the video feed"""
-        current_image = None
-        self._flg_video_feed.set()  # Set the flag to start the video feed
-        while self._flg_video_feed.is_set():
-            try:
-                new_img = self._ctrl_motion_video.get_current_image()
-                new_img_tk = ImageTk.PhotoImage(new_img.resize(self._vid_size, Image.LANCZOS))
-                if new_img_tk != current_image and new_img is not None:
-                    self.after(0, lambda: self._lbl_vid.config(image=new_img_tk))
-                    current_image = new_img_tk
-            except Exception as e:
-                print(f"Error updating video feed: {e}")
-            finally: time.sleep(20/1000)
+        if not self._flg_video_feed.is_set():
+            self._timer.stop()
+            return
+        try:
+            new_img = self._ctrl_motion_video.get_current_image()
+            if new_img is None: return
+            new_imgqt = ImageQt.toqpixmap(new_img)
+            if new_imgqt != self._last_imgqt:
+                self._lbl_vid.setPixmap(new_imgqt)
+                self._last_imgqt = new_imgqt
+        except Exception as e:
+            print(f"Error updating video feed: {e}")
             
     def _init_finetune_widgets(self):
         """Initializes the fine-tune widgets for the gridified coordinates"""
-    # >>> Create a treeview widget to display the gridified coordinates <<<
-        sfrm_treeview = tk.Frame(self._frm_finetune)
-        sfrm_params = tk.LabelFrame(self._frm_finetune, text='Parameters')
-        sfrm_treeview.pack(side=tk.LEFT,fill=tk.BOTH, expand=True, padx=5, pady=5)
-        sfrm_params.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
+        # >>> Create a treeview widget to display the gridified coordinates <<<
+        self.tree_roi.setColumnCount(5)
+        self.tree_roi.setHeaderLabels(['Row', 'Col', 'Name', 'Center coor [μm]', 'Modified'])
         
-        self._treeview_mapcoor = ttk.Treeview(sfrm_treeview, columns=('row','col','name','coor','mod'), show='headings',
-                                              selectmode='browse')
-        self._treeview_mapcoor.heading('row', text='Row')
-        self._treeview_mapcoor.heading('col', text='Col')
-        self._treeview_mapcoor.heading('name', text='Name')
-        self._treeview_mapcoor.heading('coor', text='Center coor [μm]')
-        self._treeview_mapcoor.heading('mod', text='Modified')
-        self._treeview_mapcoor.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        self._treeview_mapcoor.bind('<Double-1>', self._on_treeview_double_click)
+        # Bind double-click event to the treeview
+        self.tree_roi.doubleClicked.connect(self._on_treeview_double_click)
         
         self._update_treeview()
-        try: self._treeview_mapcoor.selection_set(self._treeview_mapcoor.get_children()[0])
-        except Exception as e: print(f"Error selecting first item in treeview: {e}")
-        
-        # Create a scrollbar for the treeview
-        scrollbar_y = ttk.Scrollbar(sfrm_treeview, orient='vertical', command=self._treeview_mapcoor.yview)
-        scrollbar_x = ttk.Scrollbar(sfrm_treeview, orient='horizontal', command=self._treeview_mapcoor.xview)
-        self._treeview_mapcoor.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
-        scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
-        scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
-        
-        # Create a label for the instructions
-        lbl_instruction = tk.Label(sfrm_treeview, text="Double-click on a coordinate to modify it.")
-        lbl_instruction.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
-        
+        item = self.tree_roi.topLevelItem(0)
+        if item is not None: self.tree_roi.setCurrentItem(item)
         
     # >>> Setup the parameters widget <<<
-        self._str_loc_xy = tk.StringVar(value=Enums_RefXY.center_center.value)
-        self._str_loc_z = tk.StringVar(value=Enums_RefZ.bottom.value)
-        self._combo_loc_xy = ttk.Combobox(sfrm_params, textvariable=self._str_loc_xy,
-                                          values=[e.value for e in Enums_RefXY], state='readonly', width=15)
-        self._combo_loc_z = ttk.Combobox(sfrm_params, textvariable=self._str_loc_z,
-                                          values=[e.value for e in Enums_RefZ], state='readonly', width=15)
-        btn_commit = tk.Button(sfrm_params, text='Set current coor as reference',
-                               command=self._update_coordinate_withCurrentCoor)
-        btn_goToNext = tk.Button(sfrm_params, text='Go to next coordinate',
-                               command=self._go_to_nextMappingCoor)
-        self._btn_finish = tk.Button(sfrm_params, text='Finish editing', command=self._finalise_editing)
-        self._btn_cancel_all = tk.Button(sfrm_params, text='Cancel all modifications', command=self._terminate)
+        self.combo_xy.addItems([e.value for e in Enums_RefXY])
+        self.combo_z.addItems([e.value for e in Enums_RefZ])
         
-        self._combo_loc_xy.pack(fill=tk.X, padx=5, pady=5)
-        self._combo_loc_z.pack(fill=tk.X, padx=5, pady=5)
-        btn_commit.pack(fill=tk.X, padx=5, pady=5)
-        btn_goToNext.pack(fill=tk.X, padx=5, pady=5)
-        self._btn_finish.pack(fill=tk.X, padx=5, pady=5)
-        self._btn_cancel_all.pack(fill=tk.X, padx=5, pady=5)
+        self.combo_xy.setCurrentText(Enums_RefXY.center_center.value)
+        self.combo_z.setCurrentText(Enums_RefZ.bottom.value)
+        
+        self.btn_set_currcoor.clicked.connect(self._update_coordinate_withCurrentCoor)
+        self.btn_nextROI.clicked.connect(self._go_to_nextMappingCoor)
+        self.btn_finish.clicked.connect(self._finalise_editing)
+        self.btn_cancel.clicked.connect(self.close)
 
-    @thread_assign
-    def _update_treeview(self) -> threading.Thread:
+    @Slot()
+    def _update_treeview(self) -> None:
         """Updates the treeview with the gridified coordinates"""
         # Store the current selection
         sel = self._get_selected_mappingCoor(suppress_warning=True)
         idx = sel[0] if sel else None
         
-        self._treeview_mapcoor.delete(*self._treeview_mapcoor.get_children())
+        self.tree_roi.clear()
         for i, mapping_coor in enumerate(self._list_mapping_coor):
             center_coor = np.mean(mapping_coor.mapping_coordinates, axis=0)
             center_coor_str = f"({center_coor[0]*1e3:.1f}, {center_coor[1]*1e3:.1f}, {center_coor[2]*1e3:.1f})"
             row, col = self._list_loc[i]
             name = mapping_coor.mappingUnit_name
             modified = 'Yes' if self._list_mod[i] else 'No'
-            self._treeview_mapcoor.insert('', 'end', values=(row, col, name, center_coor_str, modified))
+            item = qw.QTreeWidgetItem([str(row+1), str(col+1), name, center_coor_str, modified])
+            self.tree_roi.addTopLevelItem(item)
             
         # Restore the selection
         if idx is not None and idx < len(self._list_mapping_coor):
-            iid = self._treeview_mapcoor.get_children()[idx]
-            self._treeview_mapcoor.selection_set(iid)
-            self._treeview_mapcoor.see(iid)
+            iid = self.tree_roi.topLevelItem(idx)
+            if iid is None: return
+            self.tree_roi.setCurrentItem(iid)
+            self.tree_roi.scrollToItem(iid)
         
     def _calculate_target_coordinate(self, mapping_coor:MeaCoor_mm) -> np.ndarray:
         """
@@ -754,8 +686,8 @@ class TopLevel_FineTuneGridify(tk.Toplevel):
         Returns:
             np.ndarray: The selected coordinate in the form of a numpy array [x, y, z]
         """
-        loc_xy = Enums_RefXY(self._str_loc_xy.get())
-        loc_z = Enums_RefZ(self._str_loc_z.get())
+        loc_xy = Enums_RefXY(self.combo_xy.currentText())
+        loc_z = Enums_RefZ(self.combo_z.currentText())
         
         if loc_xy == Enums_RefXY.top_left:
             x = np.min([coor[0] for coor in mapping_coor.mapping_coordinates])
@@ -784,6 +716,7 @@ class TopLevel_FineTuneGridify(tk.Toplevel):
         elif loc_xy == Enums_RefXY.bottom_right:
             x = np.max([coor[0] for coor in mapping_coor.mapping_coordinates])
             y = np.min([coor[1] for coor in mapping_coor.mapping_coordinates])
+        else: raise ValueError(f"Invalid loc_xy value: {loc_xy}")
             
         if loc_z == Enums_RefZ.top:
             z = np.max([coor[2] for coor in mapping_coor.mapping_coordinates])
@@ -791,15 +724,15 @@ class TopLevel_FineTuneGridify(tk.Toplevel):
             z = np.mean([coor[2] for coor in mapping_coor.mapping_coordinates])
         elif loc_z == Enums_RefZ.bottom:
             z = np.min([coor[2] for coor in mapping_coor.mapping_coordinates])
+        else: raise ValueError(f"Invalid loc_z value: {loc_z}")
             
         return np.array([x, y, z])
     
-    @thread_assign
-    def _update_coordinate_withCurrentCoor(self) -> bool:
+    def _update_coordinate_withCurrentCoor(self) -> None:
         """Updates the selected coordinate with the current position of the motion controller"""
         result = self._get_selected_mappingCoor()
-        if not result: return False
-
+        if not result: return
+        
         idx, mapping_coor = result
         
         current_coor = np.array(self._ctrl_motion_video.get_coordinates_closest_mm())
@@ -807,8 +740,8 @@ class TopLevel_FineTuneGridify(tk.Toplevel):
         new_center_coor = calculate_coordinatesCenter(
             ref_coor=current_coor,
             mappingCoor=mapping_coor,
-            loc_xy=Enums_RefXY(self._str_loc_xy.get()),
-            loc_z=Enums_RefZ(self._str_loc_z.get())
+            loc_xy=Enums_RefXY(self.combo_xy.currentText()),
+            loc_z=Enums_RefZ(self.combo_z.currentText())
         )
         
         # Update the mapping coordinates by translating them to the new center coordinates
@@ -822,12 +755,11 @@ class TopLevel_FineTuneGridify(tk.Toplevel):
         # Update the mapping coordinates in the list
         self._list_mapping_coor[idx] = new_mapping_coor
         self._list_mod[idx] = True  # Mark the coordinate as modified
-        self._update_treeview().join()  # Refresh the treeview to show the updated coordinates
+        self._update_treeview()
 
-        return True
+        return
     
-    @thread_assign
-    def _go_to_nextMappingCoor(self) -> threading.Thread:
+    def _go_to_nextMappingCoor(self) -> None:
         """Updates the next coordinate with the current position of the motion controller
         and moves the motion controller to the next coordinate"""
         # Select the next coordinate in the treeview
@@ -835,13 +767,14 @@ class TopLevel_FineTuneGridify(tk.Toplevel):
         if not result: return None
         idx, _ = result
         if idx == len(self._list_mapping_coor) - 1:
-            messagebox.showinfo("Info", "You have reached the last coordinate.")
-            self.lift()
+            qw.QMessageBox.information(self, "Info", "You have reached the last coordinate.")
             return
-        self._treeview_mapcoor.selection_set(self._treeview_mapcoor.get_children()[idx + 1])
+        
+        item = self.tree_roi.topLevelItem(idx + 1)
+        if item is not None: self.tree_roi.setCurrentItem(item)
         
         # Move to the next coordinate
-        self._go_to_selectedMappingCoor().join()
+        self._go_to_selectedMappingCoor()
 
     def _get_selected_mappingCoor(self, suppress_warning: bool = False) -> tuple[int,MeaCoor_mm]|None:
         """Returns the currently selected mapping coordinates from the treeview
@@ -852,76 +785,99 @@ class TopLevel_FineTuneGridify(tk.Toplevel):
         Returns:
             tuple: A tuple containing the index of the selected mapping coordinates and the mapping coordinates object
         """
-        selected_item = self._treeview_mapcoor.selection()
+        selected_item = self.tree_roi.currentItem()
         if not selected_item and not suppress_warning:
-            messagebox.showwarning("Warning", "Please select a mapping coordinate to modify.")
+            qw.QMessageBox.warning(self, "Warning", "Please select a mapping coordinate to modify.")
             return None
         
-        idx = self._treeview_mapcoor.index(selected_item)
+        idx = self.tree_roi.indexOfTopLevelItem(selected_item)
         return idx, self._list_mapping_coor[idx]
         
-    @thread_assign
-    def _go_to_selectedMappingCoor(self) -> threading.Thread:
-        """Moves the motion controller to the selected mapping coordinates"""
+    @Slot()
+    def _go_to_selectedMappingCoor(self) -> None:
+        """
+        Moves the motion controller to the selected mapping coordinates
+        """
         result = self._get_selected_mappingCoor()
-        if not result:
-            return
+        if not result: return
         
         _, mapping_coor = result
         target_coor = self._calculate_target_coordinate(mapping_coor)
+        target_coor = target_coor.astype(float)
+        target_coor = (target_coor[0], target_coor[1], target_coor[2])
         
-        try: self._ctrl_motion_video.go_to_coordinates(*target_coor)
-        except Exception as e: messagebox.showerror("Error", f"Failed to move to coordinates: {e}"); return
-        
-    @thread_assign
-    def _on_treeview_double_click(self, event):
-        print("Treeview double-clicked")
+        try:
+            self.sig_gotocoor.emit(target_coor, threading.Event())
+        except Exception as e:
+            qw.QMessageBox.critical(self, "Error", f"Failed to move to coordinates: {e}")
+            return
+    
+    @Slot()
+    def _on_treeview_double_click(self, index: QModelIndex) -> None:
         self._go_to_selectedMappingCoor()
         
-    @thread_assign
+    @Slot()
     def _finalise_editing(self):
         """Finalises the editing of the gridified coordinates and returns the modified coordinates"""
-        self._btn_cancel_all.config(state='disabled')
-        self._btn_finish.config(state='disabled')
+        self.btn_cancel.setEnabled(False)
+        self.btn_finish.setEnabled(False)
         
-        confirmation = messagebox.askyesno("Confirm", "Are you sure you want to finish editing?\n"
-            "This will save all changes made to the mapping coordinates.")
-        if not confirmation:
-            self._btn_cancel_all.config(state='normal')
-            self._btn_finish.config(state='normal')
+        confirmation = qw.QMessageBox.question(self, "Confirm", "Are you sure you want to finish editing?\n"
+            "This will save all changes made to the mapping coordinates.",
+            qw.QMessageBox.Yes | qw.QMessageBox.No, # pyright: ignore[reportAttributeAccessIssue]
+            qw.QMessageBox.No # pyright: ignore[reportAttributeAccessIssue]
+        )
+        if confirmation != qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue]
+            self.btn_cancel.setEnabled(True)
+            self.btn_finish.setEnabled(True)
             return
         
         # Return the modified mapping coordinates
-        self._queue_result.put(self._list_mapping_coor)
+        self.sig_list_modified_ROI.emit(self._list_mapping_coor)
         self._flg_video_feed.clear()
-        self.destroy()
         
-    @thread_assign
-    def _terminate(self):
-        """Terminates the video feed and closes the window"""
-        self._btn_cancel_all.config(state='disabled')
-        self._btn_finish.config(state='disabled')
-        confirmation = messagebox.askyesno("Confirm", "Are you sure you want to cancel all modifications?\n"
+        self._programmatic_close = True
+        self.close()
+        
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """
+        Terminates the video feed and closes the window
+        """
+        if self._programmatic_close:
+            event.accept()
+            return super().closeEvent(event)
+        
+        self.btn_cancel.setEnabled(False)
+        self.btn_finish.setEnabled(False)
+        
+        confirmation = qw.QMessageBox.question(self, "Confirm", "Are you sure you want to cancel all modifications?\n"
             "This will discard all changes made to the mapping coordinates.\n"
-            "There is no way to undo this action.")
-        if not confirmation:
-            self._btn_cancel_all.config(state='normal')
-            self._btn_finish.config(state='normal')
+            "There is no way to undo this action.",
+            qw.QMessageBox.Yes | qw.QMessageBox.No, # pyright: ignore[reportAttributeAccessIssue]
+            qw.QMessageBox.No # pyright: ignore[reportAttributeAccessIssue]
+        )
+        if confirmation != qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue]
+            self.btn_cancel.setEnabled(True)
+            self.btn_finish.setEnabled(True)
             return
 
         self._flg_video_feed.clear()
-        self._queue_result.put(None)
-        self.destroy()
+        self.sig_cancelled.emit()
+        
+        return super().closeEvent(event)
         
 def test():
     from iris.gui.motion_video import generate_dummy_motion_controller
     
-    root = tk.Tk()
-    root.title('Test')
+    app = qw.QApplication([])
+    mw = qw.QMainWindow()
+    mwd = qw.QWidget()
+    mw.setCentralWidget(mwd)
+    lyt = qw.QHBoxLayout()
+    mwd.setLayout(lyt)
     
-    frm_motion = generate_dummy_motion_controller(root)
-    frm_motion._init_workers()
-    frm_motion.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
+    frm_motion = generate_dummy_motion_controller(mwd)
+    lyt.addWidget(frm_motion)
     
     coorUnit = MeaCoor_mm(
         mappingUnit_name='Test Mapping Unit',
@@ -932,14 +888,14 @@ def test():
     coorHub.append(coorUnit)
     
     frm_coor_mod = Gridify(
-        root,
+        mwd,
         mappingCoorHub=coorHub,
         motion_controller=frm_motion,
     )
+    lyt.addWidget(frm_coor_mod)
     
-    frm_coor_mod.grid(row=0, column=1, sticky='nsew', padx=5, pady=5)
-    
-    root.mainloop()
+    mw.show()
+    app.exec()
     
 if __name__ == '__main__':
     test()
