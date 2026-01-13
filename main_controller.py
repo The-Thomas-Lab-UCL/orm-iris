@@ -68,7 +68,8 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
                  xy_controller:'Controller_XY',
                  z_controller:'Controller_Z',
                  raman_hub:DataStreamer_Raman,
-                 stage_hub:DataStreamer_StageCam):
+                 stage_hub:DataStreamer_StageCam,
+                 base_manager:MyManager):
         
         # Set the app windows name and inherit all the properties
         screenName = 'ORM-IRIS: Open-source Raman microscope controller'
@@ -81,6 +82,12 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         self._ramanHub = raman_hub
         self._stageHub = stage_hub
         self._coorHub = List_MeaCoor_Hub()
+        
+        # > Controller proxies (for proper termination)
+        self._raman_controller = raman_controller
+        self._xy_controller = xy_controller
+        self._z_controller = z_controller
+        self._base_manager = base_manager
         
         # Data hub setups
         self._dataHub_map = Wdg_DataHub_Mapping(self,autosave=True)
@@ -340,59 +347,45 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         
         try: self._hilvl_raman.terminate()
         except Exception as e: print('Error in closing the high level controller:\n{}'.format(e))
-        
-        # try: [toplevel_extension.withdraw() for toplevel_extension in self._list_extensions_toplevel if isinstance(toplevel_extension,tk.Toplevel)]
-        # except Exception as e: print('Error in closing the extensions:\n{}'.format(e))
-        
-        # try: [toplevel_extension.terminate() for toplevel_extension in self._list_extensions_toplevel if isinstance(toplevel_extension,Extension_TopLevel)]
-        # except Exception as e: print('Error in closing the extensions:\n{}'.format(e))
-        
-        # try: self.toplevel_calibrator.withdraw()
-        # except Exception as e: print('Error in closing the calibrator:\n{}'.format(e))
-        
-        # try: self.toplevel_analyser.withdraw()
-        # except Exception as e: print('Error in closing the analyser:\n{}'.format(e))
-        
-        # try: [toplevel_analyser.withdraw() for toplevel_analyser in self._list_analyser_toplevel if isinstance(toplevel_analyser,tk.Toplevel)]
-        # except Exception as e: print('Error in closing the analyser windows:\n{}'.format(e))
-        
-        # try: self.withdraw()
-        # except Exception as e: print('Error in closing the main controller:\n{}'.format(e))
-        
-        try: self._raman.terminate()
-        except Exception as e: print('Error in closing the spectrometer controller:\n{}'.format(e))
-        
-        try: self._motion.terminate()
-        except Exception as e: print('Error in closing the motion controller:\n{}'.format(e))
                 
         try:
+            print('Terminating the spectrometer controller connection')
+            self._ramanHub.terminate_process()
+            self._ramanHub.terminate()
+            self._ramanHub.join(timeout=5)
+        except Exception as e: print('Error in closing the spectrometer controller:\n{}'.format(e))
+        
+        try:
+            print('Terminating the spectrometer controller GUI')
+            self._raman.terminate()
+        except Exception as e: print('Error in closing the spectrometer controller:\n{}'.format(e))
+
+        try:
             print('Terminating the motion controller connections')
-            self._stageHub.terminate()  # Terminates all continuous measurement and processes
-            self._stageHub.join(3)       # Waits for the processes to be terminated
+            self._stageHub.terminate()
+            self._stageHub.join(timeout=5)
         except Exception as e: print('Error in closing the motion controller:\n{}'.format(e))
         
         try:
-            print('Terminating the spectrometer controller connection')
-            self._ramanHub.terminate()
-            self._ramanHub.join(3)       # Waits for the processes to be terminated
-        except Exception as e: print('Error in closing the spectrometer controller:\n{}'.format(e))
-        
-        # try: self.toplevel_analyser.destroy()
-        # except Exception as e: print('Error in closing the analyser:\n{}'.format(e))
-        
+            print('Terminating the motion controller GUI')
+            self._motion.terminate()
+        except Exception as e: print('Error in closing the motion controller:\n{}'.format(e))
+                
         print('Terminating the processes')
         self._processor.terminate()
         
-        # Force close all the threads in this session
+        try:
+            print('Shutting down the multiprocessing manager')
+            self._base_manager.shutdown()
+        except Exception as e: print('Error in shutting down the manager:\n{}'.format(e))
+        
         print('---------- PROGRAM TERMINATED SUCCESSFULLY ----------')
+        
+        # Force exit to prevent hanging due to lingering processes
+        os._exit(0)
 
 if __name__ == '__main__':
     print('>>>>> IRIS: INITIATING THE CONTROLLERS AND THE APP <<<<<')
-    # Required on Windows when using spawn/freeze (prevents child import recursion)
-    mp.freeze_support()
-    # Force the safer multiprocessing start method for Qt (avoids fork+Qt thread parenting crashes)
-    if mp.get_start_method(allow_none=True) != 'spawn':
-        mp.set_start_method('spawn', force=True)
     app = qw.QApplication([])
     
     base_manager = MyManager()
@@ -403,8 +396,7 @@ if __name__ == '__main__':
     xyControllerProxy,zControllerProxy,camControllerProxy,stage_namespace=initialise_proxy_stage(base_manager)
     ramanHub = DataStreamer_Raman(ramanControllerProxy,ramanDictProxy)
     stageHub = DataStreamer_StageCam(xyControllerProxy,zControllerProxy,camControllerProxy,stage_namespace)
-    ramanHub.start()
-    stageHub.start()
+    # Don't start hubs yet - defer until after GUI is initialized
     processor = mp.Pool()
     
     mainWindow_Controller = MainWindow_Controller(
@@ -413,13 +405,20 @@ if __name__ == '__main__':
         xy_controller=xyControllerProxy,
         z_controller=zControllerProxy,
         raman_hub=ramanHub,
-        stage_hub=stageHub)
+        stage_hub=stageHub,
+        base_manager=base_manager
+        )
     
     # Defer initialisations until after the event loop starts to prevent crashes
-    QTimer.singleShot(0, mainWindow_Controller.initialisations)
+    # Also start the hubs after the GUI is shown to prevent cross-thread Qt object parenting issues
+    def start_hubs_and_init():
+        ramanHub.start()
+        stageHub.start()
+        mainWindow_Controller.initialisations()
+    
+    QTimer.singleShot(0, start_hubs_and_init)
     app.installEventFilter(mainWindow_Controller.shortcutHandler)
     
     mainWindow_Controller.show()
     
     app.exec()
-    base_manager.shutdown()
