@@ -388,6 +388,11 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
 
 if __name__ == '__main__':
     print('>>>>> IRIS: INITIATING THE CONTROLLERS AND THE APP <<<<<')
+    # Required on Windows when using spawn/freeze (prevents child import recursion)
+    mp.freeze_support()
+    # Force the safer multiprocessing start method for Qt (avoids fork+Qt thread parenting crashes)
+    if mp.get_start_method(allow_none=True) != 'spawn':
+        mp.set_start_method('spawn', force=True)
     app = qw.QApplication([])
     
     base_manager = MyManager()
