@@ -202,7 +202,7 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
     """
     sig_offload_mappingCoor = Signal(str, list, int) # Emitted to offload the mapping coordinates to the local disk.
     sig_delete_offload_mappingCoor = Signal(str) # Emitted to delete the offloaded mapping coordinates from the local disk.
-    sig_load_mappingCoor = Signal(str, list, int) # Emitted to load the mapping coordinates from the local disk.
+    sig_load_mappingCoor = Signal(list) # Emitted to load the mapping coordinates from the local disk.
     sig_load_lastsession_MappingCoordinates = Signal() # Emitted to load the mapping coordinates from the previous session.
     sig_save_mappingCoor = Signal(list, str, str) # Emitted to save the mapping coordinates to the local disk.
     
