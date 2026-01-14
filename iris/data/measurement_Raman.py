@@ -30,6 +30,8 @@ import queue
 import os
 from typing import Self, Literal
 
+from dataclasses import dataclass
+
 import bisect
 
 from glob import glob
@@ -39,7 +41,7 @@ if __name__ == '__main__':
     import sys
     import os
     libdir = os.path.abspath(r'.\iris')
-    sys.path.append(os.path.dirname(libdir))
+    sys.path.insert(0, os.path.dirname(libdir))
 
 
 from iris.utils.general import *
@@ -83,7 +85,6 @@ class MeaRaman():
         self._integration_time_ms:int = int_time_ms    # Integration time used for the measuremrent in milliseconds
         
         self._spectrum_rawlist:list[pd.DataFrame] = []      # list of pandas df (of the raw measurements): for storage
-        self._spectrum_rawlist_temp:list[pd.DataFrame] = [] # temporary storage for the raw measurements list
         
         self._spectrum_analysed:pd.DataFrame|None = None            # pandas df: stores the averaged spectrum
         
@@ -191,7 +192,7 @@ class MeaRaman():
         Returns:
             bool: True if the measurement data exists, False otherwise
         """
-        if len(self._spectrum_rawlist) == 0: return False
+        if len(self._spectrum_rawlist) == 0 and not isinstance(self._spectrum_analysed,pd.DataFrame): return False
         self.check_uptodate(autoupdate=True)
         return True
         
@@ -212,7 +213,7 @@ class MeaRaman():
         """
         return self._dict_metadata['laser_power_milliwatt'],self._dict_metadata['laser_wavelength_nm']
         
-    def get_laserMetadata_key(self) -> tuple[str]:
+    def get_laserMetadata_key(self) -> tuple[str,str]:
         """
         Returns the keys of the laser metadata
         
@@ -243,7 +244,7 @@ class MeaRaman():
         self._dict_metadata['accumulation'] = len(self._spectrum_rawlist)
         
         if autoupdate and not self._flg_uptodate:
-            self._spectrum_analysed = self._average(self._spectrum_rawlist)
+            self._spectrum_analysed = self.average(self._spectrum_rawlist)
             self._flg_uptodate = True
         return self._flg_uptodate
     
@@ -312,50 +313,28 @@ class MeaRaman():
         """
         return self._spectrum_rawlist
     
-    def set_raw_list(self,df_mea:pd.DataFrame=None,timestamp_int:int|None=None,idx:int|None=None):
+    def set_raw_list(self,df_mea:pd.DataFrame,timestamp_int:int,max_accumulation:int=1000) -> list[pd.DataFrame]:
         """
         Adds a measurement dataframe to the stored list of continuous measurements
         
         Args:
             df_mea (pd.DataFrame, optional): df of the measurement. Defaults to None.
-            timestmap_int (int, optional): timestamp of the measurement in integer [microsec].
+            timestamp_int (int, optional): timestamp of the measurement in integer [microsec].
             If none, takes the current timestamp. Defaults to None.
-            idx (int, optional): storage location (index) for the given measurement. If none, appends the measurement. Defaults to None.
         """
-        assert isinstance(idx,(type(None),int)), "'idx' should be an integer or None"
         assert isinstance(df_mea,pd.DataFrame), "'df_mea' should be a pandas DataFrame"
-        assert isinstance(timestamp_int,(type(None),int)), "'timestamp_int' should be an integer or None"
+        assert isinstance(timestamp_int,int), "'timestamp_int' should be an integer"
         
-        if isinstance(timestamp_int,type(None)):
-            timestamp_int = get_timestamp_us_int()
         self._measurement_time = timestamp_int
         
-        # Updates the flag to let the class know that a new measurement has been added to the list    
+        # Updates the flag to let the class know that a new measurement has been added to the list
         self._flg_uptodate = False
-        
-        # Checks the length of the current list
-        list_len = len(self._spectrum_rawlist)
-        # Appends the measurement if no index is given, or if the given index is just right next
-        if isinstance(idx,type(None)):
-            self._spectrum_rawlist.append(df_mea.copy())
-        elif idx == list_len:
-            self._spectrum_rawlist.append(df_mea.copy())
-        elif idx > list_len or idx < 0:
-            raise IndexError('set_raw_list: Index out of range')
+
+        if len(self._spectrum_rawlist) < max_accumulation:
+            self._spectrum_rawlist.append(df_mea)
         else:
-            self._spectrum_rawlist[idx] = df_mea.copy()
-        
-        # Safety to prevent memory leak. Warns the user if the list length is excessively long and automatically stores them away if so
-        if list_len > 250:
-            # print('Continuous measurement stored list is MORE THAN 250 DF LONG!!!')
-            # print('If the stored list length exceeds 2000 everything will be removed!')
-            pass
-        elif list_len > 2000:
-            print('Continuous measurement stored list is MORE THAN 2000 DF LONG!!!')
-            print('Stored list has been ERASED')
-            self._spectrum_rawlist_temp = self._spectrum_rawlist.copy()
-            self._spectrum_rawlist = []
-        pass
+            self._spectrum_rawlist.pop(0)
+            self._spectrum_rawlist.append(df_mea)
         return self._spectrum_rawlist
         
     def get_average_rawlist(self,spectrum_rawlist) -> pd.DataFrame:
@@ -369,9 +348,21 @@ class MeaRaman():
         Returns:
             pd.df: averaged spectrum
         """
-        spectrum_avg = self._average(spectrum_rawlist)
+        spectrum_avg = self.average(spectrum_rawlist)
         return spectrum_avg
-
+    
+    def calculate_analysed(self) -> pd.DataFrame:
+        """
+        Calculates the analysed values (averaged and subtracted)
+        
+        Returns:
+            pd.DataFrame: analysed spectra
+        """
+        spectrum_analysed = self.average(self._spectrum_rawlist)
+        self._flg_uptodate = True
+        self._spectrum_analysed = spectrum_analysed
+        return spectrum_analysed
+    
     def set_analysed(self,spectrum_analysed:pd.DataFrame|np.ndarray):
         """
         Sets the analysed values (averaged and subtracted)
@@ -386,7 +377,7 @@ class MeaRaman():
         else:
             if not spectrum_analysed.shape[1] == 2: raise ValueError("'spectrum_analysed' should have 2 columns (wavelength, intensity)")
             self._spectrum_analysed = pd.DataFrame(spectrum_analysed, columns=[self.label_wavelength, self.label_intensity])
-
+        
     def get_analysed(self, type:Literal['DataFrame','array']='DataFrame') -> pd.DataFrame|np.ndarray|None:
         """
         Get the analysed spectra.
@@ -404,24 +395,66 @@ class MeaRaman():
         else: ret = self._spectrum_analysed.to_numpy()
 
         return ret
-
-    def _wavelength_similarity_check(self,wavelength_list):
+    
+    def _get_any_measurement(self) -> pd.DataFrame:
         """
-        Check if a list of wavelength is similar, within a tolerance.
-        
-        Args:
-            wavelength_list (list): of wavelengths to be compared
+        Returns a dataframe, either from the analysed or the rawlist
+
+        Returns:
+            pd.DataFrame: Dataframe of the measurement.
+        """
+        assert self.check_measurement_exist(), 'No valid measurement exists to get Raman shift array.'
+        if not isinstance(self._spectrum_analysed, pd.DataFrame):
+            return self._spectrum_rawlist[-1]
+        elif isinstance(self._spectrum_analysed, pd.DataFrame):
+            return self._spectrum_analysed
+        else: raise ValueError('Analysed spectra is not in a valid format')
+    
+    def get_arr_wavelength(self) -> np.ndarray:
+        """
+        Returns the wavelength array of the analysed spectra
+
+        Returns:
+            np.ndarray: Wavelength array
+        """
+        df = self._get_any_measurement()
+        return df[self.label_wavelength].to_numpy()
+
+    def get_arr_ramanshift(self) -> np.ndarray:
+        """
+        Returns the Raman shift array of the analysed spectra
         
         Returns:
-            bool: True if similar, False if there's a difference larger than self.tolerance
+            np.ndarray: Raman shift array
         """
-        def check(wl1, wl2):
-            return all(abs(w1 - w2) <= self._tolerance for w1, w2 in zip(wl1, wl2))
+        df = self._get_any_measurement()
         
-        similar = all(check(wl, wavelength_list[0]) for wl in wavelength_list[1:])
-        return similar
+        laser_wavelength = self.get_laser_params()[1]
+        wavelength_array = df[self.label_wavelength].to_numpy()
+        ramanshift_array = convert_wavelength_to_ramanshift(wavelength_array, laser_wavelength)
+        
+        return ramanshift_array # type: ignore ; It's definitely a np.ndarray
     
-    def _average(self,spectra_list:list[pd.DataFrame],queue_response:queue.Queue=None) -> pd.DataFrame:
+    def get_arr_intensity(self, mea_type:Literal['analysed','raw','any']='analysed') -> np.ndarray:
+        """
+        Returns the intensity array of the analysed or raw spectra
+        
+        Args:
+            mea_type (Literal['analysed','raw'], optional): Type of spectra to get the intensity from. Defaults to 'analysed'.
+        
+        Returns:
+            np.ndarray: Intensity array
+        """
+        assert mea_type in ['analysed','raw','any'], "'type' should be either 'analysed', 'raw', or 'any'"
+        assert self.check_measurement_exist(), 'No valid measurement exists to get intensity array.'
+        if mea_type == 'analysed': df = self._spectrum_analysed
+        elif mea_type == 'raw': df = self._spectrum_rawlist[-1]
+        elif mea_type == 'any': df = self._get_any_measurement()
+        df:pd.DataFrame
+        return df[self.label_intensity].to_numpy()
+
+    @staticmethod
+    def average(spectra_list:list[pd.DataFrame]) -> pd.DataFrame:
         """
         Averages a given spectra list. Refer to the wavelenght_name and intensity_name
         for the required column names in the input dataframes.
@@ -430,32 +463,36 @@ class MeaRaman():
 
         Args:
             spectra_list (list): List of spectra dataframes in the same form as the one for plot
-            queue_response (queue.Queue): A queue to put the response in if required
 
         Returns:
             Dataframe: Average spectra in the same form as the input
         """
-        intensity_list = [spectra[self.label_intensity].values for spectra in spectra_list]
-        wavelength_list = [spectra[self.label_wavelength].values for spectra in spectra_list]
+        lbl_wvl = DataAnalysisConfigEnum.WAVELENGTH_LABEL.value
+        lbl_int = DataAnalysisConfigEnum.INTENSITY_LABEL.value
+        intensity_list = [spectra[lbl_int].values for spectra in spectra_list]
+        wavelength_list = [spectra[lbl_wvl].values for spectra in spectra_list]
+        tolerance = DataAnalysisConfigEnum.SIMILARITY_THRESHOLD.value
+        
+        def wavelength_similarity_check(wavelength_list):
+            def check(wl1, wl2):
+                return all(abs(w1 - w2) <= tolerance for w1, w2 in zip(wl1, wl2))
+            similar = all(check(wl, wavelength_list[0]) for wl in wavelength_list[1:])
+            return similar
         
         # Check if the wavelengths are similar and warns the user if they're different
-        if not self._wavelength_similarity_check(wavelength_list):
+        if not wavelength_similarity_check(wavelength_list):
             print("!!!!! SPECTRA WITH DIFFERENT WAVELENGTHS BEING AVERAGED !!!!!")
             
         # Calculate the average spectrum, extract the wavelengths, and put on the current timestamp
         all_intensities = np.vstack([intensity_list[i] for i in range(len(intensity_list))])
         avg_intensity = np.mean(all_intensities, axis=0)
-        wavelength = spectra_list[0][self.label_wavelength]
+        wavelength = spectra_list[0][lbl_wvl]
         
         # Write the average spectrum dataframe
         avg_spectra = pd.DataFrame({
-        DataAnalysisConfigEnum.WAVELENGTH_LABEL.value: wavelength,
-        DataAnalysisConfigEnum.INTENSITY_LABEL.value: avg_intensity
+            lbl_wvl: wavelength,
+            lbl_int: avg_intensity
         })
-        
-        if queue_response:
-            queue_response.put(avg_spectra)
-        
         return avg_spectra
     
     def copy(self) -> Self: # type: ignore
@@ -597,149 +634,103 @@ class MeaRaman_Plotter():
     """
     A class for plotting Raman spectra from a RamanMeasurement instance
     """
-    def __init__(self) -> None:
+    def __init__(self, plt_size:list|None=None) -> None:
         # >>> Plot parameters <<<
         self.plt_size = AppPlotEnum.PLT_SIZE_1D_PIXEL.value      # Plot size in [pixel x pixel]
         
         self.wavelength_name = DataAnalysisConfigEnum.WAVELENGTH_LABEL.value     # The wavelength column name
         self.intensity_name = DataAnalysisConfigEnum.INTENSITY_LABEL.value       # The spectra intensity column name
         self.ramanshift_name = DataAnalysisConfigEnum.RAMANSHIFT_LABEL.value     # The Raman shift column name
-    
-    def plot_RamanMeasurement(self,measurement:MeaRaman|None=None,title='Spectra',
-                              showplot=False,plt_size:list|None=None, flg_plot_ramanshift=False,
-                              plot_raw:bool=False,
-                              limits:tuple[float,float,float,float]|tuple[None,None,None,None]=(None,None,None,None)) -> np.ndarray:
-        """
-        Plots a given spectra.
         
+        self._fig, self._ax = plt.subplots(figsize=plt_size)
+        
+    def get_fig_ax(self) -> tuple[Figure, Axes]:
+        """
+        Returns the figure and axes used for plotting
+
+        Returns:
+            tuple[Figure, Axes]: figure and axes
+        """
+        return self._fig, self._ax
+    
+    def plot(
+        self,
+        measurement:MeaRaman,
+        title='Spectra',
+        flg_plot_ramanshift=False,
+        plot_raw:bool=False,
+        limits:tuple[float|None,float|None,float|None,float|None]=(None,None,None,None),
+        ) -> None:
+        """
+        Plot a given Ramanmeasurement into the internal figure.
+
         Args:
             measurement (RamanMeasurement): Measurement instance to plot.
             title (str, optional): Title of the plot. Defaults to 'Spectra'.
             showplot (bool, optional): Show the plot with a matplotlib window. Defaults to False.
-            plt_size (list, optional): Manually change the plot size, [y-pixel, x-pixel].
             flg_plot_ramanshift (bool, optional): Plot the Raman shift instead of the wavelength. Defaults to False.
             plot_raw (bool, optional): Plot the raw data instead of the analysed data. Defaults to False.
             limits (tuple[float,float,float,float], optional): Limits of the plot (xmin,xmax,ymin,ymax). Defaults to (None,None,None,None).
-        
-        Returns:
-            ndarray: The resized image of the plot.
-        
-        Note:
-            - If the given 'spectra' variable is not a pandas DataFrame, a white image will be returned.
-            - The plot will be resized based on the specified plt_size or the default plt_size if not provided.
-            - Raman shift will be plot if flg_plot_ramanshift is True.
         """
-        if isinstance(plt_size,type(None)):
-            plt_size = self.plt_size
+        assert isinstance(measurement,MeaRaman), "'measurement' should be a RamanMeasurement instance"
+        assert measurement.check_measurement_exist(), "No valid measurement exists to plot."
         
-        # Check if the given 'spectra' variable is a measurement. Otherwise, returns an white image
-        if not isinstance(measurement,MeaRaman): return np.full((plt_size[0],plt_size[1], 3), 255, dtype=np.uint8)
+        fig,ax = self.get_fig_ax()
+        ax.clear()
         
-        # Initialises the plot
-        if not plot_raw: df = measurement.get_analysed()
-        else: df = measurement.get_raw_list()[-1]
-        list_wavelength = df[measurement.label_wavelength]
-        list_intensity = df[measurement.label_intensity]
+        if not plot_raw: mea_type = 'analysed'
+        else: mea_type = 'raw'
         
-        dpi = plt.rcParams['figure.dpi']
-        plt_size_in = [int(plt_size[0]/dpi),int(plt_size[1]/dpi)]
-        fig = plt.figure(figsize=plt_size_in,constrained_layout=True)
-        # plt.tight_layout(h_pad=0.5,w_pad=0.5)
+        if flg_plot_ramanshift: arr_specpos = measurement.get_arr_ramanshift()
+        else: arr_specpos = measurement.get_arr_wavelength()
         
-        if flg_plot_ramanshift:
-            laser_wavelength = measurement.get_laser_params()[1]
-            list_raman_shift = [convert_wavelength_to_ramanshift(wavelength,laser_wavelength) for wavelength in list_wavelength]
-            list_spectralposition = list_raman_shift
-            xlabel = self.ramanshift_name
-        else:
-            list_spectralposition = list_wavelength
-            xlabel = self.wavelength_name
-        # Slice the list spectral position based on the given x limits
-        if isinstance(limits[0],float):
-            idx_start = bisect.bisect_left(list_spectralposition,limits[0])
-            list_spectralposition = list_spectralposition[idx_start:]
-            list_intensity = list_intensity[idx_start:]
-        if isinstance(limits[1],float):
-            idx_end = bisect.bisect_right(list_spectralposition,limits[1])
-            list_spectralposition = list_spectralposition[:idx_end]
-            list_intensity = list_intensity[:idx_end]
+        arr_intensity = measurement.get_arr_intensity(mea_type=mea_type)
         
-        plt.plot(list_spectralposition, list_intensity)
-        plt.xlabel(xlabel)
-        plt.ylabel(self.intensity_name)
-        plt.title(title)
-        
-        xmin = float(limits[0]) if isinstance(limits[0],(float,int)) else None
-        xmax = float(limits[1]) if isinstance(limits[1],(float,int)) else None
-        ymin = float(limits[2]) if isinstance(limits[2],(float,int)) else None
-        ymax = float(limits[3]) if isinstance(limits[3],(float,int)) else None
+        ax.plot(arr_specpos, arr_intensity)
+        ax.set_xlabel(self.ramanshift_name if flg_plot_ramanshift else self.wavelength_name)
+        ax.set_ylabel(self.intensity_name)
+        ax.set_title(title)
+        ax.set_xlim(limits[0], limits[1])
+        ax.set_ylim(limits[2], limits[3])
 
-        plt.xlim(xmin,xmax)
-        plt.ylim(ymin,ymax)
-        
-        # Get the plot as a NumPy array directly
-        fig = plt.gcf()  # Get the current figure
-        fig.canvas.draw()  # Force a draw 
-
-        renderer = fig.canvas.get_renderer()
-
-        # Extract pixel data as RGBA and convert to BGRA
-        rgba_data = renderer.buffer_rgba()
-        img = np.frombuffer(rgba_data, dtype=np.uint8).reshape(fig.canvas.get_width_height()[::-1] + (4,))
-
-        # Remove alpha channel (OpenCV expects BGR)
-        img = img[..., :3]
-
-        # Resize the image
-        img_resized = cv2.resize(img, (plt_size[0], plt_size[1]))
-        
-        if showplot:
-            plt.show()
-        else:
-            plt.close()
-        return img_resized
-
-    def plot_with_scatter_RamanMeasurement(self, measurement:MeaRaman|None,
-            spectralabel:str='Spectra', title='Spectra',list_scatter_wavelength:list=[],
-            list_scatter_intensity:list=[], scatterlabel:str="Scatter", plt_size:list|None=None,
-            flg_plot_ramanshift=False, fig:Figure|None=None,ax:Axes|None=None,
+    def plot_scatter(
+            self,
+            measurement:MeaRaman|None,
+            title='Spectra',
+            list_scatter_wavelength:list=[],
+            list_scatter_intensity:list=[],
+            flg_plot_ramanshift=False,
             limits:tuple[float,float,float,float]|tuple[None,None,None,None]=(None,None,None,None)
-            ) -> tuple[Figure,Axes]:
+            ) -> None:
         """
         Plots a given spectra with scatter points.
         
         Args:
             measurement (RamanMeasurement): Measurement instance to plot.
-            spectralabel (str, optional): Label of the spectra. Defaults to 'Spectra'.
             title (str, optional): Title of the plot. Defaults to 'Spectra'.
             list_scatter_wavelength (list, optional): List of scatter points' wavelengths. Defaults to [].
             list_scatter_intensity (list, optional): List of scatter points' intensities. Defaults to [].
-            scatterlabel (str, optional): Label of the scatter points. Defaults to "Scatter".
-            plt_size (list, optional): Manually change the plot size, [y-pixel, x-pixel].
             flg_plot_ramanshift (bool, optional): Plot the Raman shift instead of the wavelength. Defaults to False.
-            fig (Figure, optional): Matplotlib figure. Defaults to None.
-            ax (Axes, optional): Matplotlib axes. Defaults to None.
             limits (tuple[float,float,float,float], optional): Limits of the plot (xmin,xmax,ymin,ymax). Defaults to (None,None,None,None).
         
         Returns:
-            tuple[Figure,Axes]: Matplotlib figure and axes
+            None
         
         Note:
             - If the given 'spectra' variable is not a pandas DataFrame, a white image will be returned.
             - The plot will be resized based on the specified plt_size or the default plt_size if not provided.
         """
-        if isinstance(plt_size,type(None)):
-            plt_size = self.plt_size
+        fig = self._fig
+        ax = self._ax
             
         # Initialises the plot
         if isinstance(fig,type(None)) and isinstance(ax,type(None)):
-            fig,ax = plt.subplots(figsize=plt_size)
+            fig,ax = plt.subplots()
         elif isinstance(fig,type(None)) or isinstance(ax,type(None)):
             raise ValueError('Both fig and ax should be given')
         
         # Check if the given 'spectra' variable is a measurement. Otherwise, returns an white image
-        if not isinstance(measurement,MeaRaman):
-            return fig,ax
+        if not isinstance(measurement,MeaRaman): return
         
         # Extracts the data
         df = measurement.get_analysed()
@@ -797,8 +788,6 @@ class MeaRaman_Plotter():
         # ax.legend()
         
         fig.tight_layout()
-        
-        return fig,ax
 
 def test():
     """

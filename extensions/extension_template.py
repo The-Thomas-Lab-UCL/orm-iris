@@ -6,7 +6,11 @@ main controller when starting and terminating the app respectively
 """
 import sys
 import os
-import tkinter as tk
+
+from PySide6.QtGui import QCloseEvent
+import PySide6.QtWidgets as qw
+from PySide6.QtCore import Qt # For context
+from PySide6.QtCore import Signal, Slot, QTimer, QThread
 
 if __name__ == '__main__':
     EXT_DIR = os.path.abspath(r'..\extensions')
@@ -14,11 +18,11 @@ if __name__ == '__main__':
     
 from extensions.extension_intermediary import Ext_DataIntermediary
 
-class Extension_TopLevel(tk.Toplevel):
+class Extension_MainWindow(qw.QMainWindow):
     def __init__(self,master, intermediary: Ext_DataIntermediary) -> None:
         super().__init__(master)
         self._intermediary:Ext_DataIntermediary = intermediary
-        self.title("Extension Template")
+        self.setWindowTitle("Extension Template")
                 
     def initialise(self) -> None:
         """
@@ -35,8 +39,12 @@ class Extension_TopLevel(tk.Toplevel):
     def description(self) -> str:
         return "This is a template for extension development. Please refer to the documentation for more details."
     
-    def withdraw(self) -> None:
+    def closeEvent(self, event: QCloseEvent) -> None:
         """
-        This method is called when the extension is closed. You can use it to hide the extension's GUI.
+        Override the close event to hide the window instead of closing it.
+
+        Args:
+            event (QCloseEvent): The close event that triggered this method.
         """
-        super().withdraw()
+        event.ignore()
+        self.hide()

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pickle
 from typing import Callable, Self
 import pandas as pd
+from random import random
 
 if __name__ == '__main__':
     SCRIPT_DIR = os.path.abspath(r'.\iris')
@@ -129,6 +130,22 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         super().__init__(*args)
         self._list_observers:list[Callable] = []
         
+    def validator_new_name(self, new_name:str) -> bool:
+        """
+        Checks if a new mapping unit name is valid (i.e., not already in use).
+        
+        Args:
+            new_name (str): The new mapping unit name to check.
+            
+        Returns:
+            bool: True if the name is valid, False otherwise.
+        """
+        if not isinstance(new_name, str): raise TypeError(f"Expected str, got {type(new_name)}")
+        for mapcoor in self:
+            if mapcoor.mappingUnit_name == new_name:
+                return False
+        return True
+        
     def add_observer(self, observer:Callable):
         """
         Adds an observer to the list of observers.
@@ -144,8 +161,8 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         Notifies all observers in the list of observers.
         """
         for observer in self._list_observers:
-            if callable(observer): observer()
-            else: raise TypeError(f"Observer {observer} is not callable")
+            try: observer()
+            except Exception as e: print(f"Error notifying observer {observer}: {e}")
         
     def search_mappingCoor(self, mappingUnit_name:str) -> int|None:
         """
@@ -163,6 +180,22 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         if mappingUnit_name in list_names: idx =  list_names.index(mappingUnit_name)
         return idx
     
+    def get_mappingCoor(self, mappingUnit_name:str) -> MeaCoor_mm|None:
+        """
+        Gets a mapping coordinates object from the list by its mapping unit name.
+        
+        Args:
+            mappingUnit_name (str): The name of the mapping unit to get.
+            
+        Returns:
+            MappingCoordinates: The mapping coordinates object, or None if not found.
+        """
+        if not isinstance(mappingUnit_name, str): raise TypeError(f"Expected str, got {type(mappingUnit_name)}")
+        for mapcoor in self:
+            if mapcoor.mappingUnit_name == mappingUnit_name:
+                return mapcoor
+        return None
+
     def remove_mappingCoor(self, mappingUnit_name:str):
         """
         Removes a mapping unit from the list of mapping coordinates.
@@ -220,7 +253,7 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         super().append(mapCoor)
         self._notify_observers()
         
-    def extend(self, mapCoor:list[MeaCoor_mm]):
+    def extend(self, mapCoor:list[MeaCoor_mm], *args, **kwargs):
         """
         Extends the list with a list of mapping coordinates objects.
         
@@ -232,7 +265,7 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         super().extend(mapCoor)
         self._notify_observers()
         
-    def pop(self, idx:int) -> MeaCoor_mm:
+    def pop(self, idx:int, *args, **kwargs) -> MeaCoor_mm:
         """
         Pops a mapping coordinates object from the list by index.
         
@@ -262,5 +295,21 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         if not isinstance(list_unitNames, list) or not all(isinstance(name, str) for name in list_unitNames):
             raise TypeError(f"Expected list of str, got {type(list_unitNames)}")
         
-        list_mapCoor = [self[self.search_mappingCoor(name)] for name in list_unitNames if self.search_mappingCoor(name) is not None]
+        list_mapCoor = [self[idx] for idx in range(len(self)) if self[idx].mappingUnit_name in list_unitNames]
         return list_mapCoor
+    
+    def generate_dummy_data(self, num_units:int=5, num_coords:int=10):
+        """
+        Generates dummy data for testing purposes.
+        
+        Args:
+            num_units (int): The number of mapping units to generate. Defaults to 5.
+            num_coords (int): The number of coordinates per mapping unit. Defaults to 10.
+        """
+        for i in range(num_units):
+            mappingUnit_name = f"Unit_{i+1}"
+            # Randomise the coordinates between 0 and 1 multiplied by a factor
+            multiplier = 10000
+            mapping_coordinates = [(float(random()*multiplier), float(random()*multiplier), float(random()*multiplier)) for _ in range(num_coords)]
+            mapCoor = MeaCoor_mm(mappingUnit_name=mappingUnit_name, mapping_coordinates=mapping_coordinates)
+            self.append(mapCoor)

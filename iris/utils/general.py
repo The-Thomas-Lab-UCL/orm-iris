@@ -6,10 +6,14 @@ For: The Thomas Group, Biochemical Engineering Dept., UCL
 """
 import os
 import threading
+import PySide6.QtWidgets as qw
+import PySide6.QtCore as qc
 import tkinter as tk
 import time
 import datetime as dt
 from configupdater import ConfigUpdater
+import numpy as np
+from typing import Callable
 
 import threading
 import time
@@ -60,66 +64,113 @@ def run_with_timeout(func, args=(), kwargs={}, timeout=5):
     
     return result
 
-def messagebox_request_input(title: str, message: str, default: str = '') -> str:
+def generate_test_app(lyt:qw.QVBoxLayout|qw.QHBoxLayout) -> tuple[qw.QApplication,qw.QWidget]:
     """
-    A function that creates a messagebox that requests for an input from the user
+    Generates a test QApplication and QVBoxLayout for testing purposes
+
+    Returns:
+        tuple[qw.QApplication, qw.QWidget]: The QApplication and QWidget instances
+    """
+    app = qw.QApplication([])
+    main_window = qw.QMainWindow()
+    main_window.show()
+    wdg = qw.QWidget()
+    main_window.setCentralWidget(wdg)
+    wdg.setLayout(lyt)
+    return app, wdg
+
+def validator_float_greaterThanZero(input_str: str) -> bool:
+    """
+    A validator function that checks if the input string can be converted to a non-negative float
+
+    Args:
+        input_str (str): Input string to validate
+
+    Returns:
+        bool: True if valid, False otherwise
+    """
+    try:
+        val = float(input_str)
+        return val >= 0.0
+    except:
+        return False
+
+def messagebox_request_input(
+        parent: qw.QWidget, 
+        title: str, 
+        message: str, 
+        default: str = '',
+        validator: Callable[[str], bool]|None = None,
+        invalid_msg: str = "The entered value is invalid. Please try again.",
+        loop_until_valid: bool = False
+    ) -> str | None:
+    """
+    A function that creates a QInputDialog to request input with optional validation.
     
     Args:
-        title (str): Title of the messagebox
-        message (str): Message to be displayed in the messagebox
-        default (str, optional): Default value of the input
+        parent (qw.QWidget): The parent widget for the dialog (recommended).
+        title (str): Title of the dialog box.
+        message (str): Message/label to be displayed for the input field.
+        default (str, optional): Default value of the input.
+        validator (Callable[[str], bool]|None, optional): A function that takes the 
+            input string and returns True if valid, False otherwise.
+        invalid_msg (str): Message to show if validation fails.
+        loop_until_valid (bool): If True, keeps asking until the input is valid 
+            or the user presses Cancel.
     
     Returns:
-        str: User input
+        str | None: User input string if OK was pressed and validation passed, 
+                    otherwise None (if Cancel was pressed).
     """
-    user_input = [default]  # List to hold the input (mutable)
-    def on_ok():
-        user_input[0] = entry.get()  # Update the value within the list
-        tl.destroy()
-
-    tl = tk.Toplevel()
-    tl.title(title)
-    tl.geometry("400x150")  # Set a fixed size for the input dialog
+    current_default = default
     
-    frm = tk.Frame(tl)
-    frm.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
-    
-    tk.Label(frm, text=message).pack()
-    entry = tk.Entry(frm)
-    entry.insert(0, default)
-    entry.pack(pady=(0,5), fill=tk.X, expand=True)
-    entry.focus_set()
-    entry.bind("<Return>", lambda event: on_ok())
-    tk.Button(frm, text="OK", command=on_ok).pack(pady=(0,5),fill=tk.X, expand=True)
-    tl.attributes("-topmost", True)
-    tl.wait_window()  # Wait for the window to close
-    return user_input[0]  # Return the updated value from the list
+    while True:
+        # 1. Show the input dialog
+        user_input, ok = qw.QInputDialog.getText(
+            parent,
+            title,
+            message,
+            qw.QLineEdit.Normal, # pyright: ignore[reportAttributeAccessIssue]
+            current_default
+        )
+        
+        if not ok: return None  # User pressed Cancel
+        
+        is_valid = True
+        if validator is not None: is_valid = validator(user_input)
+        if is_valid: return user_input
+        
+        if not loop_until_valid: return None
+        else:
+            qw.QMessageBox.warning(parent, "Invalid Input", invalid_msg)
+            current_default = user_input
 
-def convert_wavelength_to_ramanshift(wavelength:float,excitation_wavelength:float) -> float:
+def convert_wavelength_to_ramanshift(wavelength:float|np.ndarray,excitation_wavelength:float) -> float|np.ndarray:
     """
     Converts wavelength to Raman shift
     
     Args:
-        wavelength (float): Wavelength in nm
+        wavelength (float|np.ndarray): Wavelength in nm
         excitation_wavelength (float): Excitation laser wavelength in nm
 
     Returns:
-        float: Raman shift in cm^-1
+        float|np.ndarray: Raman shift in cm^-1
     """
-    if wavelength == 0: wavelength = 0.0001
+    if isinstance(wavelength, float) and wavelength == 0: wavelength = 0.0001
+    else: wavelength = np.where(wavelength == 0, 0.0001, wavelength)
     raman_shift = 1e7*(1/excitation_wavelength - 1/wavelength)
     return raman_shift
 
-def convert_ramanshift_to_wavelength(raman_shift:float,excitation_wavelength:float) -> float:
+def convert_ramanshift_to_wavelength(raman_shift:float|np.ndarray,excitation_wavelength:float) -> float|np.ndarray:
     """
     Converts Raman shift to wavelength
     
     Args:
-        raman_shift (float): Raman shift in cm^-1
+        raman_shift (float|np.ndarray): Raman shift in cm^-1
         excitation_wavelength (float): Excitation laser wavelength in nm
     
     Returns:
-        float: Wavelength in nm
+        float|np.ndarray: Wavelength in nm
     """
     wavelength = 1/(1/excitation_wavelength - raman_shift/1e7)
     return wavelength
@@ -201,23 +252,48 @@ def thread_assign(func):
         return thread  # You could optionally return the thread object
     return wrapper
 
-def get_all_widgets(parent_frame:tk.Frame,get_all=True) -> list[tk.Widget]:
+def get_all_widgets(parent_widget:qw.QWidget,get_all=True) -> list[qw.QWidget]:
     """
     A function that returns all widgets in a frame and optionally, its subframes (all levels)
 
     Args:
-        parent_frame (tk.Frame): Frame which widgets needs to be listed
-        get_all (bool, optional): If True it will get the widgets in the sub-frames as well
+        parent_widget (qw.QWidget): Widget which children need to be listed
+        get_all (bool, optional): If True it will get the widgets in the sub-widgets as well
 
     Returns:
-        list[tk.Widget]: List of all widgets in the frame
+        list[qw.QWidget]: List of all widgets in the widget
     """
-    widget_list = []
-    for child_widget in parent_frame.winfo_children():
-        widget_list.append(child_widget)
-        if get_all:
-            widget_list.extend(get_all_widgets(child_widget))  # Recursion
-    return widget_list
+    if get_all:
+        return parent_widget.findChildren(qw.QWidget)   # The default findChildren() is already recursive
+    else:
+        # findChildren() with a search option that limits depth
+        # For a single level, findChildren(type, options) is useful
+        # We find widgets that are immediate children of the parent.
+        return parent_widget.findChildren(qw.QWidget, qc.Qt.FindChildOption.FindDirectChildrenOnly) # type: ignore
+
+def get_all_widgets_from_layout(parent_layout:qw.QLayout,get_all=True) -> list[qw.QWidget]:
+    """
+    A function that returns all widgets in a layout and optionally, its sub-layouts (all levels)
+
+    Args:
+        parent_layout (qw.QLayout): Layout which children need to be listed
+        get_all (bool, optional): If True it will get the widgets in the sub-layouts as well
+
+    Returns:
+        list[qw.QWidget]: List of all widgets in the layout
+    """
+    list_widget = []
+    for i in range(parent_layout.count()):
+        item = parent_layout.itemAt(i)
+        if item.widget():
+            list_widget.append(item.widget())
+            if get_all and isinstance(item.widget(), qw.QWidget):
+                child_widgets = get_all_widgets(item.widget(), get_all=True)
+                list_widget.extend(child_widgets)
+        elif item.layout() and get_all:
+            child_widgets = get_all_widgets_from_layout(item.layout(), get_all=True)
+            list_widget.extend(child_widgets)
+    return list_widget
 
 def check_and_create_config_file(config_file_path:str='config.ini'):
     """

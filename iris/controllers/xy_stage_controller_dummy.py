@@ -34,6 +34,8 @@ class XYController_Dummy(Class_XYController):
         self._max_vel_mmS = 100.0    # Maximum velocity of the motor in mm/s
         self._min_vel_mmS = 0.1      # Minimum velocity of the motor in mm/s
         
+        self._jog_step_min_um = 1 # Minimum jog step size in [um]
+        
         self._vel = 100
         self._step_um = 1               # distance traveled per step in [um], i.e., the step size
         self._step_wait_time_sec = 1e-6 # waiting time between steps in [s]
@@ -227,7 +229,7 @@ class XYController_Dummy(Class_XYController):
         if not isinstance(dist_mm, float) and not isinstance(dist_mm, int):
             raise ValueError("Distance must be a float")
         
-        if dist_mm < self._jog_step_min_um:
+        if dist_mm*1e3 < self._jog_step_min_um:
             raise ValueError("Minimum jog step size is {}".format(self._jog_step_min_um))
         
         # Set the jog step size

@@ -29,7 +29,7 @@ if __name__ == '__main__':
     import sys
     import os
     libdir = os.path.abspath(r'.\iris')
-    sys.path.append(os.path.dirname(libdir))    
+    sys.path.insert(0, os.path.dirname(libdir))    
 
 from iris.utils.general import *
 from iris.controllers.class_spectrometer_controller import Class_SpectrometerController
@@ -219,6 +219,11 @@ SetNumberAccumulations.restype = ctypes.c_uint # DRV_SUCCESS: Number of accumula
 GetMostRecentImage = andorDLL.GetMostRecentImage
 GetMostRecentImage.argtypes = [ctypes.POINTER(ctypes.c_long),ctypes.c_ulong] # [array to store the image, sized to the sensor, number of pixels]
 GetMostRecentImage.restype = ctypes.c_uint # DRV_SUCCESS: Image has been copied into array., DRV_NOT_INITIALIZED: System not initialized., DRV_ERROR_ACK: Unable to communicate with card., DRV_P1INVALID: Invalid pointer (i.e. NULL)., DRV_P2INVALID: Array size is incorrect., DRV_NO_NEW_DATA: There is no new data yet.
+
+#>>> Save settings <<<
+SaveAsSif = andorDLL.SaveAsSif
+SaveAsSif.argtypes = [ctypes.c_char_p]  # char* path
+SaveAsSif.restype = ctypes.c_uint   # unsigned int return
 
 #%% Device responses
 DRV_SUCCESS = 20002
@@ -692,6 +697,41 @@ def getMostRecentImage(xpixel:int,ypixel:int,total_pixels:int) -> np.ndarray:
     elif ret == ErrorCodes.DRV_NO_NEW_DATA.value: raise BufferError("There is no new data yet")
     
     return np.ctypeslib.as_array(image_array).reshape((ypixel, xpixel))
+
+def saveAsSif(path: str) -> None:
+    """
+    Saves the data from the last acquisition into a .sif file.
+
+    Args:
+        path (str): The full file path where the data should be saved.
+
+    Raises:
+        RuntimeError: System not initialized or communication error.
+        ChildProcessError: Acquisition is still in progress.
+        ValueError: Invalid filename/path.
+        MemoryError: File too large to be generated in memory.
+    """
+    
+    # Convert python string to bytes for the C function
+    path_bytes = path.encode('utf-8')
+    
+    ret = SaveAsSif(path_bytes)
+    
+    # Error Handling based on documentation provided
+    if ret == ErrorCodes.DRV_SUCCESS.value:
+        return
+    elif ret == ErrorCodes.DRV_NOT_INITIALIZED.value:
+        raise RuntimeError("System not initialized.")
+    elif ret == ErrorCodes.DRV_ACQUIRING.value:
+        raise ChildProcessError("Acquisition in progress.")
+    elif ret == ErrorCodes.DRV_ERROR_ACK.value:
+        raise RuntimeError("Unable to communicate with card.")
+    elif ret == ErrorCodes.DRV_P1INVALID.value:
+        raise ValueError(f"Invalid filename or path: {path}")
+    elif ret == ErrorCodes.DRV_ERROR_PAGELOCK.value:
+        raise MemoryError("File too large to be generated in memory.")
+    else:
+        raise Exception(f"Unknown error occurred. Return code: {ret}")
 
 #%% KEY PARAMETERS
 SAFE_SHUTDOWN_TEMP = -10    # Temperature above which it is safe for the device to be shut down.
@@ -1174,10 +1214,20 @@ class SpectrometerController_Andor(Class_SpectrometerController):
             DataAnalysisConfigEnum.INTENSITY_LABEL.value: intensity,
         })
         return (spectra, timestamp, self._integration_time_us)
+    
+    def _test_save_last_measurement_as_sif(self, path: str) -> None:
+        """
+        Test function to save the last measurement as a .sif file.
+
+        Args:
+            path (str): The full file path where the data should be saved.
+        """
+        with self._lock:
+            saveAsSif(path)
 
 #%% Tests
 if __name__ == "__main__":
-    matplotlib.use('TkAgg')
+    # matplotlib.use('TkAgg')
     # try: initialisation_and_connection_test()
     # except Exception as e: print(f"Initialisation and connection test failed: {e}")
 
@@ -1216,4 +1266,13 @@ if __name__ == "__main__":
         controller.measure_spectrum()
     t2 = time.time()
     print(f"Time taken for 100 measurements: {t2 - t1} seconds, time per measurement: {(t2 - t1) / 100} seconds")
+    
+    # Save the last measurement as a .sif file
+    try:
+        controller._stop_acquisition()
+        controller._test_save_last_measurement_as_sif("test_measurement.sif")
+        print(f'Saved last measurement as test_measurement.sif')
+    except Exception as e:
+        print(f"Failed to save last measurement as .sif file: {e}")
+    
     controller.terminate()

@@ -25,7 +25,7 @@ if __name__ == '__main__':
     SCRIPT_DIR = os.path.abspath(r'.\iris')
     sys.path.append(os.path.dirname(SCRIPT_DIR))
 
-from tkinter import filedialog
+import PySide6.QtWidgets as qw
 
 import numpy as np
 from PIL import Image
@@ -37,6 +37,7 @@ import uuid
 
 from iris.utils.general import *
 
+from typing import Callable
 
 from iris.data.calibration_objective import ImgMea_Cal, ImgMea_Cal_Hub
 
@@ -71,7 +72,7 @@ class MeaImg_Unit():
         
         self._unitName:str = unit_name if unit_name != None else get_timestamp_us_str()
         self._unitID:str = uuid.uuid4().hex
-        self._calibration:ImgMea_Cal = calibration
+        self._calibration:ImgMea_Cal|None = calibration
         
         self._list_metadata_keys = ['id','name','calibration_id','calibration_dict']
         
@@ -113,6 +114,7 @@ class MeaImg_Unit():
         
         if reconstruct: self._metadata = {}
         else:
+            assert isinstance(self._calibration, ImgMea_Cal), 'Calibration must be an ImageMeasurement_Calibration object'
             self._metadata = {
                 'id':self._unitID,
                 'name':self._unitName,
@@ -192,6 +194,7 @@ class MeaImg_Unit():
         """
         Resets the metadata using the internally stored values
         """
+        if not isinstance(self._calibration, ImgMea_Cal): raise ValueError('Calibration is not set')
         self._metadata = {
             'id':self._unitID,
             'name':self._unitName,
@@ -225,6 +228,7 @@ class MeaImg_Unit():
         """
         Returns the ImageMeasurement_Calibration object for the calibration parameters
         """
+        if not isinstance(self._calibration, ImgMea_Cal): raise ValueError('Calibration is not set')
         return self._calibration
         
     def _calculate_RotationCorrectionMatrix(self) -> None:
@@ -232,6 +236,7 @@ class MeaImg_Unit():
         Calculates the rotation correction matrix for the image stitching
         """
         assert self.check_calibration_exist(), 'Calibration parameters are not set'
+        if not isinstance(self._calibration, ImgMea_Cal): raise ValueError('Calibration is not set')
         
         rot_rad = self._calibration.rotation_rad
         
@@ -265,10 +270,10 @@ class MeaImg_Unit():
         
         if stitch2ori:
             coor_pixel_arr = self._mat_stitch2ori @ np.array(coor_pixel).reshape(2,1)
-            return coor_pixel_arr.flatten().astype(int).tolist()
+            return coor_pixel_arr.flatten().astype(int).tolist() # pyright: ignore[reportReturnType]
         else:
             coor_pixel_arr = self._mat_ori2stitch @ np.array(coor_pixel).reshape(2,1)
-            return coor_pixel_arr.flatten().astype(int).tolist()
+            return coor_pixel_arr.flatten().astype(int).tolist() # pyright: ignore[reportReturnType]
         
     def get_image_all_stitched(self, low_res:bool=False) -> tuple[Image.Image,tuple[float,float],tuple[float,float]]:
         """
@@ -291,6 +296,7 @@ class MeaImg_Unit():
         """
         assert len(self._dict_measurements['timestamp']) > 0, 'No images taken'
         assert self.check_calibration_exist(), 'Calibration parameters are not set'
+        assert isinstance(self._calibration, ImgMea_Cal), 'Calibration is not set'
         
         cal = self._calibration
         
@@ -506,9 +512,11 @@ class MeaImg_Unit():
         Returns:
             bool: True if the calibration parameters are set, False otherwise
         """
+        if not isinstance(self._calibration, ImgMea_Cal): return False
         return self._calibration.check_calibration_set()
         
-    def convert_imgpt2stg(self, frame_coor_mm:tuple[float,float], coor_pixel:tuple[int,int],
+    def convert_imgpt2stg(self, frame_coor_mm:tuple[float,float]|tuple[float,float,float],
+                          coor_pixel:tuple[int,int]|tuple[float,float],
                           correct_rot:bool, low_res:bool)\
         -> tuple[float,float]:
         """
@@ -523,9 +531,12 @@ class MeaImg_Unit():
         Returns:
             tuple[float,float]: X and Y coordinates in mm
         """
+        if not isinstance(self._calibration, ImgMea_Cal): raise ValueError('Calibration is not set')
+        
         if low_res: coor_pixel = (int(coor_pixel[0]/self._lres_scale),int(coor_pixel[1]/self._lres_scale))
         
         if correct_rot:
+            coor_pixel = (int(coor_pixel[0]),int(coor_pixel[1]))
             coor_pixel = self._correctRotationFlip(coor_pixel,stitch2ori=True)
         
         coor_stg_mm = self._calibration.convert_imgpt2stg(
@@ -556,12 +567,16 @@ class MeaImg_Unit():
                 from the 'get stitched image' method
             - The rotation angle is in radians and is counter clockwise
         """
+        if not isinstance(self._calibration, ImgMea_Cal): raise ValueError('Calibration is not set')
+        
         coor_pixel = self._calibration.convert_stg2imgpt(
             coor_point_mm=np.array(coor_point_mm[:2]),
             coor_stg_mm=np.array(coor_stage_mm[:2])
         )
         
-        if correct_rot: coor_pixel = self._correctRotationFlip(coor_pixel,stitch2ori=False)
+        if correct_rot:
+            coor_pixel = (int(coor_pixel[0]),int(coor_pixel[1]))
+            coor_pixel = self._correctRotationFlip(coor_pixel,stitch2ori=False)
         
         x_pixel,y_pixel = [int(coor) for coor in coor_pixel]
         
@@ -571,18 +586,20 @@ class MeaImg_Unit():
         
         return x_pixel, y_pixel
         
-    def convert_stg2mea(self, coor_stage_mm:tuple[float,float,float])\
-        -> tuple[float,float,float]:
+    def convert_stg2mea(self, coor_stage_mm:tuple[float,float,float]|tuple[float,float])\
+        -> tuple[float,float,float]|tuple[float,float]:
         """
         Calculates the measurement coordinates from the stage coordinates based on the laser coordinates
         stored in the calibration parameters
         
         Args:
-            stage_coor (tuple[float,float,float]): Stage coordinates (X,Y,Z) in mm
+            stage_coor (tuple[float,float,float]|tuple[float,float]): Stage coordinates (X,Y,Z) in mm or (X,Y) in mm
         
         Returns:
-            tuple[float,float,float]: Measurement coordinates (X,Y,Z) in mm
+            tuple[float,float,float]|tuple[float,float]: Measurement coordinates (X,Y,Z) in mm or (X,Y) in mm
         """
+        if not isinstance(self._calibration, ImgMea_Cal): raise ValueError('Calibration is not set')
+        
         coor_stage_mm_arr = np.array(coor_stage_mm[:2])
         coor_mea_mm = self._calibration.convert_stg2mea(coor_stage_mm_arr)
         
@@ -603,6 +620,8 @@ class MeaImg_Unit():
         Returns:
             tuple[float,float,float]|tuple[float,float]: Stage coordinates (X,Y,Z) in mm or (X,Y) in mm
         """
+        if not isinstance(self._calibration, ImgMea_Cal): raise ValueError('Calibration is not set')
+        
         coor_mea_mm_arr = np.array(coor_mea_mm[:2])
         coor_stage_mm = self._calibration.convert_mea2stg(coor_mea_mm_arr)
         
@@ -633,6 +652,7 @@ class MeaImg_Unit():
         Returns:
             tuple[str,dict]: Calibration ID, calibration parameters
         """
+        if not isinstance(self._calibration, ImgMea_Cal): raise ValueError('Calibration is not set')
         return self._calibration.id, self._calibration.get_calibration_asdict()
     
     def set_calibration_ImageMeasurement_Calibration(self,calibration:ImgMea_Cal) -> None:
@@ -663,7 +683,8 @@ class MeaImg_Unit():
             x_coor = float(np.random.uniform(0,1))
             y_coor = float(np.random.uniform(0,1))
             z_coor = float(0)
-            image = Image.new('RGB',(100,100),color=(255,255,0))
+            colour = (np.random.randint(0,256),np.random.randint(0,256),np.random.randint(0,256))
+            image = Image.new('RGB',(100,100),color=colour)
             
             self.add_measurement(timestamp, x_coor, y_coor, z_coor, image)
         return
@@ -682,6 +703,8 @@ class MeaImg_Hub():
         
         self._dict_unit_NameID = {}         # Dictionary to store the unit name and ID relation (name:ID)
         self._dict_unit_IDName = {}         # Dictionary to store the unit ID and name relation (ID:name)
+        
+        self._list_observer = []          # List of observers for the hub
         
     def check_measurement_exist(self) -> bool:
         """
@@ -728,7 +751,7 @@ class MeaImg_Hub():
         """
         return list(self._dict_unit_IDName.values())
 
-    def get_summary_units(self) -> tuple[list,list]:
+    def get_summary_units(self) -> tuple[list,list,list,list]:
         """
         Returns the summary of the ImageMeasurement_Units
         
@@ -764,6 +787,8 @@ class MeaImg_Hub():
         self._dict_unit_NameID[unitName] = unitId
         self._dict_unit_IDName[unitId] = unitName
         
+        self.notify_observers()
+        
     def reset_ImageMeasurementUnits(self) -> None:
         """
         Resets the ImageMeasurement_Units in the hub
@@ -772,6 +797,8 @@ class MeaImg_Hub():
         self._dict_ImageUnits['image_unit'].clear()
         self._dict_unit_NameID.clear()
         self._dict_unit_IDName.clear()
+        
+        self.notify_observers()
         
     def remove_ImageMeasurementUnit(self,unit_id:str) -> None:
         """
@@ -790,7 +817,9 @@ class MeaImg_Hub():
         self._dict_unit_NameID.pop(unit_name)
         self._dict_unit_IDName.pop(unit_id)
         
-    def get_ImageMeasurementUnit(self,unit_id:str) -> MeaImg_Unit:
+        self.notify_observers()
+        
+    def get_ImageMeasurementUnit(self,*,unit_id:str|None=None,unit_name:str|None=None) -> MeaImg_Unit:
         """
         Returns an ImageMeasurement_Unit from the hub
 
@@ -800,10 +829,47 @@ class MeaImg_Hub():
         Returns:
             ImageMeasurement_Unit: ImageMeasurement_Unit object
         """
+        assert (unit_id is not None) or (unit_name is not None), 'Either unit ID or unit name must be provided'
+        assert not (unit_id is not None and unit_name is not None), 'Only one of unit ID or unit name must be provided'
+        
+        # Get the unit ID from the unit name if provided
+        if unit_name is not None:
+            assert unit_name in self._dict_unit_NameID, 'Unit name does not exist'
+            unit_id = self._dict_unit_NameID[unit_name]
+            
         assert unit_id in self._dict_ImageUnits['unit_id'], 'Unit ID does not exist'
         
         idx = self._dict_ImageUnits['unit_id'].index(unit_id)
         return self._dict_ImageUnits['image_unit'][idx]
+    
+    def add_observer(self,observer:Callable) -> None:
+        """
+        Adds an observer to the hub
+
+        Args:
+            observer (Callable): Observer function to be added
+        """
+        if not isinstance(observer, Callable): raise ValueError('Observer must be a callable function')
+        self._list_observer.append(observer)
+        
+    def remove_observer(self,observer:Callable) -> None:
+        """
+        Removes an observer from the hub
+
+        Args:
+            observer (Callable): Observer function to be removed
+        """
+        if not isinstance(observer, Callable): raise ValueError('Observer must be a callable function')
+        if not observer in self._list_observer: raise ValueError('Observer does not exist in the list')
+        self._list_observer.remove(observer)
+        
+    def notify_observers(self) -> None:
+        """
+        Notifies all observers of an event
+        """
+        for observer in self._list_observer:
+            try: observer()
+            except Exception as e: print(f'Observer notification error: {e}')
     
     def test_generate_dummy(self):
         """
@@ -889,8 +955,12 @@ class MeaImg_Handler():
             assert calibration.check_calibration_set(), 'Calibration parameters are not set'
             
             # Open a file dialog to choose the savepath
-            savepath = filedialog.asksaveasfilename(title='Choose a JSON file to save the calibration parameters to',
-                                                    filetypes=[('JSON files','*.json')],initialfile=calibration.id)
+            savepath = qw.QFileDialog.getSaveFileName(
+                None,
+                'Choose a JSON file to save the calibration parameters to',
+                calibration.id,
+                'JSON files (*.json)'
+            )[0]
             assert savepath != '', 'Save path is empty'
             
             if savepath[-5:] != '.json': savepath += '.json'
@@ -914,9 +984,14 @@ class MeaImg_Handler():
         Returns:
             ImageMeasurement_Calibration: ImageMeasurement_Calibration object
         """
+        cal = None
         try:
-            savepath = filedialog.askopenfilename(title='Choose a JSON file to load the calibration parameters from',
-                filetypes=[('JSON files','*.json')])
+            savepath = qw.QFileDialog.getOpenFileName(
+                None,
+                'Choose a JSON file to load the calibration parameters from',
+                '',
+                'JSON files (*.json)'
+            )[0]
             assert savepath != '', 'Load path is empty'
             
             cal = ImgMea_Cal()
@@ -924,10 +999,10 @@ class MeaImg_Handler():
             
         except Exception as e:
             print(f'load_calibration_json ERROR: {e}')
-            cal = None
-        finally: return cal
+        finally:
+            return cal
     
-    def save_calibration_json_from_ImgMea(self,measurement:MeaImg_Unit,savename:str=None):
+    def save_calibration_json_from_ImgMea(self,measurement:MeaImg_Unit,savename:str|None=None):
         """
         Saves the calibration parameters to a JSON file
         
@@ -938,17 +1013,16 @@ class MeaImg_Handler():
         Returns:
             tuple[str,str]: Directory path and name of the saved JSON file
         """
-        
-        print('!!!!! TO BE MODIFIED !!!!!')
-        # Modification idea: to save the calibration file from an ImageMeasurement_Calibration
-        # obj instead of an ImageMeasurement_Unit obj
-        
         assert isinstance(measurement, MeaImg_Unit), 'Measurement must be an image measurement object'
         assert measurement.check_calibration_exist(), 'Calibration parameters are not set'
             
         # Open a file dialog to choose the savepath
-        savepath = filedialog.asksaveasfilename(title='Choose a JSON file to save the calibration parameters to',
-                                                filetypes=[('JSON files','*.json')])
+        savepath = qw.QFileDialog.getSaveFileName(
+            None,
+            'Choose a JSON file to save the calibration parameters to',
+            savename if savename is not None else measurement.get_ImageMeasurement_Calibration().id,
+            'JSON files (*.json)'
+        )[0]
         assert savepath != '', 'Save path is empty'
         
         if savepath[-5:] != '.json': savepath += '.json'
@@ -1000,11 +1074,10 @@ class MeaImg_Handler():
         list_unitIDs = hub.get_list_ImageUnit_ids()
         
         for unitID in list_unitIDs:
-            unit = hub.get_ImageMeasurementUnit(unitID)
+            unit = hub.get_ImageMeasurementUnit(unit_id=unitID)
             self.save_ImageMeasurementUnit_database(unit,conn,savepath)
             
         conn.close()
-        return
         
     def save_ImageMeasurementUnit_database(\
         self,unit:MeaImg_Unit,conn:sql.Connection,conn_path:str):
@@ -1173,8 +1246,7 @@ class MeaImg_Handler():
         conn.commit()
         return
         
-    def load_ImageMeasurementHub_database(self,loadpath:str,hub:MeaImg_Hub|None=None)\
-        -> MeaImg_Hub:
+    def load_ImageMeasurementHub_database(self,loadpath:str,hub:MeaImg_Hub|None=None) -> None:
         """
         Loads the measurements from a database
         

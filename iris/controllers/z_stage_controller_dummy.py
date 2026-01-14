@@ -13,7 +13,7 @@ if __name__ == '__main__':
     import sys
     import os
     libdir = os.path.abspath(r'.\iris')
-    sys.path.append(os.path.dirname(libdir))
+    sys.path.insert(0, os.path.dirname(libdir))
 
 from iris.controllers.class_z_stage_controller import Class_ZController
 
@@ -53,8 +53,8 @@ class ZController_Dummy(Class_ZController):
         """
         # Unfortunately the MCM301 library doesn't provide a way to get the velocity and acceleration parameters
         return (100, self._vel, 100)
-    
-    def set_vel_acc_relative(self,vel_homing:int=100, vel_move:int=100, acc_move:int=100):
+
+    def set_vel_acc_relative(self,vel_homing:int|float=100, vel_move:int|float=100, acc_move:int|float=100):
         """
         Set the velocity and acceleration parameters of the motors for both homing and typical movements.
         

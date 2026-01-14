@@ -261,8 +261,11 @@ class XYController_PI(Class_XYController):
         except Exception as e: print(f'__init__ Error: {e}')
         
     def get_identifier(self) -> str:
-        if self._identifier is None:
-            self._identifier = self._get_hardware_identifier()
+        try:
+            if self._identifier is None:
+                self._identifier = self._get_hardware_identifier()
+        except Exception as e:
+            self._identifier = f'Error getting identifier: {e}'
         return self._identifier
     
     def _get_hardware_identifier(self) -> str:

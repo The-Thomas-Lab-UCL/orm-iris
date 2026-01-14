@@ -11,9 +11,8 @@ import multiprocessing as mp
 from multiprocessing.managers import DictProxy
 from multiprocessing.connection import Connection, Pipe
 
-import tkinter as tk
-from tkinter import ttk
-from tkinter import filedialog, messagebox
+import PySide6.QtWidgets as qw
+from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer
 
 from scipy.optimize import curve_fit
 import numpy as np
@@ -23,7 +22,7 @@ import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 matplotlib.use('Agg')
 
 import json
@@ -32,11 +31,13 @@ if __name__ == '__main__':
     import sys
     import os
     libdir = os.path.abspath(r'.\iris')
-    sys.path.append(os.path.dirname(libdir))
+    sys.path.insert(0, os.path.dirname(libdir))
 
 
 from iris.utils.general import *
 from iris import LibraryConfigEnum, DataAnalysisConfigEnum
+
+from iris.resources.spectrometer_calibration_ui import Ui_spectrometerCalibrator
 
 # Make a calibration parameters class to standardise the calibration parameters to store the following info:
 # wavelen_poly_coeffs, wavelen_list_measured, wavelen_list_reference, intensity_poly_coeffs, intensity_list_measured, intensity_list_reference
@@ -172,7 +173,7 @@ class SpectrometerCalibrator():
         intensity_cal = cal_ratio*intensity
         return intensity_cal
         
-class Frm_SpectrometerCalibrationGenerator(tk.LabelFrame):
+class Wdg_SpectrometerCalibrationGenerator(Ui_spectrometerCalibrator, qw.QWidget):
     """
     GUI for the spectrometer calibration generator
 
@@ -181,8 +182,9 @@ class Frm_SpectrometerCalibrationGenerator(tk.LabelFrame):
         pipe_update (Connection): The pipe to update the calibration parameters in the backend
         dict_cal (DictCalibration): The calibration parameters dictionary
     """
-    def __init__(self, parent, pipe_update: Connection):
-        super().__init__(parent,text='Spectrometer calibration')
+    def __init__(self, parent:qw.QWidget, pipe_update: Connection):
+        super().__init__(parent)
+        self.setupUi(self)
         
     # >> General parameters <<
         figsize_in = (3.5,3.5)
@@ -191,78 +193,47 @@ class Frm_SpectrometerCalibrationGenerator(tk.LabelFrame):
         # Pipe to update the calibration parameters in the backend
         self._pipe_update = pipe_update
         
-    # >> Frames setup <<
-        frm_control = tk.LabelFrame(self,text='Save/Load')
-        frm_wv_cal = tk.LabelFrame(self,text='Wavelength calibration')
-        frm_int_cal = tk.LabelFrame(self,text='Intensity calibration')
-        
-        frm_control.grid(row=0,column=0,sticky='nsew')
-        frm_wv_cal.grid(row=1,column=0,sticky='nsew')
-        frm_int_cal.grid(row=2,column=0,sticky='nsew')
-        
-        self.rowconfigure(0,weight=1)
-        self.rowconfigure(1,weight=1)
-        self.rowconfigure(2,weight=1)
-        self.columnconfigure(0,weight=1)
-        
     # >> Global calibration parameters and widgets <<
         # Frontend params to temporarily store the calibration parameters
         self._cal_params = CalibrationParams()
         
         # Buttons to load, save, and calculate the calibration params
-        btn_load = tk.Button(frm_control,text='Load',command=self._load_calibration)
-        btn_save = tk.Button(frm_control,text='Save',command=self._save_calibration)
-        
-        # Grid the widgets
-        btn_load.grid(row=0,column=0,sticky='ew',padx=5,pady=(0,5))
-        btn_save.grid(row=0,column=1,sticky='ew',padx=5,pady=(0,5))
-        
-        frm_control.columnconfigure(0,weight=1)
-        frm_control.columnconfigure(1,weight=1)
+        self.btnLoad.clicked.connect(self._load_calibration)
+        self.btnSave.clicked.connect(self._save_calibration)
         
     # >> Wavelength calibration parameters and widgets <<
         # Canvas to show the wavelength calibration transfer function
         self._fig_wv, self._ax_wv = plt.subplots(1,1,figsize=figsize_in)
-        self._canvas_wv = FigureCanvasTkAgg(figure=self._fig_wv,master=frm_wv_cal)
-        self._canvas_wv_widget = self._canvas_wv.get_tk_widget()
-        self._canvas_wv.draw()
+        self._canvas_wv = FigureCanvas(figure=self._fig_wv)
+        self.lytPixelmapCanvas.addWidget(self._canvas_wv)
+        self._canvas_wv.draw_idle()
         
         # Treeview to show the measured and reference wavelengths
-        self._tree_wv = ttk.Treeview(frm_wv_cal,columns=('Measured','Reference'),show='headings')
-        self._tree_wv.heading('Measured',text='Measured peak loc [pixel OR nm]')
-        self._tree_wv.heading('Reference',text='Reference peak loc [nm]')
-        self._tree_wv.column('Measured',width=200)
-        self._tree_wv.column('Reference',width=200)
+        self._tree = self.treePixelmap
+        self._tree.setColumnCount(2)
+        self._tree.setHeaderLabels(['Measured peak loc [pixel OR nm]','Reference peak loc [nm]'])
         
         # Button to load the measured and reference wavelengths
-        btn_load_wv = tk.Button(frm_wv_cal,text='Load wavelength calibration points',command=self._load_wavelength)
-        
-        # Grid the widgets
-        self._tree_wv.grid(row=0,column=0,padx=(0,10))
-        self._canvas_wv_widget.grid(row=0,column=1,rowspan=2)
-        btn_load_wv.grid(row=1,column=0,sticky='ew')
+        self.btnLoadPixelmap.clicked.connect(self._load_wavelength)
         
     # >> Intensity calibration parameters and widgets<<
         # Canvas to show the intensity calibration transfer function
         figsize_in_int = (figsize_in[0]*2,figsize_in[1])
         self._fig_int, axes = plt.subplots(1,2,figsize=figsize_in_int)
         self._ax_int_raw, self._ax_int_cal = axes
-        self._canvas_int = FigureCanvasTkAgg(figure=self._fig_int,master=frm_int_cal)
-        self._canvas_int_widget = self._canvas_int.get_tk_widget()
+        self._canvas_int = FigureCanvas(figure=self._fig_int)
+        self.lytIntensityCanvas.addWidget(self._canvas_int)
+        self._canvas_int.draw_idle()
         
         # Button to load the measured and reference intensities
-        btn_load_int = tk.Button(frm_int_cal,text='Load intensity calibration points',command=self._load_intensity)
-        
-        # Grid the widgets
-        self._canvas_int_widget.grid(row=0,column=0)
-        btn_load_int.grid(row=1,column=0,sticky='ew')
+        self.btnLoadIntensity.clicked.connect(self._load_intensity)
         
     # >> Auto-load the calibration file from the last session <<
         cal_filepath = LibraryConfigEnum.SPECTROMETER_CALIBRATION_PATH.value
         if os.path.isfile(cal_filepath) and cal_filepath.endswith('.json'):
             self._load_calibration(cal_filepath)
-        
-    def _load_calibration(self,loadpath:str|None=None) -> bool:
+    
+    def _load_calibration(self,loadpath:str|None=None) -> None:
         """
         Loads the calibration file
         
@@ -274,9 +245,14 @@ class Frm_SpectrometerCalibrationGenerator(tk.LabelFrame):
         """
         if loadpath is None or not os.path.exists(loadpath) or not os.path.isfile(loadpath) or not loadpath.endswith('.json'):
             init_file = LibraryConfigEnum.SPECTROMETER_CALIBRATION_PATH.value
-            init_dir = os.path.dirname(init_file) if os.path.exists(init_file) else None
-            loadpath = filedialog.askopenfilename(filetypes=[('JSON files','*.json')],initialdir=init_dir)
-        if loadpath == '': return False
+            init_dir = os.path.dirname(init_file) if os.path.exists(init_file) else ''
+            loadpath = qw.QFileDialog.getOpenFileName(
+                self,
+                'Load calibration file',
+                init_dir,
+                'JSON files (*.json)',
+            )[0]
+        if loadpath == '': return
         
         with open(loadpath,'r') as f: dict_params = json.load(f)
         try:
@@ -285,13 +261,13 @@ class Frm_SpectrometerCalibrationGenerator(tk.LabelFrame):
                 if isinstance(val,list): self._cal_params[key] = [float(v) for v in val]
                 elif isinstance(val,tuple): self._cal_params[key] = tuple([float(v) for v in val])
                 else: self._cal_params[key] = float(val)
-        except Exception as e: print('ERROR _load_calibration file read: ',e); return False
+        except Exception as e: print('ERROR _load_calibration file read: ',e); return
         
         try:self._analyse_intensity_calibration_params(calculate_transfunc=False)
-        except Exception as e: print('ERROR _load_calibration intensity calibration: ',e)
+        except Exception as e: qw.QMessageBox.warning(self,'Load calibration error','Error in loading intensity calibration parameters:\n{}'.format(e))
         
         try:self._analyse_wavelength_calibration_params(calculate_transfunc=False)
-        except Exception as e: print('ERROR _load_calibration wavelength/pixel transfer function: ',e)
+        except Exception as e: qw.QMessageBox.warning(self,'Load calibration error','Error in loading wavelength calibration parameters:\n{}'.format(e))
         
         # Send the loadpath to the backend
         self._pipe_update.send(self._cal_params)
@@ -300,11 +276,17 @@ class Frm_SpectrometerCalibrationGenerator(tk.LabelFrame):
         """
         Saves the calibration file as a json file
         """
-        filepath = filedialog.asksaveasfilename(defaultextension='.json',filetypes=[('JSON files','*.json')])
+        filepath = qw.QFileDialog.getSaveFileName(
+            self,
+            'Save calibration file',
+            LibraryConfigEnum.SPECTROMETER_CALIBRATION_DIR_DEFAULT.value,
+            'JSON files (*.json)',
+        )[0]
         if filepath == '': return
         with open(filepath,'w') as f: json.dump(self._cal_params,f)
         
-    def _calculate_transferFunc_int_cubic(self,list_pixel_idx:list[float],list_int_mea:list[float],list_int_ref:list[float]) -> tuple[float,float,float,float]:
+    def _calculate_transferFunc_int_cubic(self,list_pixel_idx:list[float],list_int_mea:list[float],list_int_ref:list[float])\
+        -> tuple[tuple[float,float,float,float],list[tuple[float,float]]]:
         """
         Generates the transfer function from the measured and reference/expected values
         
@@ -314,7 +296,9 @@ class Frm_SpectrometerCalibrationGenerator(tk.LabelFrame):
             list_int_ref (list[float]): List of the reference intensities
         
         Returns:
-            tuple[float,float,float,float]: The coefficients of the transfer function (a,b,c,d) for the cubic function of a*x**3 + b*x**2 + c*x + d
+            tuple[tuple[float,float,float,float],list[tuple[float,float]]]: The coefficients of
+                the transfer function (a,b,c,d) for the cubic function of a*x**3 + b*x**2 + c*x + d
+                and the list of coordinates of the intensity ratio [ref/mea]
         """
         def cubic(x,a,b,c,d): return a*x**3 + b*x**2 + c*x + d
         
@@ -328,7 +312,8 @@ class Frm_SpectrometerCalibrationGenerator(tk.LabelFrame):
         popt = tuple(popt) # Convert the array to tuple for json serialisation during saving
         return popt, list_ratio_coors
         
-    def _calculate_pxlMappingFunc_wv_cubic(self,list_mea:list[float],list_ref:list[float]) -> tuple[float,float,float,float]:
+    def _calculate_pxlMappingFunc_wv_cubic(self,list_mea:list[float],list_ref:list[float])\
+        -> tuple[float,float,float,float]:
         """
         Generates the pixel mapping function from the measured and reference/expected values
         
@@ -350,9 +335,18 @@ class Frm_SpectrometerCalibrationGenerator(tk.LabelFrame):
         """
         Loads the measured and reference intensities
         """
-        messagebox.showinfo('Load intensity calibration points','Please select the csv file containing the measured and reference intensities\nThe csv file should have 3 columns: Pixel index (or raw wavelength), Measured intensity [a.u.], Reference intensity [a.u.].\nThe first line (header) will be skipped')
+        qw.QMessageBox.information(
+            self,
+            'Load intensity calibration points','Please select the csv file containing the measured'
+            ' and reference intensities\nThe csv file should have 3 columns: Pixel index (or raw wavelength),'
+            ' Measured intensity [a.u.], Reference intensity [a.u.].\nThe first line (header) will be skipped')
         
-        filepath = filedialog.askopenfilename(filetypes=[('CSV files','*.csv')])
+        filepath = qw.QFileDialog.getOpenFileName(
+            self,
+            'Load intensity calibration points',
+            '',
+            'CSV files (*.csv)',
+        )[0]
         if filepath == '': return
         
         df = pd.read_csv(filepath,header=None,skiprows=1)
@@ -444,9 +438,18 @@ class Frm_SpectrometerCalibrationGenerator(tk.LabelFrame):
         """
         Loads the measured and reference wavelengths
         """
-        messagebox.showinfo('Load wavelength calibration points','Please select the csv file containing the measured and reference wavelengths\nThe csv file should have 2 columns: Measured peak loc [pixel OR nm], Reference peak loc [nm].\nThe first line (header) will be skipped')
+        qw.QMessageBox.information(
+            self,
+            'Load wavelength calibration points','Please select the csv file containing the measured'
+            ' and reference wavelengths\nThe csv file should have 2 columns: Measured peak loc [pixel OR nm],'
+            ' Reference peak loc [nm].\nThe first line (header) will be skipped')
         
-        filepath = filedialog.askopenfilename(filetypes=[('CSV files','*.csv')])
+        filepath = qw.QFileDialog.getOpenFileName(
+            self,
+            'Load wavelength calibration points',
+            '',
+            'CSV files (*.csv)',
+        )[0]
         if filepath == '': return
         
         df = pd.read_csv(filepath,header=None,skiprows=1)
@@ -507,8 +510,8 @@ class Frm_SpectrometerCalibrationGenerator(tk.LabelFrame):
         ax.legend()
 
         # Add a label to each scatter points
-        for i,txt in enumerate(list_peakRS_mea):
-            ax.annotate(txt,(list_peakRS_mea[i],list_peakRS_ref[i]))
+        for i,peakRS in enumerate(list_peakRS_mea):
+            ax.annotate(str(peakRS),(list_peakRS_mea[i],list_peakRS_ref[i]))
         
         # Show the plot and redraw the canvas
         self._canvas_wv.draw()
@@ -517,14 +520,50 @@ class Frm_SpectrometerCalibrationGenerator(tk.LabelFrame):
         """
         Updates the treeview for the wavelength calibration
         """
-        self._tree_wv.delete(*self._tree_wv.get_children())
-        for i,(mea,ref) in enumerate(zip(self._cal_params['wavelen_list_measured'],self._cal_params['wavelen_list_reference'])):
-            self._tree_wv.insert('',tk.END,values=(mea,ref))
+        self._tree.clear()
+        for (mea,ref) in zip(self._cal_params['wavelen_list_measured'],self._cal_params['wavelen_list_reference']):
+            item = qw.QTreeWidgetItem()
+            item.setText(0,str(mea))
+            item.setText(1,str(ref))
+            
+            self._tree.addTopLevelItem(item)        
+    
+class MainWindow_SpectrometerCalibrationGenerator(qw.QMainWindow):
+    """
+    Main window for the spectrometer calibration generator
+    """
+    def __init__(self, pipe_update: Connection):
+        super().__init__()
+        self.setWindowTitle('Spectrometer Calibration Generator')
+        self._wdg = Wdg_SpectrometerCalibrationGenerator(self, pipe_update)
+        self.setCentralWidget(self._wdg)
         
+    def get_WdgCalibrator(self) -> Wdg_SpectrometerCalibrationGenerator:
+        """
+        Gets the calibrator widget
         
-if __name__ == '__main__':
-    root = tk.Tk()
+        Returns:
+            Wdg_SpectrometerCalibrationGenerator: The calibrator widget
+        """
+        return self._wdg
+        
+    @Slot()
+    def closeEvent(self, event):
+        """
+        Overrides the close event to hide the window instead of closing it
+        """
+        self.hide()
+        event.ignore()
+    
+def test():
+    app = qw.QApplication([])
+    main_window = qw.QMainWindow()
     pipe_update, pipe_update_child = Pipe()
-    Frm_SpectrometerCalibrationGenerator(root,pipe_update).pack()
-    # SpectrometerCalibrator(pipe_update_child)
-    root.mainloop()
+    wdg = Wdg_SpectrometerCalibrationGenerator(main_window, pipe_update)
+    # SpectrometerCalibrator(pipe_update_child, Pipe()[0])
+    main_window.setCentralWidget(wdg)
+    main_window.show()
+    sys.exit(app.exec())
+
+if __name__ == '__main__':
+    test()

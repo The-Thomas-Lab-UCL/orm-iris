@@ -8,10 +8,13 @@ import os
 import gc
 import numpy as np
 import pandas as pd
+import bisect
 from copy import deepcopy
 
 import threading
 import queue
+from dataclasses import dataclass
+from typing import TypedDict
 
 import dill
 import sqlite3 as sql
@@ -31,7 +34,7 @@ if __name__ == '__main__':
     import sys
     import os
     libdir = os.path.abspath(r'.\iris')
-    sys.path.append(os.path.dirname(libdir))
+    sys.path.insert(0, os.path.dirname(libdir))
     
 
 from iris.utils.general import *
@@ -118,7 +121,7 @@ class MeaRMap_Unit():
             self._label_avemea: pd.DataFrame
         }
         
-        self._lock_measurement = threading.Lock()
+        self._lock_measurement = threading.RLock()
         
         assert all([key in self._dict_measurement_types.keys() for key in self._dict_measurement.keys()]),\
             'mapping_measurement_unit: The measurement keys are not the same as the measurement types.'
@@ -138,7 +141,7 @@ class MeaRMap_Unit():
         power_key,wavelength_key = MeaRaman(reconstruct=True).get_laserMetadata_key()
         return (metadata[power_key],metadata[wavelength_key])
         
-    def get_measurementId_from_coor(self, coor:tuple[float,float]):
+    def get_measurementId_from_coor(self, coor:tuple[float,float]) -> str:
         """
         Retrieves the measurement ID from the coordinates closest to the given coordinates.
         
@@ -211,14 +214,18 @@ class MeaRMap_Unit():
         
         if self.check_measurement_and_metadata_exist(): self._notify_observers()
         
-    def get_dict_measurements(self) -> dict:
+    def get_dict_measurements(self, copy:bool=False) -> dict:
         """
         Returns the measurement data stored in the object.
         
         Returns:
             dict: dictionary of the measurement data
         """
-        return self._dict_measurement
+        if copy:
+            with self._lock_measurement:
+                return {key: list(val) for key, val in self._dict_measurement.items()}
+        else:
+            return self._dict_measurement
         
     def get_dict_types(self) -> tuple[dict,dict]:
         """
@@ -306,7 +313,8 @@ class MeaRMap_Unit():
         Returns:
             int: number of measurements
         """
-        return len(self._dict_measurement[self._label_ts])
+        with self._lock_measurement:
+            return len(self._dict_measurement[self._label_ts])
     
     def get_dict_measurement_metadata(self) -> dict:
         """
@@ -402,7 +410,7 @@ class MeaRMap_Unit():
             autoupdate (bool): automatically update the averaged_df based on the current 'list_df'. Defaults to False.
         """
         assert isinstance(measurement, MeaRaman), 'append_measurement_data: The input data type is not correct. Expected raman_measurement object.'
-        assert isinstance(coor, tuple) and len(coor) == 3, 'append_measurement_data: The input coordinate is not correct. Expected a tuple of length 3.'
+        assert isinstance(coor, (tuple,list)) and len(coor) == 3, 'append_measurement_data: The input coordinate is not correct. Expected a tuple of length 3.'
         assert all(isinstance(item, (int,float)) for item in coor), 'append_measurement_data: The input coordinate is not correct. Expected a tuple of integers or floats.'
         assert isinstance(timestamp, int), 'append_measurement_data: The input timestamp is not correct. Expected an integer.'
         assert measurement.check_measurement_exist(), 'append_measurement_data: The measurement data does not exist.'
@@ -541,17 +549,17 @@ class MeaRMap_Unit():
         assert self._flg_measurement_exist, 'get_avg_df: The measurement data does not exist.'
         assert measurement_id in self._dict_measurement[self._mea_id_key], 'get_avg_df: The timestamp does not exist in the stored data.'
         
-        idx = self._dict_measurement[self._mea_id_key].index(measurement_id)
+        idx = bisect.bisect_left(self._dict_measurement[self._mea_id_key], measurement_id)
         df = self._dict_measurement[self._label_avemea][idx]
         
         return df
         
-    def get_list_RamanMeasurement_ids(self) -> list:
+    def get_list_RamanMeasurement_ids(self) -> list[int]:
         """
         Returns the list of timestamps stored in the measurement data
         
         Returns:
-            list: list of timestamps
+            list[int]: list of timestamps
         """
         return self._dict_measurement[self._label_ts]
     
@@ -565,9 +573,10 @@ class MeaRMap_Unit():
         # assert self._flg_measurement_exist, 'get_list_wavelengths: The measurement data does not exist.'
         if not self._flg_measurement_exist: return []
         
-        df:pd.DataFrame = self._dict_measurement[self._label_avemea][-1]
-        list_wavelengths = df[self._dflabel_wavelength].tolist()
-        return list_wavelengths
+        with self._lock_measurement:
+            df:pd.DataFrame = self._dict_measurement[self._label_avemea][-1]
+            list_wavelengths = df[self._dflabel_wavelength].tolist()
+            return list_wavelengths
     
     def get_list_Raman_shift(self) -> list[float]:
         """
@@ -681,49 +690,49 @@ class MeaRMap_Unit():
         """
         return (self._label_x,self._label_y,self._label_z,self._dflabel_wavelength,self._dflabel_intensity)
     
-    def get_heatmap_table(self,wavelength:float) -> pd.DataFrame:
+    def get_heatmap_table(self, wavelength: float) -> pd.DataFrame:
         """
-        Returns the coordinates and intensities of all measurements at the requested wavelength
+        Returns a dataframe containing the x, y, z coordinates and the intensity
+        values at the specified wavelength for all measurements.
         
         Args:
-            wavelength (float): wavelength to be retrieved (closest wavelength will be used)
-        
-        Returns:
-            pd.DataFrame: dataframe of the coordinates and intensities, according to the internal labels
-        
-        Note:
-            The labels can be retrieved using the get_labels() method
+            wavelength (float): Wavelength to extract the intensity values from.
         """
-        assert self._flg_measurement_exist, 'get_coor_intensity: The measurement data does not exist.'
+        if not self._dict_measurement[self._label_avemea]:
+            return pd.DataFrame()
+
+        # 1. Get metadata needed for indexing (usually safe without lock if immutable)
+        wvl_list = self.get_list_wavelengths() 
+        closest_wavelength = wvl_list[np.argmin(np.abs(np.array(wvl_list) - wavelength))]
         
-        def find_nearest(array, value):
-            array = np.asarray(array)
-            idx = np.argmin(np.abs(array - value))
-            return array[idx]
-        
-        closest_wavelength = find_nearest(self.get_list_wavelengths(),wavelength)
-        
-        df:pd.DataFrame = self._dict_measurement[self._label_avemea][-1]
-        wavelength_idx = df[self._dflabel_wavelength].tolist().index(closest_wavelength)
-        
-        df_result = pd.DataFrame(columns=[self._label_x,self._label_y,self._label_z,
-                                          self._dflabel_wavelength,self._dflabel_intensity])
-        
+        # 2. THE SNAPSHOT: Hold lock for microseconds only
         with self._lock_measurement:
-            x_coor = self._dict_measurement[self._label_x].copy()
-            y_coor = self._dict_measurement[self._label_y].copy()
-            z_coor = self._dict_measurement[self._label_z].copy()
-            intensities = [df.iloc[wavelength_idx, df.columns.get_loc(self._dflabel_intensity)] for df in self._dict_measurement[self._label_avemea].copy()]
+            # We copy the references to the lists. 
+            # The DataFrames themselves aren't copied, just the "list of pointers"
+            ave_mea_snapshot = list(self._dict_measurement[self._label_avemea])
+            x_coor = list(self._dict_measurement[self._label_x])
+            y_coor = list(self._dict_measurement[self._label_y])
+            z_coor = list(self._dict_measurement[self._label_z])
+
+        # --- LOCK RELEASED HERE --- 
+        # The hardware can now append to the internal lists while we process the snapshot
+
+        # 3. Heavy Extraction (Outside the lock)
+        sample_df = ave_mea_snapshot[-1]
+        wvl_idx = sample_df[self._dflabel_wavelength].tolist().index(closest_wavelength)
+        int_col_idx = sample_df.columns.get_loc(self._dflabel_intensity)
         
-        df_result = pd.DataFrame({
+        # This loop takes time, but it doesn't block the hardware anymore!
+        intensities = [df.iat[wvl_idx, int_col_idx] for df in ave_mea_snapshot]
+
+        return pd.DataFrame({
             self._label_x: x_coor,
             self._label_y: y_coor,
             self._label_z: z_coor,
-            self._dflabel_wavelength: closest_wavelength,  # Constant value
+            self._dflabel_wavelength: closest_wavelength,
             self._dflabel_intensity: intensities
         })
-        return df_result
-
+    
     def add_observer(self, observer: Callable) -> None:
         """
         Adds an observer to the list of observers.
@@ -734,9 +743,13 @@ class MeaRMap_Unit():
     def remove_observer(self, observer: Callable) -> None:
         """
         Removes an observer from the list of observers.
+        
+        Raises:
+            ValueError: If the observer could not be removed.
         """
         try: self._list_observers.remove(observer)
-        except Exception as e: print(f"Error removing observer: {e}")
+        # except Exception as e: print(f"Error removing observer: {e}")
+        except Exception as e: raise ValueError(f"remove_observer: The observer could not be removed from the unit. Error: {e}")
 
     def _notify_observers(self) -> None:
         """
@@ -883,6 +896,19 @@ class MeaRMap_Hub():
         
         return dest_unit
     
+    def validate_new_unit_name(self,unit_name:str) -> bool:
+        """
+        Validates if the new unit name is valid (i.e., does not already exist in the hub)
+        
+        Args:
+            unit_name (str): unit name to be validated
+            
+        Returns:
+            bool: True if the unit name is valid, False otherwise
+        """
+        assert isinstance(unit_name, str), 'validate_new_unit_name: The input data type is not correct. Expected a string.'
+        return unit_name not in self._dict_mappingUnit_NameID
+    
     def check_measurement_exist(self):
         """
         Check if the measurement data exists
@@ -925,7 +951,7 @@ class MeaRMap_Hub():
         """
         return self._dict_mappingMeasurementUnits['measurement_unit']
 
-    def get_summary_units(self) -> tuple[list,list,list]:
+    def get_summary_units(self) -> tuple[list[str],list[str],list[dict],list[int]]:
         """
         Returns a  summarises all the stored units and their metadata.
         
@@ -995,7 +1021,9 @@ class MeaRMap_Hub():
         self._dict_mappingMeasurementUnits['measurement_unit'].append(mapping_unit)
         
         self._dict_mappingUnit_NameID[mapping_unit.get_unit_name()] = mapping_unit.get_unit_id()
-
+        
+        mapping_unit.add_observer(self._notify_observers)
+        
         if notify: self._notify_observers()
         
     def extend_mapping_unit(self,list_mapping_unit:list[MeaRMap_Unit]) -> None:
@@ -1058,6 +1086,8 @@ class MeaRMap_Hub():
         
         # Delete the object itself and all of its references
         unit:MeaRMap_Unit = self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx]
+        try: unit.remove_observer(self._notify_observers)
+        except Exception as e: print(f"Error in remove_mapping_unit_id: {e}")
         unit.delete_self()
         del self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx]
         
@@ -1070,6 +1100,11 @@ class MeaRMap_Hub():
         """
         Deletes all mapping_measurement_unit objects from the mapping_measurements dictionary.
         """
+        list_units = self._dict_mappingMeasurementUnits['measurement_unit']
+        for unit in list_units:
+            try: unit.remove_observer(self._notify_observers)
+            except Exception as e: print(f"Error in delete_all_mapping_units: {e}")
+            unit.delete_self()
         self._dict_mappingMeasurementUnits[self._unit_id_key].clear()
         self._dict_mappingMeasurementUnits['measurement_unit'].clear()
         self._dict_mappingUnit_NameID.clear()
@@ -1407,10 +1442,19 @@ class MeaRMap_Handler():
         
         extension = extension[1:]   # Remove the dot (e.g., .txt -> txt)
         
-        return self._save_MappingUnit_ext(mappingUnit,filepath,flg_saveraw,extension)
+        return self.save_MappingUnit_ext(mappingUnit,filepath,flg_saveraw,extension)
+        
+    def get_dict_extensions(self) -> dict:
+        """
+        Returns the dictionary of supported file extensions and their descriptions.
+        
+        Returns:
+            dict: dictionary of supported file extensions and their descriptions
+        """
+        return self._dict_extensions.copy()
         
     @thread_assign
-    def _save_MappingUnit_ext(self,mappingUnit:MeaRMap_Unit,filepath:str,flg_saveraw:bool,extension:str)\
+    def save_MappingUnit_ext(self,mappingUnit:MeaRMap_Unit,filepath:str,flg_saveraw:bool,extension:str)\
         -> threading.Thread:
         """
         Saves a given MappingMeasurement_Unit object into a tab delimited .csv file.
@@ -1550,7 +1594,8 @@ class MeaRMap_Handler():
         return (saveDirPath,savename,extension)
         
     def save_MappingMeasurementHub_choose(self,mappingHub:MeaRMap_Hub,
-            saveDirPath:str|None=None,savename:str|None=None,extension:str|None=None):
+        saveDirPath:str|None=None,savename:str|None=None,extension:str|None=None)\
+        -> threading.Thread:
         """
         Choose to either save to database or pickle file.
         
@@ -1570,7 +1615,7 @@ class MeaRMap_Handler():
         # Check the extension and save accordingly
         if extension == '.db':
             thread = self.save_MappingHub_database(mappingHub,saveDirPath,savename)
-        elif extension == '.pkl':
+        else:
             thread = self.save_MappingHub_pickle(mappingHub,saveDirPath,savename)
         savename = savename + extension
         return thread
@@ -1880,7 +1925,8 @@ class MeaRMap_Handler():
         savepath = os.path.join(savedirpath,savename+'.db')
         thread = self.save_MappingHub_database(hub,savedirpath=savedirpath,savename=savename)
         thread.join()
-        mapping_measurement_loaded = self.load_MappingMeasurementHub_database(savepath)
+        hub = MeaRMap_Hub()
+        mapping_measurement_loaded = self.load_MappingMeasurementHub_database(hub,savepath)
         
         savename2 = 'test - Copy2'
         thread = self.save_MappingHub_database(mapping_measurement_loaded,savedirpath=savedirpath,savename=savename2)
@@ -1940,79 +1986,101 @@ class PlotterOptions(Enum):
     """
     Enum class for the plotter options
     """
-    interp = 'Triangle interpolation'
-    scatt = 'Scatter plot'
+    interpolation = 'Triangle interpolation'
+    scattering = 'Scatter plot'
     empty = 'Empty plot'
-    scatt_kw_size = 'size'
+    
+@dataclass
+class PlotterExtraParamsBase:
+    """
+    Base dataclass for the plotter parameters
+    """
+    pass
+
+@dataclass
+class PlotterExtParams_Scattering(PlotterExtraParamsBase):
+    """
+    Dataclass for the scattering plotter parameters
+    """
+    marker_size:float = 20.0
+    
+@dataclass
+class PlotterExtParams_Empty(PlotterExtraParamsBase):
+    """
+    Dataclass for the empty plotter parameters
+    """
+    pass
+
+@dataclass
+class PlotterExtParams_Interpolation(PlotterExtraParamsBase):
+    """
+    Dataclass for the interpolation plotter parameters
+    """
+    pass
+    
+@dataclass
+class PlotterParams():
+    """
+    Dataclass for the plotter parameters
+    """
+    mapping_unit:MeaRMap_Unit|None=None
+    wavelength:float|None=None
+    clim:tuple[float|None,float|None]|None=None
+    title = '2D Mapping'
     
 class MeaRMap_Plotter:
     """
     Class to plot the mapping measurement data from the MappingMeasurement_Unit object
     """
-    def __init__(self, figsize_pxl = (800,600)):
-        self._figsize_pxl = figsize_pxl
-        self._dpi = plt.rcParams['figure.dpi']
-        self._figsize_in = (self._figsize_pxl[0]/self._dpi,self._figsize_pxl[1]/self._dpi)
+    def __init__(self):
+        self._fig, self._ax = plt.subplots()
+        self._cbar:Colorbar|None = None
         
-        self.dict_plotter_options = {
-            PlotterOptions.interp.value: self.plot_heatmap_interp,
-            PlotterOptions.scatt.value: self.plot_heatmap_scatter,
-            PlotterOptions.empty.value: self.plot_heatmap_nothing
-        }
-        
-        self.dict_plotter_kwargs = {
-            PlotterOptions.interp.value: {},
-            PlotterOptions.scatt.value: {
-                PlotterOptions.scatt_kw_size.value: (float,'Size of the scatter plot')
-            },
-            PlotterOptions.empty.value: {}
-        }
-        
-    def get_plotter_options(self) -> tuple[dict,dict]:
+    def get_figure_axes(self) -> tuple[Figure,Axes]:
         """
-        Returns the plotter options
-        
-        Returns:
-            tuple: dictionary of plotter options and dictionary of plotter kwargs
-            
-        Note:
-            - The plotter options are the plotter functions corresponding to the plotter options
-            - The plotter kwargs are the arguments to be passed to the plotter options containing
-                a dict of tuples of (arg_name,arg_type) for each argument, and the key is the plotter option
-                corresponding to the plotter option in the plotter options dictionary
-        """
-        return (self.dict_plotter_options,self.dict_plotter_kwargs)
+        Returns the figure and axes of the plotter
 
-    def plot_typehinting(self, mapping_unit:MeaRMap_Unit|None=None, wavelength:float|None=None,
-                     clim:tuple[float,float]|None=None,title = '2D Mapping', fig:Figure|None=None, ax:Axes|None=None,
-                     clrbar:Colorbar|None=None) -> tuple[Figure,Axes,Colorbar]:
-        """
-        DOES NOTHING but to show the type hinting for the plotter functions
-        
-        Plots a heatmap plot from a mapping unit, given its coordinates, and labels indicating the data column info.
-        
-        Note:
-            - not providing the mapping_unit will plot and return an empty heatmap
-            - providing a figure and axis will plot the heatmap on the given figure and axis. BOTH fig and ax should be provided.
-            - providing a colorbar will reset the colorbar. If no fig and ax are provided, this option is ignored.
-            
-        Args:
-            mapping_unit (MappingMeasurement_Unit): MappingMeasurement_Unit object to plot
-            wavelength (float): wavelength to plot the heatmap
-            clim (tuple[float,float], optional): color limit for the heatmap. Defaults to None.
-            title (str, optional): title of the resulting graph. Defaults to '2D Mapping'.
-            fig (matplotlib.figure.Figure, optional): figure to plot the heatmap. Defaults to None.
-            ax (matplotlib.axes._subplots.AxesSubplot, optional): axis to plot the heatmap. Defaults to None.
-            clrbar (matplotlib.colorbar.Colorbar, optional): colorbar to plot the heatmap. Defaults to None.
-            
         Returns:
-            tuple: (figure, axis, clrbar) of the plot
+            tuple[Figure,Axes]: figure and axes of the plotter
         """
-        raise NotImplementedError('plot_typehinting: This function is only for typehinting.')
+        return (self._fig,self._ax)
     
-    def plot_heatmap_nothing(self, mapping_unit:MeaRMap_Unit|None=None, wavelength:float|None=None,
-                     clim:tuple[float,float]|None=None,title = '2D Mapping', fig:Figure|None=None, ax:Axes|None=None,
-                     clrbar:Colorbar|None=None) -> tuple[Figure,Axes,Colorbar]:
+    def get_plotter_params(self, plotter:PlotterOptions) -> PlotterExtraParamsBase:
+        """
+        Returns the parameter dataclass for the given plotter option
+
+        Args:
+            plotter (PlotterOptions): Plotter to get the parameters for
+        """
+        if plotter == PlotterOptions.scattering:
+            return PlotterExtParams_Scattering()
+        elif plotter == PlotterOptions.interpolation:
+            return PlotterExtParams_Interpolation()
+        elif plotter == PlotterOptions.empty:
+            return PlotterExtParams_Empty()
+    
+    def initialise_empty_plot(self) -> None:
+        """
+        Initialises an empty plot
+        """
+        empty_params = PlotterParams()
+        self._plot_heatmap_empty(empty_params)
+    
+    def plot_heatmap(self, plotter:PlotterOptions, params:PlotterParams, params_extra:PlotterExtraParamsBase|None = None) -> None:
+        """
+        Plots a heatmap plot from a mapping unit, given its coordinates, and labels indicating the data column info.
+        """
+        if plotter == PlotterOptions.interpolation:
+            self._plot_heatmap_interp(params)
+        elif plotter == PlotterOptions.scattering:
+            params_extra = params_extra if isinstance(params_extra,PlotterExtParams_Scattering) else PlotterExtParams_Scattering()
+            self._plot_heatmap_scatter(params, params_extra)
+        elif plotter == PlotterOptions.empty:
+            self._plot_heatmap_empty(params)
+        else:
+            raise ValueError('plot_heatmap: The plotter option is not recognised: {}'.format(plotter))
+    
+    def _plot_heatmap_empty(self,params:PlotterParams,*args, **kwargs) -> None:
         """
         Plots nothing but returns the figure, axis, and colorbar
 
@@ -2021,62 +2089,33 @@ class MeaRMap_Plotter:
             wavelength (float): wavelength to plot the heatmap
             clim (tuple[float,float], optional): color limit for the heatmap. Defaults to None.
             title (str, optional): title of the resulting graph. Defaults to '2D Mapping'.
-            fig (matplotlib.figure.Figure, optional): figure to plot the heatmap. Defaults to None.
-            ax (matplotlib.axes._subplots.AxesSubplot, optional): axis to plot the heatmap. Defaults to None.
-            clrbar (matplotlib.colorbar.Colorbar, optional): colorbar to plot the heatmap. Defaults to None.
-            
-        Returns:
-            tuple: (figure, axis, clrbar) of the plot
         """
-        if isinstance(mapping_unit,MeaRMap_Unit) and wavelength is not None:    
-            # Retrieve the measurement data
-            df_plot:pd.DataFrame = mapping_unit.get_heatmap_table(wavelength)
-            label_x,label_y,_,_,label_intensity = mapping_unit.get_labels()
-            
-            # Convert the x-coordinate and y-coordinate into string to prevent any issues
-            values = df_plot.values
-            x_loc = df_plot.columns.get_loc(label_x)
-            y_loc = df_plot.columns.get_loc(label_y)
-            intensity_loc = df_plot.columns.get_loc(label_intensity)
-            
-            x_val = [val for val in values[:,x_loc]]
-            y_val = [val for val in values[:,y_loc]]
-            
-            x_min = min(x_val)
-            x_max = max(x_val)
-            y_min = min(y_val)
-            y_max = max(y_val)
+        mapping_unit = params.mapping_unit
+        wavelength = params.wavelength
+        title = params.title
+        try: x_val, y_val, _ = self._retrieve_heatmap_data(mapping_unit, wavelength)
+        except ValueError:
+            x_val = [0,1]
+            y_val = [0,1]
         
-        if any([not isinstance(mapping_unit,MeaRMap_Unit), wavelength is None]):
-            return (fig,ax,None)
+        x_min = min(x_val)
+        x_max = max(x_val)
+        y_min = min(y_val)
+        y_max = max(y_val)
         
-        if all([isinstance(fig,Figure), isinstance(ax,Axes)]):
-            try:
-                if isinstance(clrbar,Colorbar):
-                    clrbar.remove()
-                ax.clear()
-            except:
-                fig,ax = plt.subplots(figsize=self._figsize_in)
-        else:
-            fig,ax = plt.subplots(figsize=self._figsize_in)
+        if isinstance(self._cbar,Colorbar):
+            self._cbar.remove()
+        self._ax.clear()
         
-        if any([not isinstance(mapping_unit,MeaRMap_Unit), wavelength is None]):
-            return (fig,ax,None)
+        self._ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
+        self._ax.set_title(title)
+        self._ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
+        self._ax.set_ylabel(AppPlotEnum.PLT_LBL_Y_AXIS.value)
         
-        ax:Axes
-        ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
-        ax.set_title(title)
-        ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
-        ax.set_ylabel(AppPlotEnum.PLT_LBL_Y_AXIS.value)
-        
-        ax.set_xlim(x_min,x_max)
-        ax.set_ylim(y_min,y_max)
-        
-        return (fig,ax,None)
+        self._ax.set_xlim(x_min,x_max)
+        self._ax.set_ylim(y_min,y_max)
     
-    def plot_heatmap_interp(self, mapping_unit:MeaRMap_Unit|None=None, wavelength:float|None=None,
-                     clim:tuple[float,float]|None=None,title = '2D Mapping', fig:Figure|None=None, ax:Axes|None=None,
-                     clrbar:Colorbar|None=None) -> tuple[Figure,Axes,Colorbar]:
+    def _plot_heatmap_interp(self, params:PlotterParams, *args, **kwargs) -> None:
         """
         Plots a heatmap plot from a mapping unit, given its coordinates, and labels indicating the data column info.
         
@@ -2090,15 +2129,51 @@ class MeaRMap_Plotter:
             wavelength (float): wavelength to plot the heatmap
             clim (tuple[float,float], optional): color limit for the heatmap. Defaults to None.
             title (str, optional): title of the resulting graph. Defaults to '2D Mapping'.
-            fig (matplotlib.figure.Figure, optional): figure to plot the heatmap. Defaults to None.
-            ax (matplotlib.axes._subplots.AxesSubplot, optional): axis to plot the heatmap. Defaults to None.
-            clrbar (matplotlib.colorbar.Colorbar, optional): colorbar to plot the heatmap. Defaults to None.
-            
-        Returns:
-            tuple: (figure, axis, clrbar) of the plot
         """
         # Do the calculation first for a lower figure off time
         # (i.e., when the ax is cleared and not yet reassigned)
+        mapping_unit = params.mapping_unit
+        wavelength = params.wavelength
+        clim = params.clim
+        title = params.title
+        
+        try: x_val, y_val, intensity = self._retrieve_heatmap_data(mapping_unit, wavelength)
+        except ValueError as e: pass; return
+        except Exception as e: print(f'Error in plot_heatmap_interp: {e}'); return
+        
+        try:
+            if isinstance(self._cbar,Colorbar):
+                self._cbar.remove()
+        except Exception as e: print(f'Error in plot_heatmap_interp while removing cbar: {e}')
+        
+        try: self._ax.clear()
+        except Exception as e: print(f'Error in plot_heatmap_interp while clearing ax: {e}')
+        
+        # Check if the the data can be plot using tripcolor
+        if any([len(intensity) < 3, len(set(x_val)) < 2, len(set(y_val)) < 2]):
+            return
+        
+        self._ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
+        
+        # Plot the tripcolor using your existing data
+        # Note we're passing x, y directly, and not using `triangles`
+        self._ax.tripcolor(
+            x_val, y_val, intensity, cmap=AppPlotEnum.PLT_COLOUR_MAP.value,
+            shading=AppPlotEnum.PLT_SHADING.value, edgecolors=AppPlotEnum.PLT_EDGE_COLOUR.value)
+        
+        # Add colourbar and labels
+        self._cbar = self._fig.colorbar(self._ax.collections[0], ax=self._ax)
+        self._ax.set_title(title)
+        self._ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
+        self._ax.set_ylabel(AppPlotEnum.PLT_LBL_Y_AXIS.value)
+        
+        # Set the colourbar limits
+        if isinstance(clim,tuple) and len(clim) == 2:
+            if isinstance(clim[0],float) and isinstance(clim[1],float):
+                list(clim).sort()
+            self._cbar.mappable.set_clim(vmin=clim[0],vmax=clim[1])
+
+    def _retrieve_heatmap_data(self, mapping_unit:MeaRMap_Unit|None, wavelength:float|None):
         if isinstance(mapping_unit,MeaRMap_Unit) and wavelength is not None:    
             # Retrieve the measurement data
             df_plot:pd.DataFrame = mapping_unit.get_heatmap_table(wavelength)
@@ -2113,52 +2188,10 @@ class MeaRMap_Plotter:
             x_val = [val for val in values[:,x_loc]]
             y_val = [val for val in values[:,y_loc]]
             intensity = values[:,intensity_loc]
-        
-        if all([isinstance(fig,Figure), isinstance(ax,Axes)]):
-            try:
-                if isinstance(clrbar,Colorbar):
-                    clrbar.remove()
-                ax.clear()
-            except:
-                fig,ax = plt.subplots(figsize=self._figsize_in)
-        else:
-            fig,ax = plt.subplots(figsize=self._figsize_in)
-        
-        if any([not isinstance(mapping_unit,MeaRMap_Unit), wavelength is None]):
-            return (fig,ax,None)
-        
-        # Check if the the data can be plot using tripcolor
-        if any([len(intensity) < 3, len(set(x_val)) < 2, len(set(y_val)) < 2]):
-            return (fig,ax,None)
-        
-        ax:Axes
-        ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
-        
-        # Plot the tripcolor using your existing data
-        # Note we're passing x, y directly, and not using `triangles`
-        tpc = ax.tripcolor(x_val, y_val, intensity, cmap=AppPlotEnum.PLT_COLOUR_MAP.value,
-                           shading=AppPlotEnum.PLT_SHADING.value, edgecolors=AppPlotEnum.PLT_EDGE_COLOUR.value)
-        
-        # Add colourbar and labels
-        cbar = fig.colorbar(ax.collections[0], ax=ax)
-        ax.set_title(title)
-        ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
-        ax.set_ylabel(AppPlotEnum.PLT_LBL_Y_AXIS.value)
-        
-        # Set the colourbar limits
-        if isinstance(clim,tuple) and len(clim) == 2:
-            if isinstance(clim[0],float) and isinstance(clim[1],float):
-                list(clim).sort()
-            cbar.mappable.set_clim(vmin=clim[0],vmax=clim[1])
-        
-        # print(f"Number of figures: {plt.get_fignums()}")
-        # print(f"Number of axes: {len(fig.axes)}")
-        
-        return (fig,ax,cbar)
+        else: raise ValueError('_retrieve_heatmap_data: Invalid mapping_unit or wavelength input.')
+        return x_val,y_val,intensity
     
-    def plot_heatmap_scatter(self, mapping_unit:MeaRMap_Unit|None=None, wavelength:float|None=None,
-                     clim:tuple[float,float]|None=None, title = '2D Mapping', size:float|None=None,
-                     fig:Figure|None=None, ax:Axes|None=None, clrbar:Colorbar|None=None) -> tuple[Figure,Axes,Colorbar]:
+    def _plot_heatmap_scatter(self, params:PlotterParams, params_extra:PlotterExtParams_Scattering|None, *args, **kwargs) -> None:
         """
         Plots a heatmap plot from a mapping unit, given its coordinates, and labels indicating the data column info.
         
@@ -2173,69 +2206,46 @@ class MeaRMap_Plotter:
             clim (tuple[float,float], optional): color limit for the heatmap. Defaults to None.
             title (str, optional): title of the resulting graph. Defaults to '2D Mapping'.
             size (float, optional): size of the scatter plot. Defaults to None.
-            fig (matplotlib.figure.Figure, optional): figure to plot the heatmap. Defaults to None.
-            ax (matplotlib.axes._subplots.AxesSubplot, optional): axis to plot the heatmap. Defaults to None.
-            clrbar (matplotlib.colorbar.Colorbar, optional): colorbar to plot the heatmap. Defaults to None.
-            
-        Returns:
-            tuple: (figure, axis, clrbar) of the plot
         """
-        # Do the calculation first for a lower figure off time
-        # (i.e., when the ax is cleared and not yet reassigned)
-        if isinstance(mapping_unit,MeaRMap_Unit) and wavelength is not None:    
-            # Retrieve the measurement data
-            df_plot:pd.DataFrame = mapping_unit.get_heatmap_table(wavelength)
-            label_x,label_y,_,_,label_intensity = mapping_unit.get_labels()
-            
-            # Convert the x-coordinate and y-coordinate into string to prevent any issues
-            values = df_plot.values
-            x_loc = df_plot.columns.get_loc(label_x)
-            y_loc = df_plot.columns.get_loc(label_y)
-            intensity_loc = df_plot.columns.get_loc(label_intensity)
-            
-            x_val = [val for val in values[:,x_loc]]
-            y_val = [val for val in values[:,y_loc]]
-            intensity = values[:,intensity_loc]
+        mapping_unit = params.mapping_unit
+        wavelength = params.wavelength
+        clim = params.clim
+        title = params.title
+        size = params_extra.marker_size
         
-        if all([isinstance(fig,Figure), isinstance(ax,Axes)]):
-            try:
-                if isinstance(clrbar,Colorbar):
-                    clrbar.remove()
-                ax.clear()
-            except:
-                fig,ax = plt.subplots(figsize=self._figsize_in)
-        else:
-            fig,ax = plt.subplots(figsize=self._figsize_in)
+        try: x_val, y_val, intensity = self._retrieve_heatmap_data(mapping_unit, wavelength)
+        except ValueError as e: print(f'Error in plot_heatmap_scatter: {e}'); return
         
-        if any([not isinstance(mapping_unit,MeaRMap_Unit), wavelength is None]):
-            return (fig,ax,None)
+        try:
+            if isinstance(self._cbar,Colorbar):
+                self._cbar.remove()
+        except Exception as e: print(f'Error in plot_heatmap_scatter while clearing ax or cbar: {e}')
+        
+        try: self._ax.clear()
+        except Exception as e: print(f'Error in plot_heatmap_scatter while clearing ax: {e}')
         
         # Check if the the data can be plot using tripcolor
-        if any([len(intensity) < 3, len(set(x_val)) < 2, len(set(y_val)) < 2]):
-            return (fig,ax,None)
+        if any([len(intensity) < 3, len(set(x_val)) < 2, len(set(y_val)) < 2]): return
         
-        ax:Axes
-        ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
+        self._ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
         
-        figsize = fig.get_size_inches()
+        figsize = self._fig.get_size_inches()
         number_of_points = len(x_val)
         
         point_size = (figsize[0]*figsize[1])/number_of_points*750 if not isinstance(size,float) else size
-        ax.scatter(x_val, y_val, c=intensity, cmap=AppPlotEnum.PLT_COLOUR_MAP.value, s=point_size, linewidths=0, marker='s')
-
+        self._ax.scatter(x_val, y_val, c=intensity, cmap=AppPlotEnum.PLT_COLOUR_MAP.value, s=point_size, linewidths=0, marker='s')
+        
         # Add colourbar and labels
-        cbar:Colorbar = fig.colorbar(ax.collections[0], ax=ax)
-        ax.set_title(title)
-        ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
-        ax.set_ylabel(AppPlotEnum.PLT_LBL_Y_AXIS.value)
+        self._cbar = self._fig.colorbar(self._ax.collections[0], ax=self._ax)
+        self._ax.set_title(title)
+        self._ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
+        self._ax.set_ylabel(AppPlotEnum.PLT_LBL_Y_AXIS.value)
         
         # Set the colourbar limits
         if isinstance(clim,tuple) and len(clim) == 2:
             if isinstance(clim[0],float) and isinstance(clim[1],float):
                 list(clim).sort()
-            cbar.mappable.set_clim(vmin=clim[0],vmax=clim[1])
-        
-        return (fig,ax,cbar)
+            self._cbar.mappable.set_clim(vmin=clim[0],vmax=clim[1])
     
 def test_datasaveload_system_txt(storage_main:MeaRMap_Hub|None=None):
     if storage_main is None: storage_main = generate_dummy_mappingHub()

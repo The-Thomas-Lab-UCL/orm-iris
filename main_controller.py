@@ -1,4 +1,424 @@
-from iris.__main__ import run_app
-
+"""
+This program is to control a Raman imaging microscope consisting of an XY stage, Z stage, brightfield camera, and a spectrometer.
+"""
 if __name__ == "__main__":
-    run_app()
+    print('>>>>> IRIS: IMPORTING LIBRARIES <<<<<')
+    import sys
+    import os
+    libdir = os.path.abspath(r'.\iris')
+    sys.path.insert(0, os.path.dirname(libdir))
+    
+import sys
+import multiprocessing as mp
+import multiprocessing.pool as mpp
+import time
+
+from PySide6.QtGui import QCloseEvent
+import PySide6.QtWidgets as qw
+from PySide6.QtCore import Qt # For context
+from PySide6.QtCore import Signal, Slot, QTimer, QThread
+
+from iris.controllers import Controller_Spectrometer, Controller_XY, Controller_Z
+
+from iris import LibraryConfigEnum
+from iris.gui import ShortcutsEnum
+from iris.controllers import ControllerConfigEnum
+
+from iris.gui.motion_video import Wdg_MotionController
+from iris.gui.raman import Wdg_SpectrometerController
+from iris.gui.hilvl_Raman import Wdg_HighLvlController_Raman
+from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
+from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
+from iris.gui.hilvl_Brightfield import Wdg_HighLvlController_Brightfield
+from iris.gui.hilvl_coorGen import Wdg_Hilvl_CoorGenerator, List_MeaCoor_Hub
+
+from iris.gui.shortcut_handler import ShortcutHandler
+
+from iris.data.measurement_coordinates import List_MeaCoor_Hub
+
+from iris.calibration.calibration_generator import Wdg_SpectrometerCalibrationGenerator, MainWindow_SpectrometerCalibrationGenerator
+
+from iris.multiprocessing.basemanager import MyManager
+from iris.multiprocessing.dataStreamer_Raman import DataStreamer_Raman,initialise_manager_raman,initialise_proxy_raman
+from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam,initialise_manager_stage,initialise_proxy_stage
+
+from iris.utils.general import *
+
+from main_analyser import main_analyser
+
+from extensions.extension_intermediary import Ext_DataIntermediary
+from extensions.extension_template import Extension_MainWindow
+from extensions.optics_calibration_aid.Ext_OpticsCalibrationAid import Ext_OpticsCalibrationAid
+
+# NOTE: controller classes and enums imported lazily inside MainWindow_Controller.__init__
+# to avoid importing hardware SDKs / creating OS handles at module import time
+# (which breaks multiprocessing spawn on Windows).
+from iris.resources.main_controller_ui import Ui_main_controller
+
+class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
+    """
+    Import the tkinter app class
+    
+    Args:
+        tk (None): tkinter library
+    """
+    def __init__(self,
+                 processor:mpp.Pool,
+                 raman_controller:'Controller_Spectrometer',
+                 xy_controller:'Controller_XY',
+                 z_controller:'Controller_Z',
+                 raman_hub:DataStreamer_Raman,
+                 stage_hub:DataStreamer_StageCam,
+                 base_manager:MyManager):
+        
+        # Set the app windows name and inherit all the properties
+        screenName = 'ORM-IRIS: Open-source Raman microscope controller'
+        super().__init__()
+        self.setupUi(self)
+        self.setWindowTitle(screenName)
+        
+        # > Hub setups
+        self._processor = processor
+        self._ramanHub = raman_hub
+        self._stageHub = stage_hub
+        self._coorHub = List_MeaCoor_Hub()
+        
+        # > Controller proxies (for proper termination)
+        self._raman_controller = raman_controller
+        self._xy_controller = xy_controller
+        self._z_controller = z_controller
+        self._base_manager = base_manager
+        
+        # Data hub setups
+        self._dataHub_map = Wdg_DataHub_Mapping(self,autosave=True)
+        self._dataHub_img = Wdg_DataHub_Image(self)
+        self._dataHub_imgcal = Wdg_DataHub_ImgCal(self)
+        
+        self.lytDataHubMap.addWidget(self._dataHub_map)
+        self.lytDataHubImg.addWidget(self._dataHub_img)
+        self.lytObjCalHub.addWidget(self._dataHub_imgcal)
+        
+        # Initialise the app subframes
+        self._motion = Wdg_MotionController(
+            parent=self,
+            xy_controller=xy_controller,
+            z_controller=z_controller,
+            stageHub=stage_hub,
+            getter_imgcal=self._dataHub_imgcal.get_selected_calibration,
+            flg_issimulation=ControllerConfigEnum.SIMULATION_MODE.value)
+        self.lytMotionVideo.addWidget(self._motion)
+        
+        self._raman = Wdg_SpectrometerController(
+            parent=self,
+            processor=self._processor,
+            controller=raman_controller,
+            ramanHub=raman_hub,
+            dataHub=self._dataHub_map)
+        self.lytRaman.addWidget(self._raman)
+        
+        self._hilvl_coorGen = Wdg_Hilvl_CoorGenerator(
+            parent=self,
+            coorHub=self._coorHub,
+            motion_controller=self._motion,
+            dataHub_map=self._dataHub_map,
+            dataHub_img=self._dataHub_img,
+            dataHub_imgcal=self._dataHub_imgcal)
+        self.lytCoorGen.addWidget(self._hilvl_coorGen)
+        
+        self._hilvl_raman = Wdg_HighLvlController_Raman(
+            parent=self,
+            motion_controller=self._motion,
+            stageHub=stage_hub,
+            raman_controller=self._raman,
+            ramanHub=raman_hub,
+            dataHub_map=self._dataHub_map,
+            dataHub_img=self._dataHub_img,
+            dataHub_imgcal=self._dataHub_imgcal,
+            coorHub=self._coorHub,
+            wdg_coorGen=self._hilvl_coorGen,
+            processor=self._processor)
+        self.lytRamanMapping.addWidget(self._hilvl_raman)
+        
+        self._hilvl_brightfield = Wdg_HighLvlController_Brightfield(
+            parent=self,
+            processor=self._processor,
+            dataHub_map=self._dataHub_map,
+            dataHub_img=self._dataHub_img,
+            dataHub_imgcal=self._dataHub_imgcal,
+            motion_controller=self._motion,
+            stageHub=self._stageHub,
+            coorHub=self._coorHub)
+        self.lytBrightfield.addWidget(self._hilvl_brightfield)
+        
+    # >> Set up the data manager <<
+        self._extension_intermediary = Ext_DataIntermediary(
+            raman_controller=raman_controller,
+            camera_controller=self._stageHub.get_camera_controller(),
+            xy_controller=xy_controller,
+            z_controller=z_controller,
+            frm_motion_controller=self._motion,
+            frm_raman_controller=self._raman,
+            frm_highlvl_raman=self._hilvl_raman,
+            frm_highlvl_brightfield=self._hilvl_brightfield,
+            frm_datahub_mapping=self._dataHub_map,
+            frm_datahub_image=self._dataHub_img,
+            frm_datahub_imgcal=self._dataHub_imgcal,
+            )
+        
+    # >> Set up the calibration generator <<
+        self._spectrometer_calibrator = MainWindow_SpectrometerCalibrationGenerator(
+            pipe_update=self._ramanHub.get_calibrator_pipe()
+        )
+        
+    # >> Set up the analysers <<
+        self._main_analyser = main_analyser(
+            processor=self._processor,
+            dataHub=self._dataHub_map,
+        )
+        
+        # Set up the menu bar
+        menu_windows = self.menubar.addMenu('Windows')
+        menu_analyser = self.menubar.addMenu('Analyser')
+        menu_extensions = self.menubar.addMenu('Extensions')
+        menu_controllers = self.menubar.addMenu('Controllers')
+        
+    # >> Set up the windows menubar <<
+        menu_windows.addAction('Show "Main controller"',self.show)
+        menu_windows.addAction('Show "Main analyser"',self._main_analyser.show)
+        menu_windows.addAction('Show "Spectrometer calibration"',self._spectrometer_calibrator.show)
+        
+    # >> Set up the analyser menubar <<
+        menu_analyser.addAction('Show "Main analyser"',self._main_analyser.show)
+        # menu_analyser.addAction('Create a new [destructible] "analyser
+        
+    # >> Set up the extensions <<
+        self._list_extensions_toplevel:list[Extension_MainWindow] = []
+        
+        self._set_extensions()
+        for i,ext in enumerate(self._list_extensions_toplevel):
+            ext:Extension_MainWindow
+            menu_extensions.addAction('Show "{}"'.format(ext.windowTitle()),ext.show)
+        
+    # >> Set up the controllers menubar <<
+        menu_controllers.addAction('Set camera exposure time',self._motion.set_camera_exposure)
+        menu_controllers.addAction('Set the stage timestamp offset [ms]',self.set_RamanStage_offset)
+        
+    # >> Set up the keybindings <<
+        self.shortcutHandler = ShortcutHandler(self)
+        self._set_keybindings()
+        
+    def _set_keybindings(self):
+        """
+        Set up the keybindings for the main controller
+        """
+        # Set up the keybindings for the motion controller continuous movement
+        self.shortcutHandler.set_keybinding_press_release(ShortcutsEnum.XY_UP.value,lambda: self._motion.motion_button_manager('yfwd'),lambda: self._motion.motion_button_manager('ystop'))
+        self.shortcutHandler.set_keybinding_press_release(ShortcutsEnum.XY_DOWN.value,lambda: self._motion.motion_button_manager('yrev'),lambda: self._motion.motion_button_manager('ystop'))
+        self.shortcutHandler.set_keybinding_press_release(ShortcutsEnum.XY_RIGHT.value,lambda: self._motion.motion_button_manager('xfwd'),lambda: self._motion.motion_button_manager('xstop'))
+        self.shortcutHandler.set_keybinding_press_release(ShortcutsEnum.XY_LEFT.value,lambda: self._motion.motion_button_manager('xrev'),lambda: self._motion.motion_button_manager('xstop'))
+        self.shortcutHandler.set_keybinding_press_release(ShortcutsEnum.Z_UP.value,lambda: self._motion.motion_button_manager('zfwd'),lambda: self._motion.motion_button_manager('zstop'))
+        self.shortcutHandler.set_keybinding_press_release(ShortcutsEnum.Z_DOWN.value,lambda: self._motion.motion_button_manager('zrev'),lambda: self._motion.motion_button_manager('zstop'))
+        
+        # Set up the keybindings for the motion controller jogging
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_JOG_UP.value,lambda: self._motion.move_jog('yfwd'))
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_JOG_DOWN.value,lambda: self._motion.move_jog('yrev'))
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_JOG_RIGHT.value,lambda: self._motion.move_jog('xfwd'))
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_JOG_LEFT.value,lambda: self._motion.move_jog('xrev'))
+        
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.Z_JOG_UP.value,lambda: self._motion.move_jog('zfwd'))
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.Z_JOG_DOWN.value,lambda: self._motion.move_jog('zrev'))
+        
+        # Set up the keybindings for the motion controller speed
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_SPEED_UP.value,lambda: self._motion.incrase_decrease_speed('xy',True))
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.XY_SPEED_DOWN.value,lambda: self._motion.incrase_decrease_speed('xy',False))
+
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.Z_SPEED_UP.value,lambda: self._motion.incrase_decrease_speed('z',True))
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.Z_SPEED_DOWN.value,lambda: self._motion.incrase_decrease_speed('z',False))
+        
+        self.shortcutHandler.set_keybinding_press(ShortcutsEnum.JOG_MODE_SWITCH.value,self._motion._chkbox_jog_enabled.toggle)
+        
+    def set_RamanStage_offset(self):
+        """
+        Set the time offset between the stage and the Raman spectrometer reported timestamps
+        """
+        def validator_float(input_str:str) -> bool:
+            try:
+                newval = float(input_str)
+                return newval > 0
+            except: return False
+        
+        current_offset_ms = self._stageHub.get_measurement_offset_ms()
+        offset_ms = messagebox_request_input(
+            parent=self._raman,
+            title='Stage and Raman Hub offset setup [ms]',
+            message='Enter the time offset between the stage and the Raman Hub in [ms]:',
+            default=str(current_offset_ms),
+            validator=validator_float,
+            loop_until_valid=True
+        )
+        if not isinstance(offset_ms, str):
+            qw.QMessageBox.information(self, 'Cancelled', 'The offset setting has been cancelled')
+            return
+        
+        try: offset_ms = float(offset_ms)
+        except: qw.QMessageBox.warning(self, 'Error', 'The input must be a number')
+        else: self._stageHub.set_measurement_offset_ms(offset_ms); qw.QMessageBox.information(self, 'Success', f'The offset has been set to {offset_ms} ms')
+        
+    def initialisations(self):
+        """
+        Turns on all the auto-updaters once all the widgets are initialised
+        """
+        print('>>>>> IRIS: PERFORMING FINAL INITIALISATIONS <<<<<')
+        self._raman.initialise_spectrometer_n_analyser()
+        # [extension.initialise() for extension in self._list_extensions_toplevel]
+        
+        # > Prepare the objectives <
+        dirpath_objcal = LibraryConfigEnum.OBJECTIVE_CALIBRATION_DIR.value
+        if not os.path.isdir(dirpath_objcal): os.makedirs(dirpath_objcal,exist_ok=True)
+        self._dataHub_imgcal._load_calibration_folder(dirpath=dirpath_objcal,supp_msg=True)
+        
+        # > Prepare the spectrometer calibrator directory <
+        dirpath_speccal = LibraryConfigEnum.SPECTROMETER_CALIBRATION_DIR_DEFAULT.value
+        if not os.path.isdir(dirpath_speccal): os.makedirs(dirpath_speccal,exist_ok=True)
+        
+        # > Initialise the high level controllers <
+        self._hilvl_coorGen.initialise()
+        self._hilvl_raman.initialise()
+        print('>>>>> IRIS: INITIALISATIONS COMPLETE <<<<<')
+        
+    def closeEvent(self, event: QCloseEvent) -> None:
+        close_confirm_map = self._dataHub_map.check_safeToTerminate()
+        if not close_confirm_map:
+            event.ignore()
+            return
+        
+        close_confirm_img = self._dataHub_img.check_safeToTerminate()
+        if not close_confirm_img:
+            event.ignore()
+            return
+        
+        print('>>>>> IRIS: CLOSING THE APP <<<<<')
+        self.hide()
+        self.terminate()
+        event.accept()
+        
+        
+    def _set_extensions(self):
+        """
+        Add the extensions to the main controller
+        """
+        # > Optics calibration extension
+        optics_calibration_extension = Ext_OpticsCalibrationAid(
+            master=self,
+            intermediary=self._extension_intermediary)
+        
+        self._list_extensions_toplevel.append(optics_calibration_extension)
+        
+        for ext in self._list_extensions_toplevel:
+            ext:Extension_MainWindow
+            ext.initialise()
+            ext.hide()
+        
+    # def _set_IRIS_analyser(self):
+    #     """
+    #     Creates more IRIS analyser instances as new top level windows
+    #     """
+    #     number_analyser = len(self._list_analyser_toplevel)
+    #     toplevel_analyser = tk.Toplevel(self)
+    #     toplevel_analyser.title('[destructible] IRIS analyser {}'.format(number_analyser+1))
+    #     toplevel_analyser.config(menu=self.winfo_toplevel().config('menu')[-1])
+        
+    #     iris_analyser = main_analyser(toplevel_analyser,processor=self._processor)
+    #     iris_analyser.pack()
+        
+    #     self._list_analyser_toplevel.append(toplevel_analyser)
+    #     self._list_analyser_instances.append(iris_analyser)
+        
+    def terminate(self):
+        print('\n>>>>>>>>>> Terminating the program <<<<<<<<<<')
+        try: self._dataHub_map.terminate()
+        except Exception as e: print('Error in closing the data hub:\n{}'.format(e))
+        
+        try: self._dataHub_img.terminate()
+        except Exception as e: print('Error in closing the data hub:\n{}'.format(e))
+        
+        try: self._hilvl_coorGen.terminate()
+        except Exception as e: print('Error in closing the coordinate hub:\n{}'.format(e))
+        
+        try: self._hilvl_raman.terminate()
+        except Exception as e: print('Error in closing the high level controller:\n{}'.format(e))
+                
+        try:
+            print('Terminating the spectrometer controller connection')
+            self._ramanHub.terminate_process()
+            self._ramanHub.terminate()
+            self._ramanHub.join(timeout=5)
+        except Exception as e: print('Error in closing the spectrometer controller:\n{}'.format(e))
+        
+        try:
+            print('Terminating the spectrometer controller GUI')
+            self._raman.terminate()
+        except Exception as e: print('Error in closing the spectrometer controller:\n{}'.format(e))
+
+        try:
+            print('Terminating the motion controller connections')
+            self._stageHub.terminate()
+            self._stageHub.join(timeout=5)
+        except Exception as e: print('Error in closing the motion controller:\n{}'.format(e))
+        
+        try:
+            print('Terminating the motion controller GUI')
+            self._motion.terminate()
+        except Exception as e: print('Error in closing the motion controller:\n{}'.format(e))
+                
+        print('Terminating the processes')
+        self._processor.terminate()
+        
+        try:
+            print('Shutting down the multiprocessing manager')
+            self._base_manager.shutdown()
+        except Exception as e: print('Error in shutting down the manager:\n{}'.format(e))
+        
+        print('---------- PROGRAM TERMINATED SUCCESSFULLY ----------')
+        
+        # Force exit to prevent hanging due to lingering processes
+        os._exit(0)
+
+if __name__ == '__main__':
+    print('>>>>> IRIS: INITIATING THE CONTROLLERS AND THE APP <<<<<')
+    app = qw.QApplication([])
+    
+    base_manager = MyManager()
+    initialise_manager_raman(base_manager)
+    initialise_manager_stage(base_manager)
+    base_manager.start()
+    ramanControllerProxy,ramanDictProxy=initialise_proxy_raman(base_manager)
+    xyControllerProxy,zControllerProxy,camControllerProxy,stage_namespace=initialise_proxy_stage(base_manager)
+    ramanHub = DataStreamer_Raman(ramanControllerProxy,ramanDictProxy)
+    stageHub = DataStreamer_StageCam(xyControllerProxy,zControllerProxy,camControllerProxy,stage_namespace)
+    # Don't start hubs yet - defer until after GUI is initialized
+    processor = mp.Pool()
+    
+    mainWindow_Controller = MainWindow_Controller(
+        processor=processor,
+        raman_controller=ramanControllerProxy,
+        xy_controller=xyControllerProxy,
+        z_controller=zControllerProxy,
+        raman_hub=ramanHub,
+        stage_hub=stageHub,
+        base_manager=base_manager
+        )
+    
+    # Defer initialisations until after the event loop starts to prevent crashes
+    # Also start the hubs after the GUI is shown to prevent cross-thread Qt object parenting issues
+    def start_hubs_and_init():
+        ramanHub.start()
+        stageHub.start()
+        mainWindow_Controller.initialisations()
+    
+    QTimer.singleShot(0, start_hubs_and_init)
+    app.installEventFilter(mainWindow_Controller.shortcutHandler)
+    
+    mainWindow_Controller.show()
+    
+    app.exec()

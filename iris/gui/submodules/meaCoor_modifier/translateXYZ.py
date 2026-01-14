@@ -3,218 +3,66 @@ A GUI module to modify a mapping coordinates list by translating
 the coordinates in the X, Y and Z direction.
 """
 
-import tkinter as tk
-from tkinter import ttk
-from tkinter import messagebox
+import PySide6.QtWidgets as qw
+from PySide6.QtCore import Signal, Slot, QTimer, QThread, QObject
 
 from typing import Literal
 import threading
+from enum import Enum
 
 if __name__ == '__main__':
     import sys
     import os
     libdir = os.path.abspath(r'.\iris')
-    sys.path.append(os.path.dirname(libdir))
+    sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.gui.motion_video import Frm_MotionController
+from iris.gui.motion_video import Wdg_MotionController
 from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 
 from iris.utils.general import *
 
-class TranslateXYZ(tk.Frame):
-    def __init__(
-        self,
-        parent,
-        mappingCoorHub: List_MeaCoor_Hub,
-        motion_controller:Frm_MotionController,
-        *args, **kwargs) -> None:
-        """Initializes the mapping method
-        
-        Args:
-            parent (tk.Frame): The parent frame to place this widget in
-            MappingCoorHub (MappingCoordinatesHub): The hub to store the resulting mapping coordinates in
-            getter_MappingCoor (Callable[[], MappingCoordinates_mm]): A function to get the mapping coordinates to modify
-            motion_controller (Frm_MotionController): The motion controller to use for the mapping
-        """
-        super().__init__(parent)
-        self._coorHub = mappingCoorHub
+from iris.resources.coordinate_modifiers.translator_xyz_ui import Ui_translator_xyz
+
+class RadioOptionXY(Enum):
+    TOP_LEFT = 'tl'
+    TOP_CENTER = 'tc'
+    TOP_RIGHT = 'tr'
+    CENTER_LEFT = 'cl'
+    CENTER_CENTER = 'cc'
+    CENTER_RIGHT = 'cr'
+    BOTTOM_LEFT = 'bl'
+    BOTTOM_CENTER = 'bc'
+    BOTTOM_RIGHT = 'br'
+    
+class RadioOptionZ(Enum):
+    TOP = 'top'
+    CENTER = 'ctr'
+    BOTTOM = 'btm'
+
+class TranslatorXYZ_Worker(QObject):
+    
+    sig_updatePrevCoor_mm = Signal(str)
+    sig_currentCoor_mm = Signal(tuple)
+    
+    sig_finished = Signal(str)
+    sig_error = Signal(str)
+    sig_saveModifiedCoor = Signal(MeaCoor_mm, MeaCoor_mm)
+    
+    msg_error = "Error during translation: "
+    msg_success = "Translation completed successfully."
+    
+    _sig_gotocoor = Signal(tuple,threading.Event)
+    
+    def __init__(self, motion_controller:Wdg_MotionController):
+        super().__init__()
         self._motion_controller = motion_controller
         
-    # >>> Top level frame <<<
-        frm_instruction = tk.Frame(self)
-        frm_mapUnit_selection = tk.Frame(self)
-        self._frm_modifier = tk.LabelFrame(self, text='XYZ-coordinates translation', padx=5, pady=5)
-        frm_options = tk.LabelFrame(self, text='Options', padx=5, pady=5)
+        self._sig_gotocoor.connect(self._motion_controller.get_goto_worker().work)
         
-        row=0; col_curr=0
-        frm_instruction.grid(row=row, column=0, sticky='nsew', padx=5, pady=5); row+=1
-        frm_mapUnit_selection.grid(row=row, column=0, sticky='nsew', padx=5, pady=5); row+=1
-        self._frm_modifier.grid(row=row, column=0, sticky='nsew', padx=5, pady=5); row+=1
-        frm_options.grid(row=row, column=0, sticky='nsew', padx=5, pady=5)
-        
-        [self.grid_rowconfigure(i, weight=1) for i in range(row+1)]
-        [self.grid_columnconfigure(i, weight=1) for i in range(col_curr+1)]
-        
-    # >>> Information widget <<<
-        btn_instructions = tk.Button(frm_instruction, text='Show instructions', command=self._show_instructions)
-        
-        row=0; col_curr=0
-        btn_instructions.grid(row=0, column=0, sticky='ew', padx=5, pady=5)
-        
-        [frm_instruction.grid_rowconfigure(i, weight=0) for i in range(row+1)]
-        [frm_instruction.grid_columnconfigure(i, weight=1) for i in range(col_curr+1)]
-        
-    # >>> Selection widget <<<
-        self._combo_mapUnit = ttk.Combobox(frm_mapUnit_selection, state='readonly')
-        
-        row=0; col_curr=0
-        self._combo_mapUnit.grid(row=row, column=0, sticky='ew', padx=5, pady=5)
-        
-        [frm_mapUnit_selection.grid_rowconfigure(i, weight=0) for i in range(row+1)]
-        [frm_mapUnit_selection.grid_columnconfigure(i, weight=1) for i in range(col_curr+1)]
-        
-    # >>> Z-coordinates modification widgets <<<
-        self._sfrm_reference_loc = tk.LabelFrame(self._frm_modifier, text='Translation reference location', padx=5, pady=5)
-        self._init_referenceLocation_widgets()
-        
-        lbl_old_coor = tk.Label(self._frm_modifier, text='Reference coordinate [μm]:')
-        self._str_refCoor = tk.StringVar(value='N/A')
-        lbl_old_z_value = tk.Label(self._frm_modifier, textvariable=self._str_refCoor)
-        
-        lbl_new_z_coor = tk.Label(self._frm_modifier, text='New coordinate [μm]:')
-        ssfrm_entry = self._init_coorEntryFields()
-        self._btn_currentCoor = tk.Button(self._frm_modifier, text='Insert current coordinate (X,Y,Z)',\
-            command=self._insert_current_coordinate)
-        
-        self._btn_commit_modification = tk.Button(self._frm_modifier, text='Commit modification',
-                                                  command=self._run_coor_modification)
-        
-        row=0; col_curr=0; col_max=0
-        self._sfrm_reference_loc.grid(row=row, column=col_curr, sticky='nsew', padx=5, pady=5,columnspan=2); row+=1; col_curr=0
-        lbl_old_coor.grid(row=row, column=col_curr, sticky='w', padx=5, pady=5); col_curr+=1
-        lbl_old_z_value.grid(row=row, column=col_curr, sticky='w', padx=5, pady=5); row+=1; col_max=max(col_max, col_curr); col_curr=0
-        
-        lbl_new_z_coor.grid(row=row, column=col_curr, sticky='w', padx=5, pady=5); col_curr+=1
-        ssfrm_entry.grid(row=row, column=col_curr, sticky='ew', padx=5, pady=5); row+=1; col_max=max(col_max, col_curr); col_curr=0
-        
-        self._btn_currentCoor.grid(row=row, column=col_curr, sticky='ew', padx=5, pady=5); col_curr+=1
-        self._btn_commit_modification.grid(row=row, column=col_curr, sticky='ew', padx=5, pady=5); col_curr+=1
-        
-        col_max = max(col_max, col_curr)
-        [self._frm_modifier.grid_rowconfigure(i, weight=0) for i in range(row+1)]
-        [self._frm_modifier.grid_columnconfigure(i, weight=1) for i in range(col_max+1)]
-        
-    # >>> Options frame <<<
-        self._bool_auto_selectLast = tk.BooleanVar(value=True)  # Default to selected
-        self._bool_auto_moveLastShift = tk.BooleanVar(value=True)  # Default to
-        chk_auto_selectLast = tk.Checkbutton(frm_options, text='Auto-select last modified mapping unit', state='normal',
-                                             variable=self._bool_auto_selectLast)
-        chk_auto_moveLastShift = tk.Checkbutton(frm_options, text='Auto-move the stage using the last coordinate shift', state='normal',
-                                                variable=self._bool_auto_moveLastShift)
-        
-        chk_auto_selectLast.grid(row=0, column=0, sticky='w', padx=5, pady=5)
-        chk_auto_moveLastShift.grid(row=1, column=0, sticky='w', padx=5, pady=5)
-        
-    # >>> Parameters for the mapping coordinates modification <<<
-        self._dict_mapUnit = {}  # Dictionary to store mapping units
-        self._modify_response:Literal['commit', 'cancel'] = None    # Response from the modification process
-        
-    # >>> Others <<<
-        self._coorHub.add_observer(self._update_list_units)
-        self._update_list_units()
-
-    def _init_coorEntryFields(self):
-        """
-        Initialises the entry fields for the new coordinates
-        """
-        ssfrm_entry = tk.Frame(self._frm_modifier)
-        self._entry_newCoor_x = tk.Entry(ssfrm_entry)
-        self._entry_newCoor_y = tk.Entry(ssfrm_entry)
-        self._entry_newCoor_z = tk.Entry(ssfrm_entry)
-        self._entry_newCoor_x.grid(row=0, column=0, sticky='ew', padx=5, pady=5)
-        self._entry_newCoor_y.grid(row=0, column=1, sticky='ew', padx=5, pady=5)
-        self._entry_newCoor_z.grid(row=0, column=2, sticky='ew', padx=5, pady=5)
-        
-        # Bind the entry fields to running the modification when the Enter key is pressed
-        self._entry_newCoor_x.bind('<Return>', lambda event: self._run_coor_modification())
-        self._entry_newCoor_y.bind('<Return>', lambda event: self._run_coor_modification())
-        self._entry_newCoor_z.bind('<Return>', lambda event: self._run_coor_modification())
-        
-        return ssfrm_entry
-        
-    def _init_referenceLocation_widgets(self):
-        """Initialises the widgets for the reference location"""
-        self._ssfrm_reference_loc_xy = tk.LabelFrame(self._sfrm_reference_loc, text='XY reference location', padx=5, pady=5)
-        self._ssfrm_reference_loc_z = tk.LabelFrame(self._sfrm_reference_loc, text='Z reference location', padx=5, pady=5)
-        self._ssfrm_reference_loc_xy.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
-        self._ssfrm_reference_loc_z.grid(row=0, column=1, sticky='nsew', padx=5, pady=5)
-        
-        # Set the variables for the radio buttons
-        self._radio_xy = tk.StringVar(value='cc')  # Default to center center
-        self._radio_z = tk.StringVar(value='btm')  # Default to bottom
-        
-        # XY reference location radio buttons
-        radio_topleft = tk.Radiobutton(self._ssfrm_reference_loc_xy, text='Top Left', variable=self._radio_xy, value='tl',command=self._update_reference_coordinates_label)
-        radio_topcenter = tk.Radiobutton(self._ssfrm_reference_loc_xy, text='Top Center', variable=self._radio_xy, value='tc',command=self._update_reference_coordinates_label)
-        radio_topright = tk.Radiobutton(self._ssfrm_reference_loc_xy, text='Top Right', variable=self._radio_xy, value='tr',command=self._update_reference_coordinates_label)
-        radio_centerleft = tk.Radiobutton(self._ssfrm_reference_loc_xy, text='Center Left', variable=self._radio_xy, value='cl',command=self._update_reference_coordinates_label)
-        radio_centercenter = tk.Radiobutton(self._ssfrm_reference_loc_xy, text='Center Center', variable=self._radio_xy, value='cc',command=self._update_reference_coordinates_label)
-        radio_centerright = tk.Radiobutton(self._ssfrm_reference_loc_xy, text='Center Right', variable=self._radio_xy, value='cr',command=self._update_reference_coordinates_label)
-        radio_bottomleft = tk.Radiobutton(self._ssfrm_reference_loc_xy, text='Bottom Left', variable=self._radio_xy, value='bl',command=self._update_reference_coordinates_label)
-        radio_bottomcenter = tk.Radiobutton(self._ssfrm_reference_loc_xy, text='Bottom Center', variable=self._radio_xy, value='bc',command=self._update_reference_coordinates_label)
-        radio_bottomright = tk.Radiobutton(self._ssfrm_reference_loc_xy, text='Bottom Right', variable=self._radio_xy, value='br',command=self._update_reference_coordinates_label)
-        
-        # Z reference location radio buttons
-        radio_z_top = tk.Radiobutton(self._ssfrm_reference_loc_z, text='Top', variable=self._radio_z, value='top',command=self._update_reference_coordinates_label)
-        radio_z_center = tk.Radiobutton(self._ssfrm_reference_loc_z, text='Center', variable=self._radio_z, value='ctr',command=self._update_reference_coordinates_label)
-        radio_z_bottom = tk.Radiobutton(self._ssfrm_reference_loc_z, text='Bottom', variable=self._radio_z, value='btm',command=self._update_reference_coordinates_label)
-        
-        # Place the radio buttons in the XY reference location frame
-        radio_topleft.grid(row=0, column=0, sticky='w', padx=5, pady=5)
-        radio_topcenter.grid(row=0, column=1, sticky='w', padx=5, pady=5)
-        radio_topright.grid(row=0, column=2, sticky='w', padx=5, pady=5)
-        radio_centerleft.grid(row=1, column=0, sticky='w', padx=5, pady=5)
-        radio_centercenter.grid(row=1, column=1, sticky='w', padx=5, pady=5)
-        radio_centerright.grid(row=1, column=2, sticky='w', padx=5, pady=5)
-        radio_bottomleft.grid(row=2, column=0, sticky='w', padx=5, pady=5)
-        radio_bottomcenter.grid(row=2, column=1, sticky='w', padx=5, pady=5)
-        radio_bottomright.grid(row=2, column=2, sticky='w', padx=5, pady=5)
-        
-        # Place the radio buttons in the Z reference location frame
-        radio_z_top.grid(row=0, column=0, sticky='w', padx=5, pady=5)
-        radio_z_center.grid(row=1, column=0, sticky='w', padx=5, pady=5)
-        radio_z_bottom.grid(row=2, column=0, sticky='w', padx=5, pady=5)
-        
-    def _empty_coorInputFields(self):
-        """Empties the coordinate input fields"""
-        self._entry_newCoor_x.delete(0, tk.END)
-        self._entry_newCoor_y.delete(0, tk.END)
-        self._entry_newCoor_z.delete(0, tk.END)
-    
-    def _update_reference_coordinates_label(self):
+    def _get_reference_coordinate(self, mappingCoor:MeaCoor_mm, xyLoc:RadioOptionXY, zLoc:RadioOptionZ)\
+        -> tuple[float, float, float]:
         """
         Updates the label showing the current reference coordinates
-        """
-        """Updates the label showing the current reference coordinates"""
-        unit_name = self._combo_mapUnit.get()
-        if unit_name not in self._dict_mapUnit: self._str_refCoor.set('N/A'); return
-        
-        mappingCoor = self._dict_mapUnit.get(unit_name)
-        if not isinstance(mappingCoor, MeaCoor_mm): self._str_refCoor.set('N/A'); return
-        
-        coorRef_xy = self._get_reference_coordinates_XY(mappingCoor)
-        coorRef_z = self._get_reference_coordinates_Z(mappingCoor)
-        
-        self._str_refCoor.set(f'({coorRef_xy[0]*1e3:.0f}, {coorRef_xy[1]*1e3:.0f}, {coorRef_z*1e3:.0f}) [μm]')
-        
-    def _get_reference_coordinates_XY(self, mappingCoor:MeaCoor_mm) -> tuple[float, float]:
-        """Gets the reference coordinates for the mapping coordinates
-        
-        Args:
-            mappingCoor (MappingCoordinates_mm): The mapping coordinates to get the reference coordinates from
-            
-        Returns:
-            tuple[float, float]: The reference coordinates in mm (x, y)
         """
         assert isinstance(mappingCoor, MeaCoor_mm), "Invalid mapping coordinates type"
         
@@ -225,176 +73,359 @@ class TranslateXYZ(tk.Frame):
         x_ctr = (x_min + x_max) / 2
         y_ctr = (y_min + y_max) / 2
         
-        if self._radio_xy.get() == 'tl':    return (x_min, y_max)
-        elif self._radio_xy.get() == 'tc':  return (x_ctr, y_max)
-        elif self._radio_xy.get() == 'tr':  return (x_max, y_max)
-        elif self._radio_xy.get() == 'cl':  return (x_min, y_ctr)
-        elif self._radio_xy.get() == 'cc':  return (x_ctr, y_ctr)
-        elif self._radio_xy.get() == 'cr':  return (x_max, y_ctr)
-        elif self._radio_xy.get() == 'bl':  return (x_min, y_min)
-        elif self._radio_xy.get() == 'bc':  return (x_ctr, y_min)
-        elif self._radio_xy.get() == 'br':  return (x_max, y_min)
+        if xyLoc == RadioOptionXY.TOP_LEFT:         coor_xy = (x_min, y_max)
+        elif xyLoc == RadioOptionXY.TOP_CENTER:     coor_xy = (x_ctr, y_max)
+        elif xyLoc == RadioOptionXY.TOP_RIGHT:      coor_xy = (x_max, y_max)
+        elif xyLoc == RadioOptionXY.CENTER_LEFT:    coor_xy = (x_min, y_ctr)
+        elif xyLoc == RadioOptionXY.CENTER_CENTER:  coor_xy = (x_ctr, y_ctr)
+        elif xyLoc == RadioOptionXY.CENTER_RIGHT:   coor_xy = (x_max, y_ctr)
+        elif xyLoc == RadioOptionXY.BOTTOM_LEFT:    coor_xy = (x_min, y_min)
+        elif xyLoc == RadioOptionXY.BOTTOM_CENTER:  coor_xy = (x_ctr, y_min)
+        elif xyLoc == RadioOptionXY.BOTTOM_RIGHT:   coor_xy = (x_max, y_min)
         else: raise ValueError("No reference location selected")
-            
-    def _get_reference_coordinates_Z(self, mappingCoor:MeaCoor_mm) -> float:
-        """Gets the reference Z-coordinate for the mapping coordinates
-        
-        Args:
-            mappingCoor (MappingCoordinates_mm): The mapping coordinates to get the reference Z-coordinate from
-            
-        Returns:
-            float: The reference Z-coordinate in mm
-        """
-        assert isinstance(mappingCoor, MeaCoor_mm), "Invalid mapping coordinates type"
         
         z_min = min(coor[2] for coor in mappingCoor.mapping_coordinates)
         z_max = max(coor[2] for coor in mappingCoor.mapping_coordinates)
         z_ctr = (z_min + z_max) / 2
         
-        if self._radio_z.get() == 'top':    return z_max
-        elif self._radio_z.get() == 'ctr':  return z_ctr
-        elif self._radio_z.get() == 'btm':  return z_min
+        if zLoc == RadioOptionZ.TOP:    coor_z = z_max
+        elif zLoc == RadioOptionZ.CENTER:  coor_z = z_ctr
+        elif zLoc == RadioOptionZ.BOTTOM:  coor_z = z_min
         else: raise ValueError("No reference Z-coordinate selected")
         
-    def _insert_current_coordinate(self):
-        """Inserts the current z-coordinate from the motion controller into the
-        coordinate entry fields"""
+        return (coor_xy[0], coor_xy[1], coor_z)
+        
+    @Slot(MeaCoor_mm, RadioOptionXY, RadioOptionZ)
+    def get_reference_coordinate(self, mappingCoor:MeaCoor_mm, xyLoc:RadioOptionXY, zLoc:RadioOptionZ):
+        """
+        Emits the reference coordinate signal
+        """
+        coor = self._get_reference_coordinate(mappingCoor, xyLoc, zLoc)
+        self.sig_updatePrevCoor_mm.emit(f'{coor[0]*1e3:.0f}, {coor[1]*1e3:.0f}, {coor[2]*1e3:.0f} (μm)')
+        
+    @Slot()
+    def get_current_coordinate(self):
+        """
+        Emits the current coordinate from the motion controller
+        """
         coor = self._motion_controller.get_coordinates_closest_mm()
+        if not all(isinstance(c, (int,float)) for c in coor):
+            self.sig_error.emit('Could not retrieve current coordinates from motion controller.')
+            return
+        
+        self.sig_currentCoor_mm.emit(coor)
+    
+    
+    @Slot(MeaCoor_mm, RadioOptionXY, RadioOptionZ, tuple)
+    def _perform_translation(self,mappingCoor:MeaCoor_mm, loc_xy:RadioOptionXY, loc_z:RadioOptionZ,
+                             new_coor:tuple[float,float,float]):
+        """
+        Runs the modification of the z-coordinates of the selected mapping coordinates
+        
+        Args:
+            mappingCoor (MeaCoor_mm): The mapping coordinates to modify
+            loc_xy (RadioOptionXY): The reference location in XY
+            loc_z (RadioOptionZ): The reference location in Z
+            new_coor (tuple[float,float,float]): The new coordinate to move the reference location to
+        """
+    # > Modify the coordinates <
+        try:
+            ref_coor = self._get_reference_coordinate(mappingCoor, loc_xy, loc_z)
+        except ValueError as e:
+            self.sig_finished.emit(f"{self.msg_error} Invalid input: {e}")
+            return
+        
+        # Translate the coordinates
+        shiftx = new_coor[0] - ref_coor[0]
+        shifty = new_coor[1] - ref_coor[1]
+        shiftz = new_coor[2] - ref_coor[2]
+        
+        list_new_coor = []
+        for x, y, z in mappingCoor.mapping_coordinates:
+            new_x = x + shiftx
+            new_y = y + shifty
+            new_z = z + shiftz
+            list_new_coor.append((new_x, new_y, new_z))
+        
+        self.sig_saveModifiedCoor.emit(mappingCoor, MeaCoor_mm(
+            mappingUnit_name=mappingCoor.mappingUnit_name+'_translated',
+            mapping_coordinates=list_new_coor
+        ))
+        
+    @Slot(MeaCoor_mm, MeaCoor_mm, RadioOptionXY, RadioOptionZ, bool)
+    def _move_to_next_meaCoor_ref(self, prev_meaCoor:MeaCoor_mm, current_meaCoor:MeaCoor_mm,
+                                  loc_xy:RadioOptionXY, loc_z:RadioOptionZ, xy_only:bool):
+        """
+        Moves the stage to the new reference coordinate of the modified mapping coordinates
+        """
+        prev_coor = self._get_reference_coordinate(prev_meaCoor, loc_xy, loc_z)
+        curr_coor = self._get_reference_coordinate(current_meaCoor, loc_xy, loc_z)
+        
+        new_x = curr_coor[0] + (curr_coor[0] - prev_coor[0])
+        new_y = curr_coor[1] + (curr_coor[1] - prev_coor[1])
+        
+        if xy_only: new_z = curr_coor[2]
+        else: new_z = curr_coor[2] + (curr_coor[2] - prev_coor[2])
+        
+        evt_moveDone = threading.Event()
+        self._sig_gotocoor.emit((new_x, new_y, new_z), evt_moveDone)
+        evt_moveDone.wait()
+    
+
+class TranslateXYZ(Ui_translator_xyz, qw.QWidget):
+    msg_instructions = (
+        "The Translate XYZ module allows you to translate the coordinates of a selected mapping unit, "
+        "essentially moving it to another location while maintaining its points distribution.\n\n"
+        "To use the module:\n"
+        "1. Select the mapping unit you wish to modify from the dropdown menu.\n"
+        "2. Choose the reference location for the translation using the radio buttons. "
+        "e.g., top left (XY) means that the coordinates' top-left most coordinate will be moved to the newly specified coordinate.\n"
+        "3. The current reference coordinate will be displayed next to 'Reference coordinate [μm]'.\n"
+        "4. Enter the new desired coordinate for the reference location in the 'New coordinate [μm]' fields.\n"
+        "5. You can click 'Insert current coordinate (X,Y,Z)' to automatically fill in the current position of the motion controller.\n"
+        "6. Click 'Commit modification' to apply the translation to the selected mapping unit.\n\n"
+        "Options:\n"
+        "- 'Auto-select last modified mapping unit': Automatically selects the newly created mapping unit after modification.\n"
+        "- 'Auto-move the stage using the last coordinate shift': Moves the motion controller to the new reference coordinate after modification.\n"
+    )
+    
+    sig_updateListUnits = Signal()
+    sig_update_prevCoor = Signal(MeaCoor_mm, RadioOptionXY, RadioOptionZ)
+    sig_performTranslation = Signal(MeaCoor_mm, RadioOptionXY, RadioOptionZ, tuple, bool)
+    sig_goto_nextMeaCoor_ref = Signal(MeaCoor_mm, MeaCoor_mm, RadioOptionXY, RadioOptionZ)
+    
+    def __init__(
+        self,
+        parent,
+        mappingCoorHub: List_MeaCoor_Hub,
+        motion_controller:Wdg_MotionController,
+        *args, **kwargs) -> None:
+        """Initializes the mapping method
+        
+        Args:
+            parent (tk.Frame): The parent frame to place this widget in
+            MappingCoorHub (MappingCoordinatesHub): The hub to store the resulting mapping coordinates in
+            getter_MappingCoor (Callable[[], MappingCoordinates_mm]): A function to get the mapping coordinates to modify
+            motion_controller (Frm_MotionController): The motion controller to use for the mapping
+        """
+        super().__init__(parent)
+        self.setupUi(self)
+        self.setLayout(self.main_layout)
+        
+        self._coorHub = mappingCoorHub
+        self._motion_controller = motion_controller
+        
+    # >>> Information widget <<<
+        self.btn_instructions.clicked.connect(lambda: qw.QMessageBox.information(
+            self,
+            "Instructions",
+            self.msg_instructions
+        ))
+        
+    # >>> Parameters for the mapping coordinates modification <<<
+        self._dict_mapUnit = {}  # Dictionary to store mapping units
+        
+        self._init_worker_and_signals()
+    
+    def _init_worker_and_signals(self):
+        """
+        Initialises the worker thread for communication with the motion controller
+        """
+        # Create the worker thread
+        self._thread_worker = QThread()
+        
+        self._worker_translator = TranslatorXYZ_Worker(
+            motion_controller=self._motion_controller)
+        self._worker_translator.moveToThread(self._thread_worker)
+        
+        # Signal: Store current stage coordinate
+        self.btn_storeCoor.clicked.connect(self._worker_translator.get_current_coordinate)
+        self._worker_translator.sig_currentCoor_mm.connect(self._update_current_coordinate)
+        
+        # Signal: Update reference coordinate
+        self.sig_update_prevCoor.connect(self._worker_translator.get_reference_coordinate)
+        self._worker_translator.sig_updatePrevCoor_mm.connect(lambda text: self.lbl_prevCoor.setText(text))
+        
+        # Signal: Perform translation
+        self.sig_performTranslation.connect(self._worker_translator._perform_translation)
+        
+        # Signal: Handle saving modified coordinates
+        self._worker_translator.sig_saveModifiedCoor.connect(self._handle_save_modified_coor)
+        
+        # Signal: Move to next mapping coordinate reference
+        self.sig_goto_nextMeaCoor_ref.connect(self._worker_translator._move_to_next_meaCoor_ref)
+        
+        self.destroyed.connect(self._worker_translator.deleteLater)
+        self.destroyed.connect(self._thread_worker.quit)
+        
+        self._thread_worker.start()
+        
+        # >>> Others <<<
+        self.sig_updateListUnits.connect(self._update_list_units)
+        self._coorHub.add_observer(self.sig_updateListUnits.emit)
+        self.sig_updateListUnits.emit()
+        
+        # Commit button
+        self.btn_commit.clicked.connect(self._perform_translation)
+    
+    @Slot(tuple)
+    def _update_current_coordinate(self, coor:tuple):
+        """
+        Updates the current coordinate displayed in the entry fields
+        """
         coorx_um = coor[0] * 1e3
         coory_um = coor[1] * 1e3
         coorz_um = coor[2] * 1e3
         
-        self._entry_newCoor_x.delete(0, tk.END)
-        self._entry_newCoor_y.delete(0, tk.END)
-        self._entry_newCoor_z.delete(0, tk.END)
-        self._entry_newCoor_x.insert(0, f'{coorx_um:.0f}')
-        self._entry_newCoor_y.insert(0, f'{coory_um:.0f}')
-        self._entry_newCoor_z.insert(0, f'{coorz_um:.0f}')
+        self.spin_coorXUm.setValue(coorx_um)
+        self.spin_coorYUm.setValue(coory_um)
+        self.spin_coorZUm.setValue(coorz_um)
         
-    def _show_instructions(self):
-        instructions = (
-            "This module allows you to modify the z-coordinates of a mapping coordinates list.\n"
-            "TODO: Add instructions on how to use this module.\n"
-        )
-        messagebox.showinfo("Instructions", instructions)
+    def _get_reference_location(self) -> tuple[RadioOptionXY, RadioOptionZ]:
+        """Gets the selected reference location from the radio buttons
+        
+        Returns:
+            tuple[RadioOptionXY, RadioOptionZ]: The selected reference locations for XY and Z
+        """
+        # Get XY location
+        if self.btn_xy_topleft.isChecked():         xyLoc = RadioOptionXY.TOP_LEFT
+        elif self.btn_xy_topcentre.isChecked():     xyLoc = RadioOptionXY.TOP_CENTER
+        elif self.btn_xy_topright.isChecked():      xyLoc = RadioOptionXY.TOP_RIGHT
+        elif self.btn_xy_centreleft.isChecked():    xyLoc = RadioOptionXY.CENTER_LEFT
+        elif self.btn_xy_centrecentre.isChecked():  xyLoc = RadioOptionXY.CENTER_CENTER
+        elif self.btn_xy_centreright.isChecked():   xyLoc = RadioOptionXY.CENTER_RIGHT
+        elif self.btn_xy_bottomleft.isChecked():    xyLoc = RadioOptionXY.BOTTOM_LEFT
+        elif self.btn_xy_bottomcentre.isChecked():  xyLoc = RadioOptionXY.BOTTOM_CENTER
+        elif self.btn_xy_bottomright.isChecked():   xyLoc = RadioOptionXY.BOTTOM_RIGHT
+        else: raise ValueError("No reference location selected")
+        
+        # Get Z location
+        if self.btn_z_top.isChecked():      zLoc = RadioOptionZ.TOP
+        elif self.btn_z_centre.isChecked():    zLoc = RadioOptionZ.CENTER
+        elif self.btn_z_bottom.isChecked():    zLoc = RadioOptionZ.BOTTOM
+        else: raise ValueError("No reference Z-coordinate selected")
+        
+        return (xyLoc, zLoc)
     
+    @Slot()
     def _update_list_units(self):
         """Updates the list of mapping units in the combobox"""
         self._dict_mapUnit.clear()  # Clear the existing dictionary
         self._dict_mapUnit = {unit.mappingUnit_name: unit for unit in self._coorHub}
         
-        self._combo_mapUnit.configure(
-            values=list(self._dict_mapUnit.keys()),
-            state='readonly'
-        )
+        self.combo_meaCoor.clear()
+        self.combo_meaCoor.addItems(list(self._dict_mapUnit.keys()))
         
     @thread_assign
-    def _run_coor_modification(self):
+    def _perform_translation(self):
         """
         Runs the modification of the z-coordinates of the selected mapping coordinates
         """
     # > Retrieve the selected mapping unit from the combobox and check it <
-        selected_unit_name = self._combo_mapUnit.get()
+        selected_unit_name = self.combo_meaCoor.currentText()
         if not selected_unit_name:
-            messagebox.showwarning("Warning", "Please select a mapping unit to modify.")
+            qw.QMessageBox.warning(self, "Warning", "Please select a mapping unit to modify.")
             return
         
         if selected_unit_name not in self._dict_mapUnit:
-            messagebox.showerror("Error", f"Mapping unit '{selected_unit_name}' not found.")
+            qw.QMessageBox.warning(self, "Warning", f"Mapping unit '{selected_unit_name}' not found.")
             return
         
         # Get the current mapping coordinates
         mapping_coordinates = self._dict_mapUnit[selected_unit_name]
         
         if not isinstance(mapping_coordinates, MeaCoor_mm):
-            messagebox.showerror("Error", "Invalid mapping coordinates type.")
+            qw.QMessageBox.warning(self, "Warning", "Invalid mapping coordinates type.")
             return
         
-    # > Modify the coordinates <
-        try:
-            coorRef_xy = self._get_reference_coordinates_XY(mapping_coordinates)
-            coorRef_z = self._get_reference_coordinates_Z(mapping_coordinates)
-            
-            new_coor_x = float(self._entry_newCoor_x.get()) * 1e-3
-            new_coor_y = float(self._entry_newCoor_y.get()) * 1e-3
-            new_coor_z = float(self._entry_newCoor_z.get()) * 1e-3
-        except ValueError as e:
-            messagebox.showerror("Error", f"Invalid input: {e}")
+        new_coor_mm = (self.spin_coorXUm.value()/1e3,
+                    self.spin_coorYUm.value()/1e3,
+                    self.spin_coorZUm.value()/1e3)
+        
+        print('Check if the "*" delivery works')
+        self.sig_performTranslation.emit(
+            mapping_coordinates,
+            *self._get_reference_location(),
+            new_coor_mm,
+            self.chk_automove_xyonly.isChecked()
+        )
+        
+    @Slot(MeaCoor_mm, MeaCoor_mm)
+    def _handle_save_modified_coor(self, prev_meaCoor:MeaCoor_mm, modified_meaCoor:MeaCoor_mm):
+        new_name = messagebox_request_input(
+            parent=self,
+            title="New Mapping Unit Name",
+            message="Please enter a new name for the modified mapping coordinates:",
+            default=f"{modified_meaCoor.mappingUnit_name}",
+            validator=self._coorHub.validator_new_name,
+            invalid_msg="Mapping unit name already exists. Please choose a different name.",
+            loop_until_valid=True,
+        )
+        
+        if new_name is None:
+            qw.QMessageBox.warning(self, "Warning", "Modification cancelled. No new mapping unit name provided.")
             return
         
-        # Translate the coordinates
-        shiftx = new_coor_x - coorRef_xy[0]
-        shifty = new_coor_y - coorRef_xy[1]
-        shiftz = new_coor_z - coorRef_z
+        new_mappingCoor = MeaCoor_mm(
+            mappingUnit_name=new_name,
+            mapping_coordinates=modified_meaCoor.mapping_coordinates
+        )
         
-        list_new_coor = []
-        for x, y, z in mapping_coordinates.mapping_coordinates:
-            new_x = x + shiftx
-            new_y = y + shifty
-            new_z = z + shiftz
-            list_new_coor.append((new_x, new_y, new_z))
+        try: self._coorHub.append(new_mappingCoor)
+        except Exception as e:
+            qw.QMessageBox.warning(self, "Warning", f"Could not save modified mapping coordinates: {e}")
+            return
         
-        while True:
-            # Request for a new name
-            new_name = messagebox_request_input(
-                "New Mapping Unit Name",
-                "Please enter a new name for the modified mapping coordinates:",
-                default=f"{selected_unit_name}"
+        if self.chk_autoSelect.isChecked():
+            self._update_list_units()
+            self.combo_meaCoor.setCurrentText(new_name)
+            self.sig_update_prevCoor.emit(new_mappingCoor, *self._get_reference_location())
+        
+        if self.chk_autoSelect.isChecked() and self.chk_autoMove.isChecked():
+            self.sig_goto_nextMeaCoor_ref.emit(
+                prev_meaCoor,
+                new_mappingCoor,
+                *self._get_reference_location()
             )
-            
-            # Add the new mapping coordinates to the hub
-            new_mapping_coor = MeaCoor_mm(new_name,list_new_coor)
-            try: self._coorHub.append(new_mapping_coor); break
-            except KeyError as e:
-                retry = messagebox.askyesno("Error", f"Mapping unit '{new_name}' already exists. Please choose a different name.\n\nError: {e}\n\nDo you want to try again?")
-                if not retry: return
-            except Exception as e: messagebox.showerror("Error", f"Failed to add new mapping coordinates: {e}"); break
         
-        self._empty_coorInputFields()
-        messagebox.showinfo("Success", "Z-coordinates modified successfully.")
-        
-        if self._bool_auto_selectLast.get():
-            self._combo_mapUnit.set(new_mapping_coor.mappingUnit_name)
-            self._update_reference_coordinates_label()
-        
-        flg_autoMove = False
-        if self._bool_auto_selectLast.get() and self._bool_auto_moveLastShift.get():
-            flg_autoMove = messagebox.askyesno("Move Stage",
-                "Auto-move is selected\nDo you want to move the stage to the new reference coordinate with the applied shift?")
-        if flg_autoMove:
-            # Move the stage to the new reference coordinate + shift
-            new_xy = self._get_reference_coordinates_XY(new_mapping_coor)
-            new_z = self._get_reference_coordinates_Z(new_mapping_coor)
-            x, y, z = new_xy[0] + shiftx, new_xy[1] + shifty, new_z + shiftz
-            self._motion_controller.go_to_coordinates(x,y,z)
+        print(f'Newly saved coordinates: {new_mappingCoor.mapping_coordinates}')
     
 def test():
     from iris.gui.motion_video import generate_dummy_motion_controller
+    import sys
     
-    root = tk.Tk()
-    root.title('Test')
+    app = qw.QApplication([])
+    mw = qw.QMainWindow()
+    mwdg = qw.QWidget()
+    mw.setCentralWidget(mwdg)
+    lyt = qw.QHBoxLayout(mwdg)
     
-    frm_motion = generate_dummy_motion_controller(root)
-    frm_motion.initialise_auto_updater()
-    frm_motion.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
+    frm_motion = generate_dummy_motion_controller(mwdg)
     
     coorUnit = MeaCoor_mm(
         mappingUnit_name='Test Mapping Unit',
-        mapping_coordinates=[(0, 0, 0), (1, 1, 1), (2, 2, 2), (3, 3, 3)]
+        mapping_coordinates=[
+            (-0.5, -0.5, 0),
+            (0.5, -0.5, 0),
+            (0.5, 0.5, 0),
+            (-0.5, 0.5, 0),
+        ]
     )
     
     coorHub = List_MeaCoor_Hub()
     coorHub.append(coorUnit)
     
     frm_coor_mod = TranslateXYZ(
-        root,
+        mwdg,
         mappingCoorHub=coorHub,
         motion_controller=frm_motion,
     )
     
-    frm_coor_mod.grid(row=0, column=1, sticky='nsew', padx=5, pady=5)
+    lyt.addWidget(frm_motion)
+    lyt.addWidget(frm_coor_mod)
     
-    root.mainloop()
+    mw.show()
+    sys.exit(app.exec())
     
 if __name__ == '__main__':
     test()

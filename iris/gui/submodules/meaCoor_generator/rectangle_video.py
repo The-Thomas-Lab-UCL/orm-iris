@@ -1,432 +1,433 @@
 """
 An instance that manages a basic mapping method in tkinter.
 This is similar to that of the mapping_method_rectxy_scan_constz mapping method
-but this one can set it using a video feed (with an objective calibration file/params)
+but this one can set it using an image (with an objective calibration file/params)
 instead.
 """
 if __name__ == '__main__':
     import sys
     import os
     SCRIPT_DIR = os.path.abspath(r'.\library')
-    EXTENSION_DIR = os.path.abspath(r'.\extensions')
     sys.path.append(os.path.dirname(SCRIPT_DIR))
-    sys.path.append(os.path.dirname(EXTENSION_DIR))
 
-import tkinter as tk
-import numpy as np
-
-from typing import Callable, Literal
+import PySide6.QtWidgets as qw
+from PySide6.QtCore import Qt, Signal, Slot, QThread, QObject, QTimer
 
 from uuid import uuid4
+from typing import Literal
 
-from iris.gui.motion_video import Frm_MotionController
+import numpy as np
+from PIL.Image import Image
+
+from iris.gui.motion_video import Wdg_MotionController
 from iris.utils.general import *
 
-from iris.data.calibration_objective import ImgMea_Cal
+from iris.data.calibration_objective import ImgMea_Cal, ImgMea_Cal_Hub
 from iris.data.measurement_image import MeaImg_Unit, MeaImg_Handler
-from iris.gui.image_calibration.Canvas_ROIdefinition import ImageCalibration_canvas_calibration
+from iris.gui.image_calibration.Canvas_ROIdefinition import Canvas_Image_Annotations
+from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
 
 from iris.data import SaveParamsEnum
 from iris.gui import AppPlotEnum
 
-class Rect_Video(tk.Frame):
-    def __init__(self,
-                 container_frame,
-                 motion_controller:Frm_MotionController,
-                 status_bar:tk.Label,
-                 getter_imgcal:Callable[[],ImgMea_Cal],
+from iris.resources.coordinate_generators.rect_video_ui import Ui_Rect_Video
+
+class CanvasUpdater_Worker(QObject):
+    """
+    A worker class to automatically update the video feed canvas
+    with the image unit and the clicked coordinates
+    """
+    sig_error = Signal(str)
+    
+    _sig_updateImageCalibration = Signal()
+    
+    sig_updateImage = Signal(Image)
+    sig_annotateRectangle = Signal(tuple,tuple,bool)
+    sig_annotateMultiPoints = Signal(list,bool,bool)
+    
+    def __init__(self, canvas_image:Canvas_Image_Annotations, motion_controller:Wdg_MotionController,
                  *args, **kwargs):
-        super().__init__(container_frame)
+        super().__init__(*args, **kwargs)
+        self._canvas_image = canvas_image
+        self._motion_controller = motion_controller
+        
+        self.sig_updateImage.connect(self._canvas_image.set_image)
+        self.sig_annotateRectangle.connect(self._canvas_image.draw_rectangle_canvas)
+        self.sig_annotateMultiPoints.connect(self._canvas_image.annotate_canvas_multi)
+        
+    @Slot(list)
+    def _update_image_annotation_points(self, list_clickCoor_pixel:list[tuple[float,float]]) -> None:
+        """
+        Updates the image shown on the canvas
+        """
+        # print(f'{get_timestamp_us_str()}: Updating canvas image with {len(list_clickCoor_pixel)} points')
+        img = self._motion_controller.get_current_image()
+        
+        self.sig_updateImage.emit(img)
+        self.sig_annotateMultiPoints.emit(list_clickCoor_pixel,True,True)
+    
+    @Slot(list)
+    def _update_image_annotation_rectangle(self, list_rect_meaCoors_pixel:list[tuple[float,float]]):
+        """
+        Automatically updates the image shown on the canvas with the rectangle annotations
+        
+        Args:
+            list_rect_meaCoors_mm (list[tuple[float,float]]): The rectangle coordinates in mm
+        """
+        assert isinstance(list_rect_meaCoors_pixel,list), 'list_rect_meaCoors_mm must be a list'
+        assert len(list_rect_meaCoors_pixel) == 2, 'list_rect_meaCoors_mm must have 2 coordinates'
+        
+        # print(f'{get_timestamp_us_str()}: Updating canvas rectangle annotation with coordinates {list_rect_meaCoors_pixel}')
+        
+        img = self._motion_controller.get_current_image()
+        self.sig_updateImage.emit(img)
+        self._canvas_image.stop_recordClicks()
+        self.sig_annotateRectangle.emit(list_rect_meaCoors_pixel[0],list_rect_meaCoors_pixel[1],True)
+
+class Rect_Video(Ui_Rect_Video, qw.QWidget):
+    
+    sig_updateResPt = Signal()
+    sig_updateResUm = Signal()
+    
+    sig_resetStoredCoors = Signal()     # To reset the stored coordinates
+    sig_updateCalibration = Signal()    # To update the calibration parameters
+    
+    sig_updateCanvasRectangle = Signal(list)
+    sig_updateCanvasImage = Signal(list)
+    
+    def __init__(
+        self,
+        parent: qw.QWidget,
+        motion_controller:Wdg_MotionController,
+        dataHub_img:Wdg_DataHub_Image,
+        dataHub_imgCal:Wdg_DataHub_ImgCal,
+        *args, **kwargs
+        ):
+        super().__init__(parent)
+        self.setupUi(self)
+        self.setLayout(self.main_layout)
         
     # >>> General setup <<<
         self._motion_controller = motion_controller
-        self._getter_ImageCalibration = getter_imgcal
-        self._statbar = status_bar
-        self._bg_colour = self._statbar.cget('background')
+        self._dataHub_img = dataHub_img
+        self._dataHub_imgCal = dataHub_imgCal
         
         video_feed_size = AppPlotEnum.MAP_METHOD_IMAGE_VIDEO_SIZE.value
         
-    # >>> Frame setups <<<
-        self.frm_video = tk.LabelFrame(self,text='2. Video feed/Coordinate selection')
-        self.frm_control = tk.LabelFrame(self,text='Control Panel')
-        
-        self.frm_video.grid(row=0,column=0)
-        self.frm_control.grid(row=0,column=1)
+        # Parameters
+        self._imgUnit:MeaImg_Unit|None = None       # The image measurement unit used
+        self._img:Image|None = None                  # The image shown on the canvas
+        self._flg_mode:Literal['point','rectangle'] = 'point'   # The current mode of the coordinate generator
         
     # >>> Video feed setup <<<
-        # Frame
-        self._canvas_video = ImageCalibration_canvas_calibration(self.frm_video,size_pixel=video_feed_size)
-        self._btn_update_video = tk.Button(self.frm_video,text='1. Start video feed',command=self._start_videoFeed)
-        self._lbl_coor_click = tk.Label(self.frm_video,text='Selected coordinates: None',wraplength=video_feed_size[0],anchor='w',justify='left')
-        lbl_vidinfo = tk.Label(self.frm_video,text="Left click to select coordinates\nRight click to remove all the selected coordinates\n'3. Define scan area' will select an area that includes all the selected points",
-                               background='yellow',wraplength=video_feed_size[0],anchor='w',
-                               justify='left')
-        
-        self._canvas_video.bind('<Button-3>',lambda event: self._reset_click_coors())
-        
-        self._canvas_video.grid(row=0,column=0)
-        self._btn_update_video.grid(row=1,column=0)
-        self._lbl_coor_click.grid(row=2,column=0,sticky='ew')
-        lbl_vidinfo.grid(row=3,column=0,sticky='ew')
+        # Parameters
+        self._list_imgunit_names:list[str] = []
+
+        # Canvas setup
+        self._canvas_video = Canvas_Image_Annotations(self,size_pixel=video_feed_size)
+        self.lyt_canvas.addWidget(self._canvas_video)
+        self._canvas_video.start_recordClicks()
         
         # Params
-        self._flg_videoFeed = threading.Event()
-        self._list_clickCoor_mm = []    # The list of clicked coordinates in mm
-        self._list_rect_coors_mm = []        # The rectangle coordinates for the scan area in mm
-        
-    # >>> Objective calibration setup <<<
-        self._ImageUnit:MeaImg_Unit = None
-        
-    # >>> Control panel setup <<<
-        # Subframe setup
-        sfrm_cal = tk.Frame(self.frm_control)
-        sfrm_z = tk.Frame(self.frm_control)
-        sfrm_res = tk.Frame(self.frm_control)
-        
-        sfrm_cal.grid(row=0,column=0)
-        sfrm_z.grid(row=1,column=0)
-        sfrm_res.grid(row=2,column=0)
-        
-        self.frm_control.columnconfigure(0,weight=1)
-        self.frm_control.rowconfigure(0,weight=1)
-        self.frm_control.rowconfigure(1,weight=1)
-        self.frm_control.rowconfigure(2,weight=1)
-        
-    # > Calibration and scan setup widgets <
-        self._btn_set_calArea = tk.Button(sfrm_cal,text='3. Define scan area',command=self._set_scan_area)
-        self._str_lbl_calArea = tk.StringVar(value='Scan edges: None to None')
-        lbl_calArea = tk.Label(sfrm_cal,textvariable=self._str_lbl_calArea,anchor='w',justify='left')
-        
-        # Grid
-        self._btn_set_calArea.grid(row=3,column=0,sticky='ew')
-        lbl_calArea.grid(row=4,column=0,sticky='ew')
-        
-        sfrm_cal.columnconfigure(0,weight=1)
-        sfrm_cal.rowconfigure(0,weight=1)
-        sfrm_cal.rowconfigure(1,weight=1)
-        sfrm_cal.rowconfigure(2,weight=1)
-        sfrm_cal.rowconfigure(3,weight=1)
-        sfrm_cal.rowconfigure(4,weight=1)
-        
-        # Params
-        self._last_loadpath = SaveParamsEnum.DEFAULT_SAVE_PATH.value
+        self._list_clickMeaCoor_mm = []     # The list of clicked coordinates in mm
+        self._list_rect_meaCoors_mm = []    # The rectangle coordinates for the scan area in mm
         
     # > Z-coordinate setup widgets <
-        self._str_lbl_coorz = tk.StringVar(value='Z-coordinate: None')
-        lbl_coorz_entry = tk.Label(sfrm_z,textvariable=self._str_lbl_coorz,anchor='w',justify='left')
-        self._var_coorz = tk.StringVar()
-        self._entry_coorz = tk.Entry(sfrm_z,textvariable=self._var_coorz)
-        self._btn_setcurr_coorz = tk.Button(sfrm_z,text='Set current Z',command=self._set_coor_z)
+        self.btn_storeZ.clicked.connect(self._store_current_coorz)
         
-        self._entry_coorz.bind('<Return>',lambda event: self._set_coor_z(coor=self._var_coorz.get(),unit='um'))
+    # >>> Worker and signals setup <<<
+        self._init_signals()
+        self._init_workers()
         
-        lbl_coorz_entry.grid(row=0,column=0,columnspan=2,sticky='ew')
-        self._entry_coorz.grid(row=1,column=0)
-        self._btn_setcurr_coorz.grid(row=1,column=1)
+    # >>> Initial update <<<
+        try: self._update_calibration()
+        except Exception as e: print(e)
+
+    def _init_signals(self):
+        """
+        Initialises the signals and slots for the GUI
+        """
+        # Set scan area button
+        self.btn_defineROI.clicked.connect(self._set_scan_area)
         
-    # > Resolution setup widgets <
-        init_value_res = 2
-        self._str_lbl_res_x = tk.StringVar(value=f'Resolution X: {init_value_res}')
-        self._str_lbl_res_y = tk.StringVar(value=f'Resolution Y: {init_value_res}')
-        lbl_res_x = tk.Label(sfrm_res,textvariable=self._str_lbl_res_x,anchor='w',justify='left',width=17)
-        lbl_res_y = tk.Label(sfrm_res,textvariable=self._str_lbl_res_y,anchor='w',justify='left',width=17)
-        self._spin_res_x = tk.Spinbox(sfrm_res,from_=1,to=100000,increment=1,values=init_value_res,width=7)
-        self._spin_res_y = tk.Spinbox(sfrm_res,from_=1,to=100000,increment=1,values=init_value_res,width=7)
-        self._btn_set_res = tk.Button(sfrm_res,text='Set resolution',command=self._set_resolution)
+        # Resolution spinbox signals
+        self.sig_updateResPt.connect(self._update_resolution_pt)
+        self.sig_updateResUm.connect(self._update_resolution_um)
         
-        self._spin_res_x.bind('<Return>',lambda event: self._set_resolution())
-        self._spin_res_y.bind('<Return>',lambda event: self._set_resolution())
+        self.spin_resXPt.editingFinished.connect(self.sig_updateResUm.emit)
+        self.spin_resYPt.editingFinished.connect(self.sig_updateResUm.emit)
+        self.spin_resXum.editingFinished.connect(self.sig_updateResPt.emit)
+        self.spin_resYum.editingFinished.connect(self.sig_updateResPt.emit)
         
-        # Grid
-        lbl_res_x.grid(row=0,column=0,sticky='ew')
-        lbl_res_y.grid(row=1,column=0,sticky='ew')
-        self._spin_res_x.grid(row=0,column=1)
-        self._spin_res_y.grid(row=1,column=1)
-        self._btn_set_res.grid(row=2,column=0,columnspan=2,sticky='ew')
+        # Canvas clear annotations observer
+        self._canvas_video.add_observer_rightclick(self.sig_resetStoredCoors.emit)
+        self.sig_resetStoredCoors.connect(self._reset_click_coors)
+        self._canvas_video.sig_leftclick.connect(self._append_clickCoor_mm)
         
-    # >>> Coordinate generation parameters <<<
-        self._mapping_coordinates:list[tuple] = None
-        self._res_x = int(float(self._spin_res_x.get()))
-        self._res_y = int(float(self._spin_res_y.get()))
-        self._stagecoor_init_xy_mm:tuple = None
-        self._stagecoor_final_xy_mm:tuple = None
-        self._coor_z_mm:float = None
+        # Calibration update
+        self._dataHub_imgCal.add_observer_calibrationChange(self.sig_updateCalibration.emit)
+        self.sig_updateCalibration.connect(self._update_calibration)
         
-    # # ><>< Debugging functions starts ><><
-    #     btn_generate_coors = tk.Button(self,text='Generate coordinates',command=self.get_mapping_coordinates)
-    #     btn_generate_coors.grid(row=1,column=0,columnspan=2,sticky='ew')
-    # # ><>< Debugging functions ends ><><
+    def _init_workers(self):
+        """
+        Initialises the worker threads for automatic image updating
+        """
+        # Worker thread for automatic image updating
+        self._thread_canvas = QThread()
+        self._worker_canvas = CanvasUpdater_Worker(self._canvas_video,self._motion_controller)
+        self._worker_canvas.moveToThread(self._thread_canvas)
+        
+        # Connect signals
+        self.sig_updateCanvasImage.connect(self._worker_canvas._update_image_annotation_points)
+        self.sig_updateCanvasRectangle.connect(self._worker_canvas._update_image_annotation_rectangle)
+        
+        self._worker_canvas.sig_error.connect(lambda msg: qw.QMessageBox.warning(self, 'Error', msg))
+        self._thread_canvas.start()
+        
+        # Set a timer to automatically update the image shown
+        freq = 25  # in Hz
+        self._timer_updateCanvas = QTimer()
+        self._timer_updateCanvas.setInterval(int(1000/freq))
+        self._timer_updateCanvas.timeout.connect(self._update_canvas)
+        self.destroyed.connect(self._timer_updateCanvas.stop)
+        self._timer_updateCanvas.start()
+        
+    def _block_signals_resolution(self,block:bool):
+        """
+        Blocks or unblocks the resolution spinbox signals
+        
+        Args:
+            block (bool): True to block, False to unblock
+        """
+        self.spin_resXPt.blockSignals(block)
+        self.spin_resYPt.blockSignals(block)
+        self.spin_resXum.blockSignals(block)
+        self.spin_resYum.blockSignals(block)
     
-    @thread_assign
-    def _set_resolution(self):
+    @Slot()
+    def _update_resolution_pt(self):
+        """
+        Sets the point resolution of the mapping method
+        """
+        self.blockSignals(True)
+        resUm_x = self.spin_resXum.value()
+        resUm_y = self.spin_resYum.value()
+        
+        if len(self._list_rect_meaCoors_mm) < 2:
+            self.blockSignals(False)
+            return
+        
+        dist_x = abs(self._list_rect_meaCoors_mm[1][0] - self._list_rect_meaCoors_mm[0][0])
+        dist_y = abs(self._list_rect_meaCoors_mm[1][1] - self._list_rect_meaCoors_mm[0][1])
+        
+        points_x = int(dist_x/resUm_x)+1 if resUm_x>0 else 1
+        points_y = int(dist_y/resUm_y)+1 if resUm_y>0 else 1
+        
+        self.spin_resXPt.setValue(points_x)
+        self.spin_resYPt.setValue(points_y)
+        
+        self.blockSignals(False)
+    
+    @Slot()
+    def _update_resolution_um(self):
         """
         Sets the resolution of the mapping method
         """
-        self._btn_set_res.config(state='disabled')
-        self._spin_res_x.config(state='disabled')
-        self._spin_res_y.config(state='disabled')
+        self.blockSignals(True)
+        res_x_pt = self.spin_resXPt.value()
+        res_y_pt = self.spin_resYPt.value()
         
-        res_x = self._spin_res_x.get()
-        res_y = self._spin_res_y.get()
-        
-        try:
-            res_x = int(float(res_x))
-            res_y = int(float(res_y))
-        except ValueError:
-            self._status_update('Resolution must be a number','yellow')
-            return
-            
-        if not res_x > 1 or not res_y > 1:
-            self._status_update('Resolution must be greater than 1','yellow')
+        if len(self._list_rect_meaCoors_mm) < 2:
+            self.blockSignals(False)
             return
         
-        self._res_x = res_x
-        self._res_y = res_y
+        dist_x = abs(self._list_rect_meaCoors_mm[1][0] - self._list_rect_meaCoors_mm[0][0])
+        dist_y = abs(self._list_rect_meaCoors_mm[1][1] - self._list_rect_meaCoors_mm[0][1])
         
-        try:
-            init_x_mm, init_y_mm = self._stagecoor_init_xy_mm
-            final_x_mm, final_y_mm = self._stagecoor_final_xy_mm
-            res_x_mm = (final_x_mm - init_x_mm)/(res_x-1)
-            res_y_mm = (final_y_mm - init_y_mm)/(res_y-1)
-            
-            self._str_lbl_res_x.set(f'Res. X: {res_x_mm*1e3:.1f} μm, {self._res_x} pts')
-            self._str_lbl_res_y.set(f'Res. Y: {res_y_mm*1e3:.1f} μm, {self._res_y} pts')
-        except:
-            self._str_lbl_res_x.set(f'Resolution X: {self._res_x} pts')
-            self._str_lbl_res_y.set(f'Resolution Y: {self._res_y} pts')
+        resUm_x = dist_x/(res_x_pt-1) if res_x_pt>1 else 0
+        resUm_y = dist_y/(res_y_pt-1) if res_y_pt>1 else 0
         
-        self._btn_set_res.config(state='normal')
-        self._spin_res_x.config(state='normal')
-        self._spin_res_y.config(state='normal')
+        self.spin_resXum.setValue(resUm_x)
+        self.spin_resYum.setValue(resUm_y)
+        
+        self.blockSignals(False)
     
-    @thread_assign
-    def _set_coor_z(self,coor:str|None=None,unit:Literal['mm','um']='mm'):
+    @Slot()
+    def _store_current_coorz(self):
         """
-        Sets the Z-coordinate to the given value
+        Gets the current stage coordinate and store it as the initial position
+        """
+        try:
+            coor_z_mm = self._motion_controller.get_coordinates_closest_mm()[2]
+            if not isinstance(coor_z_mm,float): raise ValueError('Z coordinate is not a float')
+        except Exception as e:
+            print(e)
+            qw.QMessageBox.warning(self, 'Error', str(e))
+            return
+        
+        self.spin_z.setValue(coor_z_mm*1e3)
+    
+    @Slot()
+    def _update_calibration(self):
+        """
+        Updates the calibration parameters
+        """
+        # print(f'{get_timestamp_us_str()}: Updating calibration for rectangle video mapping method')
+        new_calibration = self._dataHub_imgCal.get_selected_calibration()
+        self._imgUnit = MeaImg_Unit(
+            unit_name=f'ImgUnit_{uuid4()}',
+            calibration=new_calibration
+        )
+        # print(f'{get_timestamp_us_str()}: Updated calibration to {new_calibration.id}')
+    
+    @Slot(tuple)
+    def _append_clickCoor_mm(self, coor_pixel:tuple):
+        """
+        Appends the clicked coordinate in mm to the list
         
         Args:
-            coor (str, optional): The Z-coordinate to set. Defaults to None.
-            unit (Literal['mm','um'], optional): The unit of the coordinate. Defaults to 'mm'.
-        
-        Note:
-            If coor is None, it will get it from the current stage coordinate
+            coor_pixel (tuple): The clicked coordinate in pixels
         """
-        self._btn_setcurr_coorz.config(state='disabled')
-        self._entry_coorz.config(state='disabled')
+        # print(f'{get_timestamp_us_str()}: Clicked coordinate in pixels: {coor_pixel}')
+        stage_coor_mm = self._motion_controller.get_coordinates_closest_mm()
         
-        assert isinstance(coor,str) or coor == None, 'Coordinate must be a string or None'
-        if coor == None:
-            stagecoor = self._motion_controller.get_coordinates_closest_mm()
-            coor = stagecoor[2]
-        elif isinstance(coor,str):
-            try: coor = float(coor)
-            except Exception as e: print('ERROR _set_coor_z:',e); return
+        if not all(isinstance(c,float) for c in stage_coor_mm):
+            qw.QMessageBox.warning(self, 'Error', 'Image stage coordinates not available')
+            return
+        if self._imgUnit is None:
+            qw.QMessageBox.warning(self, 'Error', 'No image unit selected')
+            return
         
-        if unit == 'um':
-            coor_mm = coor*1e-3
-        else:
-            coor_mm = coor
-        
-        self._coor_z_mm = coor_mm
-        self._str_lbl_coorz.set('Z-coordinate [μm]: {:.1f}'.format(self._coor_z_mm*1e3))
-        self._entry_coorz.delete(0,tk.END)
-        self._entry_coorz.insert(0,'{}'.format(self._coor_z_mm))
-        
-        self._btn_setcurr_coorz.config(state='normal')
-        self._entry_coorz.config(state='normal')
+        clickCoor_mm = self._imgUnit.convert_imgpt2stg(
+                            frame_coor_mm=stage_coor_mm, # pyright: ignore[reportArgumentType] ; Checked above
+                            coor_pixel=coor_pixel,
+                            correct_rot=False,
+                            low_res=False
+                        )
+        self._list_clickMeaCoor_mm.append(clickCoor_mm)
     
-    @thread_assign
+    @Slot()
     def _set_scan_area(self):
         """
         Sets the scan area by taking the (x_min,y_min) and (x_max,y_max)
         from the list of clicked coordinates
         """
-        try:
-            self._btn_set_calArea.config(state='disabled')
-            
-            if len(self._list_clickCoor_mm) < 2:
-                self._status_update('Not enough coordinates selected','yellow')
-                return
-            
-            # Get the calibration area
-            list_clickCoor_pixel = [self._ImageUnit.convert_stg2imgpt(coor_stage_mm=(0,0),\
-                coor_point_mm=coor_mm,correct_rot=False,low_res=False) for coor_mm in self._list_clickCoor_mm]
-            
-            x_min_pixel = min([coor[0] for coor in list_clickCoor_pixel])
-            x_max_pixel = max([coor[0] for coor in list_clickCoor_pixel])
-            y_min_pixel = min([coor[1] for coor in list_clickCoor_pixel])
-            y_max_pixel = max([coor[1] for coor in list_clickCoor_pixel])
-            
-            coor_min_mm = self._ImageUnit.convert_imgpt2stg(
-                frame_coor_mm=(0,0),
-                coor_pixel=(x_min_pixel,y_min_pixel),
-                correct_rot=False,
-                low_res=False)
-            coor_max_mm = self._ImageUnit.convert_imgpt2stg(
-                frame_coor_mm=(0,0),
-                coor_pixel=(x_max_pixel,y_max_pixel),
-                correct_rot=False,
-                low_res=False)
-            
-            x_min_mm = coor_min_mm[0]
-            x_max_mm = coor_max_mm[0]
-            y_min_mm = coor_min_mm[1]
-            y_max_mm = coor_max_mm[1]
-            
-            # list_x = [coor[0] for coor in self._list_clickCoor_mm]
-            # list_y = [coor[1] for coor in self._list_clickCoor_mm]
-            
-            # x_min_mm = min(list_x)
-            # x_max_mm = max(list_x)
-            # y_min_mm = min(list_y)
-            # y_max_mm = max(list_y)
-            
-            coor_min = (x_min_mm,y_min_mm)
-            coor_max = (x_max_mm,y_max_mm)
-            
-            stagecoor_min = self._ImageUnit.convert_mea2stg(coor_min)
-            stagecoor_max = self._ImageUnit.convert_mea2stg(coor_max)
-            
-            self._stagecoor_init_xy_mm = stagecoor_min
-            self._stagecoor_final_xy_mm = stagecoor_max
-            
-            print('Stage coordinates:',self._stagecoor_init_xy_mm,self._stagecoor_final_xy_mm)
-            
-            self._str_lbl_calArea.set('Scan edges [μm]:\n({:.1f},{:.1f}) to ({:.1f},{:.1f})'.format(x_min_mm*1e3,y_min_mm*1e3,x_max_mm*1e3,y_max_mm*1e3))
-            
-        # Clear the click coordinates and the annotations except the scan area
-            self._list_clickCoor_mm.clear()
-            self._canvas_video.clear_all_annotations()
-            self._list_clickCoor_mm.extend([(x_min_mm,y_min_mm),(x_max_mm,y_max_mm)])
-            self._list_rect_coors_mm = [(x_min_mm,y_min_mm),(x_max_mm,y_max_mm)]
-        except Exception as e:
-            print('ERROR _set_calibration_area:',e)
-        finally:
-            self._btn_set_calArea.config(state='normal')
-            
-    
-    def _stop_videoFeed(self):
-        self._flg_videoFeed.clear()
-        self._btn_update_video.configure(text='1. Start video feed',command=self._start_videoFeed)
-        self._status_update('Video feed stopped')
-    
-    def _start_videoFeed(self):
-        img_cal = self._getter_ImageCalibration()
-        if not isinstance(img_cal,ImgMea_Cal):
-            self._status_update('No calibration loaded','yellow')
+        if not isinstance(self._imgUnit,MeaImg_Unit) or not self._imgUnit.check_calibration_exist():
+            try:
+                self._update_calibration()
+            except Exception as e:
+                print(e)
+                qw.QMessageBox.warning(self, 'Error', 'Please select an objective first')
             return
         
-        print(img_cal.id)
-        self._ImageUnit = MeaImg_Unit(unit_name='Video feed_'+str(uuid4())
-                                                ,calibration=img_cal)
+        if len(self._list_clickMeaCoor_mm) < 2:
+            qw.QMessageBox.warning(self, 'Error', 'Please click at least 2 coordinates to define the scan area')
+            return
         
-        # Start the video feed
-        threading.Thread(target=self._auto_update_videoFeed).start()
-        self._btn_update_video.configure(text='Stop video feed',command=self._stop_videoFeed)
+        # Get the min and max coordinates
+        list_x = [coor[0] for coor in self._list_clickMeaCoor_mm]
+        list_y = [coor[1] for coor in self._list_clickMeaCoor_mm]
+        
+        x_min = min(list_x)
+        x_max = max(list_x)
+        y_min = min(list_y)
+        y_max = max(list_y)
+        
+        coor_min = (x_min,y_min)
+        coor_max = (x_max,y_max)
+        
+        # Convert to stage coordinates and store it
+        stagecoor_min = self._imgUnit.convert_mea2stg(coor_min)
+        stagecoor_max = self._imgUnit.convert_mea2stg(coor_max)
+        
+        self._stagecoor_init_xy_mm = stagecoor_min
+        self._stagecoor_final_xy_mm = stagecoor_max
+        
+        # Update the scan edges label
+        self.lbl_scanEdges.setText('({:.1f}, {:.1f}) to ({:.1f}, {:.1f}) μm'.format(
+            stagecoor_min[0]*1e3,stagecoor_min[1]*1e3,
+            stagecoor_max[0]*1e3,stagecoor_max[1]*1e3))
+        
+        # Store the rectangle coordinates
+        self._list_rect_meaCoors_mm = [coor_min,coor_max]
+        self._list_clickMeaCoor_mm.clear()
+        self._list_clickMeaCoor_mm.extend([coor_min,coor_max])
+        
+        # Switch to rectangle mode (to commit the selected ROI) and emit signal to update resolution
+        self._flg_mode = 'rectangle'
+        self.sig_updateResPt.emit()
     
+    @Slot()
     def _reset_click_coors(self):
         """
         Resets the click coordinates
         """
-        self._list_clickCoor_mm.clear()
-        self._list_rect_coors_mm.clear()
-        self._canvas_video.clear_all_annotations()
-        self._lbl_coor_click.configure(text='Selected coordinates [μm]: None')
-    
-    def _auto_update_videoFeed(self):
-        """
-        Automatically updates the video feed on the canvas
-        """
-        # Clear the click coordinates and the annotations
-        self._list_clickCoor_mm.clear()
-        self._list_rect_coors_mm.clear()
-        self._canvas_video.clear_all_annotations()
+        self._list_clickMeaCoor_mm.clear()
+        self._list_rect_meaCoors_mm.clear()
+        self.lbl_scanEdges.setText('None')
+        self._flg_mode = 'point'
         
-        # Set the list recording the clicks (pixel coordinates)
-        list_clicks_temp = self._canvas_video.start_recordClicks()
-        self._flg_videoFeed.set()
-        while self._flg_videoFeed.is_set():
-            img = self._motion_controller.get_current_image()
-            if img is None: time.sleep(0.1); continue
+        self._canvas_video.clear_all_annotations()
+        self._canvas_video.start_recordClicks()
+    
+    @Slot()
+    def _update_canvas(self) -> None:
+        """
+        Updates the image shown on the canvas
+        """
+        if not self.isVisible():
+            print('Canvas not visible, skipping update')
+            return  # Do not update if the widget is not visible
+        
+        if not isinstance(self._imgUnit,MeaImg_Unit) or not self._imgUnit.check_calibration_exist(): return
+        
+        stagecoor_mm = self._motion_controller.get_coordinates_closest_mm()
+        
+        if not isinstance(stagecoor_mm,tuple): return
+        if not all(isinstance(c,float) for c in stagecoor_mm): return
+        
+        self._canvas_video.clear_all_annotations()
+        if self._flg_mode == 'point':
+            list_clickCoor_pixel = [self._imgUnit.convert_stg2imgpt(
+                coor_stage_mm=stagecoor_mm, # pyright: ignore[reportArgumentType] ; Checked above
+                coor_point_mm=coor_mm,
+                correct_rot=False,
+                low_res=False
+                )
+                for coor_mm in self._list_clickMeaCoor_mm
+            ]
+            self.sig_updateCanvasImage.emit(list_clickCoor_pixel)
             
-            stage_coor_mm = self._motion_controller.get_coordinates_closest_mm()
-            
-            self._canvas_video.set_image(img)
-            
-            # Check if there are any clicks
-            if len(list_clicks_temp) > 0:
-                # Convert the pixel coordinates to mm
-                click_coor_pxl = list_clicks_temp.pop()
-                click_coor_mm = self._ImageUnit.convert_imgpt2stg(frame_coor_mm=stage_coor_mm[:2],\
-                    coor_pixel=click_coor_pxl,correct_rot=False,low_res=False)
-                
-                # Append the click coordinates and update the label
-                self._list_clickCoor_mm.append(click_coor_mm)
-                str_coorlist_um = ', '.join([f'({coor_mm[0]*1e3:.1f},{coor_mm[1]*1e3:.1f})'\
-                    for coor_mm in self._list_clickCoor_mm])
-                self._lbl_coor_click.configure(text=f'Selected coordinates [μm]: {str_coorlist_um}')
-                
-            # Annotate the canvas with the stored click coordinates
-            self._canvas_video.clear_all_annotations()
-            for coor_mm in self._list_clickCoor_mm:
-                coor_pxl = self._ImageUnit.convert_stg2imgpt(coor_stage_mm=stage_coor_mm[:2],\
-                    coor_point_mm=coor_mm,correct_rot=False,low_res=False)
-                self._canvas_video.annotate_canvas(coor_pxl,scale=True)
-                
-            # Draw the rectangle coordinates
-            if len(self._list_rect_coors_mm) == 2:
-                try:
-                    coor_pxl_min = self._ImageUnit.convert_stg2imgpt(coor_stage_mm=stage_coor_mm[:2],\
-                        coor_point_mm=self._list_rect_coors_mm[0],correct_rot=False,low_res=False)
-                    coor_pxl_max = self._ImageUnit.convert_stg2imgpt(coor_stage_mm=stage_coor_mm[:2],\
-                        coor_point_mm=self._list_rect_coors_mm[1],correct_rot=False,low_res=False)
-                    
-                    self._canvas_video.draw_rectangle_canvas(coor_pxl_min,coor_pxl_max)
-                except Exception as e: print('ERROR _auto_update_videoFeed:',e); self._list_rect_coors_mm.clear()
+        elif self._flg_mode == 'rectangle':
+            list_clickCoor_pixel = [self._imgUnit.convert_stg2imgpt(
+                coor_stage_mm=stagecoor_mm, # pyright: ignore[reportArgumentType] ; Checked above
+                coor_point_mm=coor_mm,
+                correct_rot=False,
+                low_res=False
+                )
+                for coor_mm in self._list_rect_meaCoors_mm
+            ]
+            self.sig_updateCanvasRectangle.emit(list_clickCoor_pixel)
     
     def get_mapping_coordinates_mm(self):
-        # Stop the video feed to conserve resources
-        try: self._stop_videoFeed()
-        except Exception as e: print('ERROR get_mapping_coordinates:',e)
-        
-        if self._stagecoor_init_xy_mm == None or self._stagecoor_final_xy_mm == None or self._coor_z_mm == None:
-            self._status_update('Not all coordinates set','yellow')
-            return
-        
-        if self._res_x == None or self._res_y == None:
-            self._status_update('Resolution not set','yellow')
+        if self._stagecoor_init_xy_mm == None or self._stagecoor_final_xy_mm == None:
+            qw.QMessageBox.warning(self, 'Error', 'Scan area not defined')
             return
         
         # Generate the mapping coordinates
-        x_min, y_min = self._stagecoor_init_xy_mm
-        x_max, y_max = self._stagecoor_final_xy_mm
+        x_min = self._stagecoor_init_xy_mm[0]
+        y_min = self._stagecoor_init_xy_mm[1]
+        x_max = self._stagecoor_final_xy_mm[0]
+        y_max = self._stagecoor_final_xy_mm[1]
+        coor_z_mm = self.spin_z.value()/1e3
         
-        x = np.linspace(x_min,x_max,self._res_x)
-        y = np.linspace(y_min,y_max,self._res_y)
+        res_x = self.spin_resXPt.value()
+        res_y = self.spin_resYPt.value()
         
-        self._mapping_coordinates = [(x_val,y_val,self._coor_z_mm) for x_val in x for y_val in y]
-        self._status_update('Coordinates generated','green')
+        x = np.linspace(x_min,x_max,res_x)
+        y = np.linspace(y_min,y_max,res_y)
         
-        # ><>< Debugging part starts ><><
-        print('Mapping coordinates:',self._mapping_coordinates)
-        # ><>< Debugging part ends ><><
-        
-        return self._mapping_coordinates
-    
-    def _status_update(self,message=None,bg_colour=None):
-        """
-        To update the status bar at the bottom
-        
-        Args:
-            message (str): The update message
-            bg_colour (str, optional): Background colour. Defaults to 'default'.
-        """
-        if bg_colour == None:
-            bg_colour = self._bg_colour
-        
-        if message == None:
-            message = 'Controller ready'
-        self._statbar.configure(text=message,background=bg_colour)
+        return [(x_val,y_val,coor_z_mm) for x_val in x for y_val in y]
     
 def initialise_manager_hub_controllers():
     from iris.multiprocessing.basemanager import MyManager
@@ -447,28 +448,43 @@ def initialise_manager_hub_controllers():
     return xyControllerProxy, zControllerProxy, stageHub
     
 def test():
-    xyctrl,zctrl,stageHub = initialise_manager_hub_controllers()
+    import sys
     
-    root = tk.Tk()
-    root.title('Test')
-    toplvl = tk.Toplevel(root)
-    toplvl.title('motion controller')
+    app = qw.QApplication([])
+    main_window = qw.QMainWindow()
+    main_widget = qw.QWidget()
+    main_layout = qw.QHBoxLayout()
+    main_widget.setLayout(main_layout)
+    main_window.setCentralWidget(main_widget)
     
-    status_bar = tk.Label(root,text='Ready',bd=1,relief=tk.SUNKEN,anchor=tk.W)
-    status_bar.pack(side=tk.BOTTOM,fill=tk.X)
-    motion_controller = Frm_MotionController(
-        parent=toplvl,
-        xy_controller=xyctrl,
-        z_controller=zctrl,
-        stageHub=stageHub
+    cal = ImgMea_Cal()
+    cal.generate_dummy_params()
+    
+    from iris.gui.motion_video import generate_dummy_motion_controller
+    
+    motion_controller = generate_dummy_motion_controller(main_widget)
+    
+    imghub = Wdg_DataHub_Image(main=main_widget)
+    imghub.get_ImageMeasurement_Hub().test_generate_dummy()
+    
+    imgcalhub = Wdg_DataHub_ImgCal(main=main_widget)
+    imgcalhub.get_ImageMeasurement_Calibration_Hub().generate_dummy_calibrations()
+    
+    mapping_method = Rect_Video(
+        parent=main_widget,
+        motion_controller=motion_controller,
+        dataHub_img=imghub,
+        dataHub_imgCal=imgcalhub,
     )
-    motion_controller.initialise_auto_updater()
-    motion_controller.pack()
     
-    mapping_method = Rect_Video(root,motion_controller,status_bar)
-    mapping_method.pack()
+    main_layout.addWidget(motion_controller)
+    main_layout.addWidget(mapping_method)
+    main_layout.addWidget(imghub)
+    main_layout.addWidget(imgcalhub)
     
-    root.mainloop()
+    main_window.show()
+    sys.exit(app.exec())
     
 if __name__ == '__main__':
+    pass
     test()

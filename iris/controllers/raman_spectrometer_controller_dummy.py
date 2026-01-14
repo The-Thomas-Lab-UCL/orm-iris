@@ -21,7 +21,7 @@ if __name__ == '__main__':
     import sys
     import os
     libdir = os.path.abspath(r'.\iris')
-    sys.path.append(os.path.dirname(libdir))
+    sys.path.insert(0, os.path.dirname(libdir))
     
 
 from iris.utils.general import *
@@ -41,9 +41,9 @@ class SpectrometerController_Dummy(Class_SpectrometerController):
         
         # Aquisition related parameters
         self.integration_time_us = 500e3        # int: Stores the spectrometer's integration time [microsec]
-        self.integration_time_min = 10        # int: Stores the spectrometer's minimum allowable integration time [millisec]
-        self.integration_time_max = 10000        # int: Stores the spectrometer's maximum allowable integration time [millisec]
-        self.integration_time_inc = 25        # int: Stores the spectrometer's allowable integration time increment [millisec]
+        self.integration_time_min = 10*1e3      # int: Stores the spectrometer's minimum allowable integration time [microsec]
+        self.integration_time_max = 10000*1e3   # int: Stores the spectrometer's maximum allowable integration time [microsec]
+        self.integration_time_inc = 25*1e3      # int: Stores the spectrometer's allowable integration time increment [microsec]
         
         # Calibration related parameters
         self.bg_acq_num = 10    # Number of aquisition for the background removal

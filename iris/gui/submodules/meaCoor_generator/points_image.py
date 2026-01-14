@@ -1,103 +1,298 @@
 """
 An instance that manages a basic mapping method in tkinter.
-This is similar to that of the mapping_method_rectxy_scan_image
-but instead of generating a grid of scan pionts, it generates a list of points
-that are defined by the user.
+This is similar to that of the mapping_method_rectxy_scan_constz mapping method
+but this one can set it using an image (with an objective calibration file/params)
+instead.
 """
 if __name__ == '__main__':
     import sys
     import os
     SCRIPT_DIR = os.path.abspath(r'.\library')
-    EXTENSION_DIR = os.path.abspath(r'.\extensions')
     sys.path.append(os.path.dirname(SCRIPT_DIR))
-    sys.path.append(os.path.dirname(EXTENSION_DIR))
 
-import tkinter as tk
-from tkinter import ttk
+import PySide6.QtWidgets as qw
+from PySide6.QtCore import Signal, Slot, QThread, QObject
+
 import numpy as np
 from PIL.Image import Image
-import PIL
 
-from iris.gui.motion_video import Frm_MotionController
+from iris.gui.motion_video import Wdg_MotionController
 from iris.utils.general import *
 
 from iris.data.calibration_objective import ImgMea_Cal, ImgMea_Cal_Hub
 from iris.data.measurement_image import MeaImg_Unit, MeaImg_Handler
-from iris.gui.image_calibration.Canvas_ROIdefinition import ImageCalibration_canvas_calibration
-from iris.gui.dataHub_MeaImg import Frm_DataHub_Image
+from iris.gui.image_calibration.Canvas_ROIdefinition import Canvas_Image_Annotations
+from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image
 
-from iris.gui.submodules.meaCoor_generator.rectangle_image import Rect_Image
+from iris.data import SaveParamsEnum
+from iris.gui import AppPlotEnum
 
-class Points_Image(Rect_Image):
+from iris.resources.coordinate_generators.point_image_ui import Ui_Point_Image
+
+class CanvasUpdater_Worker(QObject):
+    """
+    A worker class to automatically update the video feed canvas
+    with the image unit and the clicked coordinates
+    """
+    sig_error = Signal(str)
+    
+    sig_img_stageCoor_mm = Signal(tuple)
+    
+    sig_updateImage = Signal(Image)
+    sig_annotateRectangle = Signal(tuple,tuple,bool)
+    
+    sig_finished = Signal() # To indicate that the canvas update is finished
+    
+    def __init__(self, canvas_image:Canvas_Image_Annotations, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._canvas_image = canvas_image
+        self.sig_updateImage.connect(self._canvas_image.set_image)
+        self.sig_annotateRectangle.connect(self._canvas_image.draw_rectangle_canvas)
+        
+    @Slot(MeaImg_Unit,bool)
+    def _update_image_shown(self, imgUnit:MeaImg_Unit, low_resolution:bool) -> None:
+        """
+        Updates the image shown on the canvas
+        """
+        img, stage_coor_mm, _ = imgUnit.get_image_all_stitched(low_res=low_resolution)
+        self.sig_updateImage.emit(img)
+        self.sig_img_stageCoor_mm.emit(stage_coor_mm)
+        self.sig_finished.emit()
+
+class Points_Image(Ui_Point_Image, qw.QWidget):
+    
+    sig_updateImageCombobox = Signal()
+    sig_updateResPt = Signal()
+    sig_updateResUm = Signal()
+    
+    sig_resetStoredCoors = Signal() # To reset the stored coordinates
+    
+    sig_updateCanvasRectangle = Signal(MeaImg_Unit,bool,list)
+    sig_updateCanvasImage = Signal(MeaImg_Unit,bool)
+    
     def __init__(
         self,
-        container_frame,
-        motion_controller:Frm_MotionController,
-        dataHub_img:Frm_DataHub_Image,
-        status_bar:tk.Label,
+        parent: qw.QWidget,
+        motion_controller:Wdg_MotionController,
+        dataHub_img:Wdg_DataHub_Image,
         *args, **kwargs
         ):
-        super().__init__(
-            container_frame=container_frame,
-            motion_controller=motion_controller,
-            dataHub_img=dataHub_img,
-            status_bar=status_bar,
-            *args, **kwargs
-        )
-        self._btn_show_image.configure(text='Define scan area',command=self._start_defining_scan_area)
-        self._lbl_res_x.destroy()
-        self._lbl_res_y.destroy()
-        self._spin_res_x.destroy()
-        self._spin_res_y.destroy()
-        self._btn_set_res.destroy()
-        self._lbl_calArea.destroy()
+        super().__init__(parent)
+        self.setupUi(self)
+        self.setLayout(self.main_layout)
         
-    @thread_assign
-    def _start_defining_scan_area(self):
+    # >>> General setup <<<
+        self._motion_controller = motion_controller
+        self._dataHub_img = dataHub_img
+        
+        video_feed_size = AppPlotEnum.MAP_METHOD_IMAGE_VIDEO_SIZE.value
+        
+        # Parameters
+        self._imgUnit:MeaImg_Unit|None = None    # The image unit object
+        self._img:Image|None = None                  # The image shown on the canvas
+        self._img_coor_stage_mm:tuple|None = None    # The stage coordinates corresponding to the self._img camera frame of reference
+        
+    # >>> Video feed setup <<<
+        # Parameters
+        self._list_imgunit_names:list[str] = []
+
+        # Canvas setup
+        self._canvas_image = Canvas_Image_Annotations(self,size_pixel=video_feed_size)
+        self.lyt_canvas.addWidget(self._canvas_image)
+        self._canvas_image.start_recordClicks()
+        
+        self.combo_image.activated.connect(self._update_image_shown)
+        
+        # Params
+        self._list_clickMeaCoor_mm = []     # The list of clicked coordinates in mm
+        
+    # > Z-coordinate setup widgets <
+        self.btn_storeZ.clicked.connect(self._store_current_coorz)
+        
+    # >>> Worker and signals setup <<<
+        self._init_signals()
+        self._init_workers()
+
+    def _init_signals(self):
         """
-        Automatically updates the image shown on the canvas
+        Initialises the signals and slots for the GUI
+        """
+        # Set scan area button
+        self.btn_instruction.clicked.connect(self._show_instructions)
+        
+        # Image unit combobox
+        self.combo_image.setEnabled(False)
+        self._dataHub_img.get_ImageMeasurement_Hub().add_observer(self.sig_updateImageCombobox.emit)
+        self.sig_updateImageCombobox.connect(self._update_combobox_imageUnits)
+        self.sig_updateImageCombobox.emit()
+        
+        # Canvas clear annotations observer
+        self._canvas_image.add_observer_rightclick(self.sig_resetStoredCoors.emit)
+        self.sig_resetStoredCoors.connect(self._reset_click_coors)
+        
+    def _init_workers(self):
+        """
+        Initialises the worker threads for automatic image updating
+        """
+        # Worker thread for automatic image updating
+        self._thread_canvas = QThread()
+        self._worker_canvas = CanvasUpdater_Worker(self._canvas_image)
+        self._worker_canvas.moveToThread(self._thread_canvas)
+        
+        # Connect signals
+        self.sig_updateCanvasImage.connect(self._worker_canvas._update_image_shown)
+        
+        self._worker_canvas.sig_error.connect(lambda msg: qw.QMessageBox.warning(self, 'Error', msg))
+        self._worker_canvas.sig_img_stageCoor_mm.connect(self._update_img_stageCoor_mm)
+        self._thread_canvas.start()
+    
+    @Slot()
+    def _show_instructions(self):
+        """
+        Shows the instructions for using the rectangle image mapping method
+        """
+        instructions = (
+            "Instructions:\n"
+            "1. Select an image to display\n"
+            "2. Left-click on the image to include points in the ROI\n"
+            "3. Right-click on the image to reset the selected points.\n"
+        )
+        qw.QMessageBox.information(self, 'Instructions - Rectangle Image Mapping Method', instructions)
+    
+    @Slot(tuple)
+    def _update_img_stageCoor_mm(self,coor_mm:tuple):
+        """
+        Updates the image stage coordinates
+        
+        Args:
+            coor_mm (tuple): The stage coordinates in mm
+        """
+        assert isinstance(coor_mm,tuple), 'coor_mm must be a tuple'
+        assert all(isinstance(c,float) for c in coor_mm), 'coor_mm must be a tuple of floats'
+        self._img_coor_stage_mm = coor_mm
+        
+    @Slot(tuple)
+    def _append_clickCoor_mm(self, coor_pixel:tuple):
+        """
+        Appends the clicked coordinate in pixels to the list of clicked coordinates
+        after converting it to stage coordinates in mm
+        
+        Args:
+            coor_pixel (tuple): The clicked coordinate in pixels
+        """
+        imgUnit = self._get_selected_ImageUnit()
+        if not isinstance(imgUnit,MeaImg_Unit) or not imgUnit.check_calibration_exist():
+            print('No image unit or calibration selected')
+            return
+        
+        stage_coor_mm = self._img_coor_stage_mm
+        
+        if not isinstance(stage_coor_mm,tuple):
+            print('Invalid stage coordinates')
+            return
+        
+        if not all(isinstance(c,float) for c in stage_coor_mm):
+            print('Invalid stage coordinates')
+            return
+        
+        coor_stage_mm = imgUnit.convert_imgpt2stg(
+            frame_coor_mm=stage_coor_mm,
+            coor_pixel=coor_pixel,
+            correct_rot=True,
+            low_res=self.chk_lres.isChecked()
+        )
+        
+        self._list_clickMeaCoor_mm.append(coor_stage_mm[:2])   # Only store x,y coordinates
+    
+    @Slot()
+    def _store_current_coorz(self):
+        """
+        Gets the current stage coordinate and store it as the initial position
         """
         try:
-            self._combo_imageUnits.configure(state='disabled')
-            self._btn_show_image.configure(state='normal',text='Finalize scan area',command=self._set_scan_area)
-            self._update_image_shown()
-            thread = threading.Thread(target=self._update_image_annotation)
-            thread.start()
-            thread.join()
-        except Exception as e: print('ERROR _auto_annotate_image:',e)
-        finally:
-            self._combo_imageUnits.configure(state='readonly')
-            self._btn_show_image.configure(state='normal',text='Define scan area',command=self._start_defining_scan_area)
+            coor_z_mm = self._motion_controller.get_coordinates_closest_mm()[2]
+            if not isinstance(coor_z_mm,float): raise ValueError('Z coordinate is not a float')
+        except Exception as e:
+            print(e)
+            qw.QMessageBox.warning(self, 'Error', str(e))
+            return
         
-    @thread_assign
-    def _set_scan_area(self):
+        self.spin_z.setValue(coor_z_mm*1e3)
+    
+    @Slot()
+    def _reset_click_coors(self):
         """
-        Sets the scan area by taking the (x_min,y_min) and (x_max,y_max)
-        from the list of clicked coordinates
+        Resets the click coordinates
         """
-        try:    # Clear the click coordinates and the annotations except the scan area
-            # Stop the auto update of the image
-            self._flg_thd_auto_image.clear()
-        except Exception as e: print('ERROR _set_calibration_area:',e)
+        self._list_clickMeaCoor_mm.clear()
+        self.lbl_scanEdges.setText('None')
+        
+        self._canvas_image.clear_all_annotations()
+        self._canvas_image.start_recordClicks()
+    
+    @Slot()
+    def _update_combobox_imageUnits(self):
+        """
+        Automatically updates the combobox with the image units
+        """
+        self.combo_image.setEnabled(False)
+        hub = self._dataHub_img.get_ImageMeasurement_Hub()
+        list_unit_ids = hub.get_list_ImageUnit_ids()
+        dict_idToName = hub.get_dict_IDtoName()
+        list_unit_names = [dict_idToName[unit_id] for unit_id in list_unit_ids]
+        
+        # Only updates when necessary
+        if list_unit_names == self._list_imgunit_names: return
+        
+        self._list_imgunit_names = list_unit_names.copy()
+        name = self.combo_image.currentText()
+        self.combo_image.clear()
+        self.combo_image.addItems(self._list_imgunit_names)
+        
+        if name in self._list_imgunit_names:
+            self.combo_image.setCurrentText(name)
+        elif len(self._list_imgunit_names) > 0:
+            self.combo_image.setCurrentIndex(0)
+        
+        self.combo_image.setEnabled(len(self._list_imgunit_names) > 0)
+    
+    def _get_selected_ImageUnit(self) -> MeaImg_Unit|None:
+        """
+        Returns the selected image unit in the combobox
+
+        Returns:
+            ImageMeasurement_Unit|None: The selected image unit or None
+        """
+        unit_name = self.combo_image.currentText()
+        hub = self._dataHub_img.get_ImageMeasurement_Hub()
+        ret = None
+        try: ret = hub.get_ImageMeasurementUnit(unit_name=unit_name)
+        except Exception as e:
+            print(f'Error getting selected ImageUnit: {e}')
+        return ret
+    
+    @Slot()
+    def _update_image_shown(self) -> None:
+        """
+        Updates the image shown on the canvas
+        """
+        img = self._get_selected_ImageUnit()
+        if img is None:
+            print('No image unit selected')
+            return
+        # print(f'Updating image shown: {img.get_IdName()}')
+        
+        self._reset_click_coors()
+        
+        self.sig_updateCanvasImage.emit(
+            img,
+            self.chk_lres.isChecked()
+        )
     
     def get_mapping_coordinates_mm(self):
-        # Stop the video feed to conserve resources
-        try: self._flg_thd_auto_image.clear(); self._thread_auto_image.join(1)
-        except Exception as e: print('ERROR get_mapping_coordinates:',e)
-        
-        if len(self._list_clickMeaCoor_mm) == 0:
-            self._status_update('No coordinates clicked','yellow')
-            return
-        
-        try:
-            self._mapping_coordinates = [self._imgUnit.convert_mea2stg(coor) for coor in self._list_clickMeaCoor_mm]
-            self._mapping_coordinates = [(coor[0],coor[1],self._coor_z_mm) for coor in self._mapping_coordinates]
-            self._status_update('Coordinates generated','green')
-        except Exception as e:
-            self._status_update('Error converting coordinates','red')
-            return
-        
-        return self._mapping_coordinates
+        z = self.spin_z.value()*1e-3
+        list_coors = [(x,y,z) for (x,y) in self._list_clickMeaCoor_mm]
+        return list_coors
     
 def initialise_manager_hub_controllers():
     from iris.multiprocessing.basemanager import MyManager
@@ -118,41 +313,37 @@ def initialise_manager_hub_controllers():
     return xyControllerProxy, zControllerProxy, stageHub
     
 def test():
-    xyctrl,zctrl,stageHub = initialise_manager_hub_controllers()
+    import sys
     
-    root = tk.Tk()
-    root.title('Test')
-    toplvl = tk.Toplevel(root)
-    toplvl.title('motion controller')
+    app = qw.QApplication([])
+    main_window = qw.QMainWindow()
+    main_widget = qw.QWidget()
+    main_layout = qw.QHBoxLayout()
+    main_widget.setLayout(main_layout)
+    main_window.setCentralWidget(main_widget)
     
     cal = ImgMea_Cal()
     cal.generate_dummy_params()
     
-    status_bar = tk.Label(root,text='Ready',bd=1,relief=tk.SUNKEN,anchor=tk.W)
-    status_bar.pack(side=tk.BOTTOM,fill=tk.X)
-    motion_controller = Frm_MotionController(
-        parent=toplvl,
-        xy_controller=xyctrl,
-        z_controller=zctrl,
-        stageHub=stageHub,
-        getter_imgcal=lambda: cal,
-    )
-    motion_controller.initialise_auto_updater()
-    motion_controller.pack()
+    from iris.gui.motion_video import generate_dummy_motion_controller
     
-    imghub = Frm_DataHub_Image(main=root)
-    imghub.test_generate_dummy()
-    imghub.pack()
+    motion_controller = generate_dummy_motion_controller(main_widget)
+    
+    imghub = Wdg_DataHub_Image(main=main_widget)
+    imghub.get_ImageMeasurement_Hub().test_generate_dummy()
     
     mapping_method = Points_Image(
-        container_frame=root,
+        parent=main_widget,
         motion_controller=motion_controller,
         dataHub_img=imghub,
-        status_bar=status_bar,
     )
-    mapping_method.pack()
     
-    root.mainloop()
+    main_layout.addWidget(motion_controller)
+    main_layout.addWidget(mapping_method)
+    main_layout.addWidget(imghub)
+    
+    main_window.show()
+    sys.exit(app.exec())
     
 if __name__ == '__main__':
     pass

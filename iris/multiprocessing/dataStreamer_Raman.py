@@ -50,13 +50,13 @@ if __name__ == '__main__':
     import sys
     import os
     libdir = os.path.abspath(r'.\iris')
-    sys.path.append(os.path.dirname(libdir))
+    sys.path.insert(0, os.path.dirname(libdir))
 
 
 from iris.utils.general import *
-from iris.calibration.calibration_generator import CalibrationParams, SpectrometerCalibrator, Frm_SpectrometerCalibrationGenerator
+from iris.calibration.calibration_generator import CalibrationParams, SpectrometerCalibrator, Wdg_SpectrometerCalibrationGenerator
 from iris.data.measurement_Raman import MeaRaman, MeaRaman_Plotter
-from iris.multiprocessing.basemanager import MyManager,get_my_manager
+from iris.multiprocessing.basemanager import MyManager,get_my_manager, SyncManager
 
 from iris.controllers import Controller_Spectrometer
 
@@ -454,17 +454,17 @@ class DataStreamer_Raman(mp.Process):
         finally:
             self._flg_process_measurement.set()
             
-    def join(self):
+    def join(self, timeout:float|None=None):
         """
         Joins the process
         """
         self.terminate_process()
-        self._flg_process_updater.wait()
-        self._flg_process_measurement.wait()
-        self._calibrator.terminate()
-        super().join()
+        self._flg_process_updater.wait(timeout)
+        self._flg_process_measurement.wait(timeout)
+        # self._calibrator.terminate()
+        super().join(timeout)
 
-def initialise_manager_raman(manager:MyManager):
+def initialise_manager_raman(manager:MyManager|SyncManager):
     """
     Registers the classes and the dictionary with the manager.
     """
@@ -474,8 +474,8 @@ def initialise_manager_raman(manager:MyManager):
     manager.register('list_raman_measurement_proxy',callable=list,proxytype=mpm.ListProxy)
     manager.register('list_raman_integrationtime_proxy',callable=list,proxytype=mpm.ListProxy)
     manager.register('list_raman_flg_retrieved_proxy',callable=list,proxytype=mpm.ListProxy)
-    
-def initialise_proxy_raman(manager:MyManager):
+
+def initialise_proxy_raman(manager:MyManager|SyncManager):
     """
     Initialises the proxies for the controllers and the dictionary.
     
@@ -523,47 +523,47 @@ def test_initialise_cal_hub():
     
     # Calibrator setup
     app = tk.Tk()
-    calibrator_gui = Frm_SpectrometerCalibrationGenerator(app,pipe_front)
+    calibrator_gui = Wdg_SpectrometerCalibrationGenerator(app,pipe_front)
     calibrator_gui.pack()
     
     return hub,app
 
-def test_calibrator():
-    """
-    Tests the calibrator
-    """
-    hub,app = test_initialise_cal_hub()
-    hub.start()
+# def test_calibrator():
+#     """
+#     Tests the calibrator
+#     """
+#     hub,app = test_initialise_cal_hub()
+#     hub.start()
     
-    # Make a toplevel to show the obtained spectrum
-    import matplotlib as mpl
-    mpl.use('Agg')
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-    import tkinter as tk
+#     # Make a toplevel to show the obtained spectrum
+#     import matplotlib as mpl
+#     mpl.use('Agg')
+#     import matplotlib.pyplot as plt
+#     from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+#     import tkinter as tk
     
-    toplvl = tk.Toplevel(app)
-    fig,ax = plt.subplots()
-    canvas = FigureCanvasTkAgg(fig,master=toplvl)
-    canvas.get_tk_widget().pack()
+#     toplvl = tk.Toplevel(app)
+#     fig,ax = plt.subplots()
+#     canvas = FigureCanvasTkAgg(fig)
+#     canvas.get_tk_widget().pack()
     
-    def update_plot():
-        """
-        Updates the plot
-        """
-        while True:
-            ts = get_timestamp_us_int()
-            list_ts,list_mea,_ = hub.get_measurement(timestamp_start=ts,WaitForMeasurement=False)
-            mea = list_mea[-1]
-            ax.clear()
-            ax.plot(mea[DataAnalysisConfigEnum.WAVELENGTH_LABEL.value],mea[DataAnalysisConfigEnum.INTENSITY_LABEL.value])
-            canvas.draw()
+#     def update_plot():
+#         """
+#         Updates the plot
+#         """
+#         while True:
+#             ts = get_timestamp_us_int()
+#             list_ts,list_mea,_ = hub.get_measurement(timestamp_start=ts,WaitForMeasurement=False)
+#             mea = list_mea[-1]
+#             ax.clear()
+#             ax.plot(mea[DataAnalysisConfigEnum.WAVELENGTH_LABEL.value],mea[DataAnalysisConfigEnum.INTENSITY_LABEL.value])
+#             canvas.draw()
             
-            time.sleep(0.1)
+#             time.sleep(0.1)
     
-    threading.Thread(target=update_plot).start()
+#     threading.Thread(target=update_plot).start()
     
-    app.mainloop()
+#     app.mainloop()
 
 def test():
     hub,app = test_initialise_cal_hub()
@@ -636,5 +636,5 @@ def test():
     hub.join()
     print('Test completed')
     
-if __name__ == '__main__':
-    test_calibrator()
+# if __name__ == '__main__':
+    # test_calibrator()

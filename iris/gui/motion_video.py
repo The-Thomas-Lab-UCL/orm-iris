@@ -5,18 +5,19 @@ Made on: 04 March 2024
 By: Kevin Uning
 For: The Thomas Group, Biochemical Engineering Dept., UCL
 """
+import PySide6.QtWidgets as qw
+import PySide6.QtCore as qc
+from PySide6.QtCore import Qt as qt, Signal, Slot, QObject, QThread, QTimer
+from PySide6.QtGui import QPixmap
 
-import tkinter as tk
-from tkinter import ttk
-from tkinter import messagebox,filedialog
 import threading
 import queue
 
-from PIL import Image, ImageTk, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageQt
 import cv2
 import numpy as np
 
-from typing import Callable, Literal
+from typing import Callable, Literal, Any
 
 import time
 
@@ -24,8 +25,7 @@ if __name__ == '__main__':
     import sys
     import os
     libdir = os.path.abspath(r'.\iris')
-    sys.path.append(os.path.dirname(libdir))
-
+    sys.path.insert(0, os.path.dirname(libdir))
 
 from iris.utils.general import *
 
@@ -38,7 +38,371 @@ from iris.gui import AppPlotEnum, AppVideoEnum
 from iris.controllers import ControllerConfigEnum
 from iris.controllers import CameraController, Controller_XY, Controller_Z
 
-class Frm_MotionController(tk.Frame):
+from iris.resources.motion_video.brightfieldcontrol_ui import Ui_wdg_brightfield_controller
+from iris.resources.motion_video.stagecontrol_ui import Ui_stagecontrol
+
+WAIT_MOVEMENT_TIMEOUT = 10.0  # Timeout for waiting for the movement to finish [s] (reset if the stage is still moving)
+
+class BrightfieldController(qw.QWidget,Ui_wdg_brightfield_controller):
+    def __init__(self,parent=None):
+        super().__init__(parent)
+        self.setupUi(self)
+        self.setLayout(self.main_layout)
+        
+        self._dock_index = 0
+        
+        # Set the initial dock location
+        self.main_win:qw.QMainWindow = self.window() # pyright: ignore[reportAttributeAccessIssue] ; assume the parent is a QMainWindow
+        
+        self._register_videofeed_dock()
+        self.dock_video.topLevelChanged.connect(self._handle_videofeed_docking_changed)
+        
+    def _register_videofeed_dock(self):
+        # This tells the Main Window: "You are the boss of this dock now"
+        self._dock_original_index = self.main_win.layout().indexOf(self.dock_video) # pyright: ignore[reportOptionalMemberAccess] ; assume the parent is a QMainWindow
+        self._dock_original_index = max(0,self._dock_original_index-1)
+            
+    @Slot(bool)
+    def _handle_videofeed_docking_changed(self,floating:bool):
+        if floating:
+            self.main_win.addDockWidget(qt.DockWidgetArea.RightDockWidgetArea, self.dock_video)
+            self.dock_video.setFloating(True)
+        else:
+            self.main_layout.insertWidget(self._dock_original_index, self.dock_video)
+            self.main_layout.insertWidget(self._dock_original_index, self.dock_video)
+            self.dock_video.setFloating(False)
+
+class StageControl(qw.QWidget, Ui_stagecontrol):
+    def __init__(self,parent=None):
+        super().__init__(parent)
+        self.setupUi(self)
+        self.setLayout(self.verticalLayout)
+
+class CustomButton(qw.QPushButton):
+    # Define custom signals for left and right clicks
+    rightClicked = Signal()
+    leftClicked = Signal()
+    leftReleased = Signal()
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Connect the custom signals to the provided functions
+        
+    def set_left_click_function(self, func: Callable[[], Any]):
+        """
+        Sets the function to be called on left click
+
+        Args:
+            func (Callable[[], Any]): The function to be called on left click
+        """
+        self.leftClicked.connect(func)
+        
+    def set_left_release_function(self, func: Callable[[], Any]):
+        """
+        Sets the function to be called on left button release
+
+        Args:
+            func (Callable[[], Any]): The function to be called on left button release
+        """
+        self.leftReleased.connect(func)
+        
+    def set_right_click_function(self, func: Callable[[], Any]):
+        """
+        Sets the function to be called on right click
+
+        Args:
+            func (Callable[[], Any]): The function to be called on right click
+        """
+        self.rightClicked.connect(func)
+        
+    def mousePressEvent(self, event):
+        if event.button() == qt.MouseButton.LeftButton:
+            self.leftClicked.emit()
+        elif event.button() == qt.MouseButton.RightButton:
+            self.rightClicked.emit()
+        super().mousePressEvent(event)
+        
+    def mouseReleaseEvent(self, event):
+        if event.button() == qt.MouseButton.LeftButton:
+            self.leftReleased.emit()
+        super().mouseReleaseEvent(event)
+
+class ResizableQLabel(qw.QLabel):
+    def __init__(self, min_width: int=1, min_height: int=1, *args, **kwargs):
+        assert isinstance(min_width,int) and min_width > 0, 'min_width must be a positive integer'
+        assert isinstance(min_height,int) and min_height > 0, 'min_height must be a positive integer'
+        
+        super().__init__(*args, **kwargs)
+        self._pixmap = QPixmap()
+        self.setSizePolicy(qw.QSizePolicy.Policy.Expanding, qw.QSizePolicy.Policy.Expanding)
+        self.setMinimumSize(min_width, min_height)
+        
+    def setPixmap(self, pixmap):
+        self._pixmap = pixmap
+        self.resizeEvent(None)
+        
+    def resizeEvent(self, event):
+        if not self._pixmap.isNull():
+            # Get the size of the label's content area
+            label_size = event.size() if event else self.size()
+            scaled_pixmap = self._pixmap.scaled(
+                label_size,
+                qc.Qt.AspectRatioMode.KeepAspectRatio,
+                qc.Qt.TransformationMode.SmoothTransformation
+            )
+            super().setPixmap(scaled_pixmap)
+        super().resizeEvent(event)
+
+class Motion_MoveBreathingZ_Worker(QObject):
+    """
+    Moves the z-stage up and down for a few cycles
+    
+    Args:
+        flg_done (threading.Event): A flag to stop the breathing motion
+    """
+    signal_breathing_finished = Signal()
+    
+    def __init__(self, ctrl_z: 'Controller_Z', parent=None):
+        super().__init__(parent)
+        self.ctrl_z = ctrl_z
+        self._breathing_timer: QTimer|None = None
+        
+    @Slot()
+    def start(self):
+        self._breathing_timer = QTimer(self)
+        self._breathing_timer.timeout.connect(self._do_breathing_step)
+        self._breathing_state = 0 # Use a state machine to track the motion
+        self._breathing_timer.start(10) # 50ms interval
+        
+    @Slot()
+    def _do_breathing_step(self):
+        # A simple state machine to perform the sequence
+        if self._breathing_state == 0:
+            self.ctrl_z.move_jog('zfwd')
+        elif self._breathing_state == 1:
+            self.ctrl_z.move_jog('zrev')
+        elif self._breathing_state == 2:
+            self.ctrl_z.move_jog('zrev')
+        elif self._breathing_state == 3:
+            self.ctrl_z.move_jog('zfwd')
+            
+        self._breathing_state = (self._breathing_state + 1) % 4
+
+    @Slot()
+    def stop(self):
+        if self._breathing_timer is not None:
+            self._breathing_timer.stop()
+        self.signal_breathing_finished.emit()
+
+class Motion_AutoCoorReport_Worker(QObject):
+    
+    sig_coor = Signal(str)
+    
+    def __init__(self, stageHub:DataStreamer_StageCam, parent=None):
+        super().__init__(parent)
+        self._stageHub = stageHub
+        self._timer: QTimer|None = None
+        
+    @Slot()
+    def start(self):
+        self._timer = QTimer(self)
+        self._timer.setInterval(100)
+        self._timer.timeout.connect(self._emit_coor)
+        # Defer timer start to ensure event loop is running
+        QTimer.singleShot(0, self._timer.start)
+        
+    def _emit_coor(self):
+        timestamp_req = get_timestamp_us_int()
+        result = self._stageHub.get_coordinates_closest(timestamp_req)
+        
+        if result is None:
+            self.sig_coor.emit('X: -- Y: -- Z: -- µm')
+            return
+        
+        coor_x,coor_y,coor_z = result
+        coor_x_um = float(coor_x * 1000)
+        coor_y_um = float(coor_y * 1000)
+        coor_z_um = float(coor_z * 1000)
+        
+        coor_str = 'X: {:.1f} Y: {:.1f} Z: {:.1f} µm'.format(coor_x_um,coor_y_um,coor_z_um)
+        self.sig_coor.emit(coor_str)
+
+class Motion_GetCoordinatesClosest_mm_Worker(QObject):
+    """
+    A worker to get the closest coordinates in mm from the stage controller
+    """
+    sig_coor = Signal(np.ndarray)
+    
+    def __init__(self, stageHub:DataStreamer_StageCam, parent=None):
+        super().__init__(parent)
+        self._stageHub = stageHub
+    
+    def _get_coor(self):
+        timestamp_req = get_timestamp_us_int()
+        result = self._stageHub.get_coordinates_closest(timestamp_req)
+        
+        if result is None:
+            return (None,None,None)
+        
+        coor_x,coor_y,coor_z = result
+        coor = np.array([coor_x,coor_y,coor_z])
+        return coor
+
+    @Slot()
+    def work_async(self):
+        coor = self._get_coor()
+        self.sig_coor.emit(coor)
+        
+    @Slot(queue.Queue)
+    def work_sync(self, q_ret:queue.Queue):
+        coor = self._get_coor()
+        q_ret.put(coor)
+    
+class Motion_GoToCoor_Worker(QObject):
+    """
+    A worker to move the stage to the target coordinates
+    """
+    sig_mvmt_started = Signal(str)
+    sig_mvmt_finished = Signal(str)
+    
+    msg_target_reached = 'Target reached'
+    msg_target_timeout = 'Timeout waiting for target'
+    msg_target_failed = 'Failed to set or reach target'
+    
+    def __init__(self, stageHub:DataStreamer_StageCam, ctrl_xy: 'Controller_XY',
+                 ctrl_z: 'Controller_Z', parent=None):
+        super().__init__(parent)
+        self._stageHub = stageHub
+        self.ctrl_xy = ctrl_xy
+        self.ctrl_z = ctrl_z
+        
+    def _get_coor(self) -> np.ndarray|None:
+        """
+        Gets the current coordinates from the stage hub
+
+        Returns:
+            np.ndarray: The current coordinates in mm (x,y,z)
+        """
+        timestamp_req = get_timestamp_us_int()
+        result = self._stageHub.get_coordinates_closest(timestamp_req)
+        
+        if result is None: return None
+        else: return np.array(result)
+        
+    def _notify_finish(self, thread_xy:threading.Thread, thread_z:threading.Thread,
+                       event_finished:threading.Event):
+        """
+        Waits for the target to be reached, the coordinate doesn't update within the timeout, raises a TimeoutError
+        
+        Args:
+            thread_xy (threading.Thread): The thread moving the XY stage
+            thread_z (threading.Thread): The thread moving the Z stage
+            timeout (float): Timeout in seconds
+                        
+        Raises:
+            TimeoutError: If the target is not reached within the timeout
+        """
+        timeout = WAIT_MOVEMENT_TIMEOUT
+        
+        start_time = time.time()
+        coor = self._get_coor()
+        while True:
+            if thread_xy.is_alive() or thread_z.is_alive():
+                thread_xy.join(timeout=0.1)
+                thread_z.join(timeout=0.1)
+            else:
+                event_finished.set()
+                self.sig_mvmt_finished.emit(self.msg_target_reached)
+                break
+            
+            if time.time() - start_time > timeout:
+                event_finished.set()
+                self.sig_mvmt_finished.emit(self.msg_target_timeout)
+            
+            coor_new = self._get_coor()
+            # Resets the timer if the coordinates are not the same (i.e., the stage is still moving)
+            if coor_new is None: continue
+            if coor is None: coor = coor_new
+            if np.allclose(coor,coor_new,atol=0.001): start_time = time.time()
+            coor = coor_new
+        
+    @Slot(tuple, threading.Event)
+    def work(
+        self,
+        coors_mm:tuple[float,float,float],
+        event_finished:threading.Event):
+        """
+        Moves the stage to specific coordinates, except if None is provided
+
+        Args:
+            coors_mm (tuple[float,float,float]): Target coordinates in mm (x,y,z). Use None to skip moving that axis.
+            event_finished (threading.Event): An event to signal when the movement is finished.
+        """
+        # print('Motion_GoToCoor_Worker.work() called with coordinates (mm):',coors_mm)
+        # print('Thread ID:', threading.current_thread().ident)
+        # If None is provided, assign the current coordinates (i.e., do not move)
+        coor_x_mm, coor_y_mm, coor_z_mm = coors_mm
+        if any([coor_x_mm is None,coor_y_mm is None,coor_z_mm is None]):
+            res = self._get_coor()
+            if res is None:
+                self.sig_mvmt_finished.emit(self.msg_target_failed)
+                return
+            coor_x_current,coor_y_current,coor_z_current = res
+            if coor_x_mm is None: coor_x_mm = coor_x_current
+            if coor_y_mm is None: coor_y_mm = coor_y_current
+            if coor_z_mm is None: coor_z_mm = coor_z_current
+        
+        self.sig_mvmt_started.emit('Moving to X: {:.3f} Y: {:.3f} Z: {:.3f} mm'.format(coor_x_mm,coor_y_mm,coor_z_mm))
+        
+        # Operate both stages at once
+        thread_xy_move = threading.Thread(target=self.ctrl_xy.move_direct,args=((coor_x_mm,coor_y_mm),))
+        thread_z_move = threading.Thread(target=self.ctrl_z.move_direct,args=(coor_z_mm,))
+        
+        thread_xy_move.start()
+        thread_z_move.start()
+
+        self._notify_finish(thread_xy_move,thread_z_move,event_finished)
+
+# class _worker_set_vel_relative(QObject):
+#     """
+#     A worker to set the velocity and acceleration parameters for the stages
+#     """
+#     sig_param_set = Signal(tuple)
+    
+#     def __init__(self, ctrl_xy: 'Controller_XY', ctrl_z: 'Controller_Z', parent=None):
+#         super().__init__(parent)
+#         self.ctrl_xy = ctrl_xy
+#         self.ctrl_z = ctrl_z
+        
+#     @Slot(tuple)
+#     def work(self, vel_params:tuple[float|None,float|None]) -> None:
+#         """
+#         Sets the velocity parameters for the motors
+        
+#         Args:
+#             vel_params (tuple[float|None,float|None]): Velocity parameters for the motors in percentage.
+#                 (vel_xy, vel_z). Use None to keep the current value.
+#         """
+#         vel_xy, vel_z = vel_params
+#         if isinstance(vel_xy,type(None)): vel_xy = self.ctrl_xy.get_vel_acc_relative()[1]
+#         if isinstance(vel_z,type(None)): vel_z = self.ctrl_z.get_vel_acc_relative()[1]
+        
+#         assert isinstance(vel_xy,(float,int)) and isinstance(vel_z,(float,int)), 'Invalid input type for the velocity parameters'
+        
+#         self.ctrl_xy.set_vel_acc_relative(vel_homing=vel_xy,vel_move=vel_xy)
+#         self.ctrl_z.set_vel_acc_relative(vel_homing=vel_z,vel_move=vel_z)
+        
+#     @Slot(queue.Queue)
+#     def _get_current_vel(self, q_ret:queue.Queue) -> None:
+#         """
+#         Gets the current velocity parameters for the motors
+#         """
+#         speed_xy = self.ctrl_xy.get_vel_acc_relative()[1]
+#         speed_z = self.ctrl_z.get_vel_acc_relative()[1]
+
+#         q_ret.put((speed_xy,speed_z))
+
+class Wdg_MotionController(qw.QGroupBox):
     """
     A class to control the app subwindow for the motion:
     - video output
@@ -53,10 +417,21 @@ class Frm_MotionController(tk.Frame):
     Args:
         tk (None): Nothing needed here
     """
+    sig_statbar_message = Signal(str,str)  # A signal to update the status bar message
+    sig_breathing_stopped = Signal()
     
-    def __init__(self,parent,xy_controller:Controller_XY,z_controller:Controller_Z,
-                 stageHub:DataStreamer_StageCam,getter_imgcal:Callable[[],ImgMea_Cal],
-                 flg_issimulation=True, main:bool=False):
+    _sig_go_to_coordinates = Signal(tuple,threading.Event)
+    
+    def __init__(
+        self,
+        parent,
+        xy_controller:Controller_XY,
+        z_controller:Controller_Z,
+        stageHub:DataStreamer_StageCam,
+        getter_imgcal:Callable[[],ImgMea_Cal],
+        flg_issimulation=True,
+        main:bool=False
+        ):
         # Initialise the class
         super().__init__(parent)
         self._stageHub:DataStreamer_StageCam = stageHub
@@ -69,289 +444,317 @@ class Frm_MotionController(tk.Frame):
         self.flg_issimulation = flg_issimulation    # If True, request the motion controller to do a simulation instead
         
     # >>> Top layout <<<
-        frm_video = tk.Frame(self)  # Top frame compartment for the video
-        notebook_motion_ctrl = ttk.Notebook(self)  # Top frame compartment for the stage controllers
-        self._statbar = tk.Label(self, text="Video and stage initialisation", bd=1, relief=tk.SUNKEN,anchor=tk.W)
+        main_layout = qw.QVBoxLayout(self)  # The main layout for the entire frame
+        wdg_video = BrightfieldController(self)  # Top layout compartment for the video
+        self._wdg_stage = StageControl(self)
+        self._statbar = qw.QStatusBar(self)  # Status bar at the bottom
+        self._statbar.showMessage("Video and stage initialisation")
         
-        # Pack the frames
-        row=0; col=0
-        frm_video.grid(row=row,column=0,sticky='nsew'); row+=1
-        notebook_motion_ctrl.grid(row=row,column=0,sticky='nsew'); row+=1
-        self._statbar.grid(row=row,column=0,sticky='sew'); row+=1
-        
-        self._bg_colour = self._statbar.cget('background')
-        
-        # Grid configuration
-        [self.grid_rowconfigure(i,weight=1) for i in range(row)]
-        [self.grid_columnconfigure(i,weight=1) for i in range(col)]
-        
-        # Notebook setup
-        self._frm_mctrl = tk.Frame(self)  # Bottom frame compartment for the stage controllers
-        self._frm_GoToCoord = tk.Frame(self)  # Bottom frame compartment for the go to coordinate
-        
-        notebook_motion_ctrl.add(self._frm_mctrl,text='Directional control')
-        notebook_motion_ctrl.add(self._frm_GoToCoord,text='Go to coordinate')
-        
-    # >>> Inter-class/frame data transfer <<<
-        self.queue_response_motion = queue.Queue()  # Sets a queue to store data for other classes to take out and use
+        main_layout.addWidget(wdg_video)
+        main_layout.addWidget(self._wdg_stage)
+        main_layout.addWidget(self._statbar)
         
     # >>> Video widgets and parameter setup <<<
-        self._camera_ctrl:CameraController = None   # Controls the camera, will be defined in the video initialise method
+        self._camera_ctrl:CameraController = self._stageHub.get_camera_controller()
         self._video_height = ControllerConfigEnum.VIDEOFEED_HEIGHT.value    # Video feed height in pixel
         self._flg_isvideorunning = False         # A flag to turn on/off the video
-        self._currentImage:Image.Image = None   # The current image to be displayed
+        self._currentImage:Image.Image|None = None   # The current image to be displayed
         self._currentFrame = None               # The current frame to be displayed
         self._flg_isNewFrmReady = threading.Event()  # A flag to wait for the frame to be captured
         
         # >> Sub-frame setup <<
-        sfrm_video = tk.Frame(frm_video)  # Hosts the video subframe
-        sfrm_video_ctrl = tk.Frame(frm_video)  # Hosts the video controller subframe
-        sfrm_video_coor = tk.Frame(frm_video)  # Hosts the video coordinate reporting subframe
-        
-        row=0; col=0
-        sfrm_video.grid(row=row,column=0,sticky='nsew'); row+=1; col+=1
-        sfrm_video_ctrl.grid(row=row,column=0,sticky='nsew'); row+=1
-        sfrm_video_coor.grid(row=row,column=0,sticky='nsew'); row+=1
-        [frm_video.grid_rowconfigure(i,weight=1) for i in range(row)]
-        [frm_video.grid_columnconfigure(i,weight=1) for i in range(col)]
-        
-        # > Video
-        self._lbl_video = tk.Label(sfrm_video,image=self._currentFrame)    # A label to show the video
-        
-        row=0; col=0
-        self._lbl_video.grid(row=0,column=0,sticky='nsew')
-        [sfrm_video.grid_rowconfigure(i,weight=1) for i in range(row)]
-        [sfrm_video.grid_columnconfigure(i,weight=1) for i in range(col)]
-        
-        # > Video controllers
-        self._btn_videotoggle = tk.Button(sfrm_video_ctrl,text='Turn camera ON',command= lambda:self.video_initialise(),bg='yellow')
-        self._btn_reinit_conn = tk.Button(sfrm_video_ctrl,text='Reset camera connection',command=lambda: self.reinitialise_connection('camera'),bg='yellow')
-        self._bool_crosshair = tk.BooleanVar(value=False)
-        self._bool_scalebar = tk.BooleanVar(value=True)
-        chk_crosshair = tk.Checkbutton(sfrm_video_ctrl,text='Show crosshair',variable=self._bool_crosshair)
-        chk_scalebar = tk.Checkbutton(sfrm_video_ctrl,text='Show scalebar',variable=self._bool_scalebar)
-        btn_set_imgproc_gain = tk.Button(sfrm_video_ctrl,text='Set flatfield gain',command=lambda: self._set_imageProc_gain())
-        btn_set_flatfield = tk.Button(sfrm_video_ctrl,text='Set flatfield',command=lambda: self._set_flatfield_correction_camera())
-        btn_save_flatfield = tk.Button(sfrm_video_ctrl,text='Save flatfield',command=lambda: self._save_flatfield_correction())
-        btn_load_flatfield = tk.Button(sfrm_video_ctrl,text='Load flatfield',command=lambda: self._load_flatfield_correction())
-        
-        # Video corrections
-        self._dict_vidcorrection = {}
-        self._combo_vidcorrection = ttk.Combobox(sfrm_video_ctrl,values=list(stageHub.Enum_CamCorrectionType.__members__),
-                                                 state='readonly')
-        self._combo_vidcorrection.current(0)
-        
-        row=0; col=0
-        chk_crosshair.grid(row=row,column=0,sticky='ew'); col+=1
-        chk_scalebar.grid(row=row,column=1,sticky='ew'); row+=1
-        self._btn_videotoggle.grid(row=row,column=0,sticky='ew')
-        self._btn_reinit_conn.grid(row=row,column=1,sticky='ew'); row+=1
-        self._combo_vidcorrection.grid(row=row,column=0,columnspan=2,sticky='ew'); row+=1
-        
-        btn_set_imgproc_gain.grid(row=row,column=0,sticky='ew')
-        btn_set_flatfield.grid(row=row,column=1,sticky='ew'); row+=1
-        btn_save_flatfield.grid(row=row,column=0,sticky='ew')
-        btn_load_flatfield.grid(row=row,column=1,sticky='ew'); row+=1
-        
-        [sfrm_video_ctrl.grid_rowconfigure(i,weight=0) for i in range(row)]
-        [sfrm_video_ctrl.grid_columnconfigure(i,weight=1) for i in range(col+1)]
-        
-        # > Coordinate reporting
-        self._lbl_coor = tk.Label(sfrm_video_coor,text='Stage coordinates (x,y,z): ',anchor='center')
-        
-        row=0; col=0
-        self._lbl_coor.grid(row=0,column=0,sticky='new')
-        [sfrm_video_coor.grid_rowconfigure(i,weight=0) for i in range(row)]
-        [sfrm_video_coor.grid_columnconfigure(i,weight=1) for i in range(col)]
+        self._init_video_widgets(stageHub, wdg_video)
         
     # >>> Motion widgets and parameter setup <<<
         # Set up the variable for the controller later
         self.ctrl_xy = xy_controller    # The xy-stage controller (proxy)
         self.ctrl_z = z_controller      # The z-stage controller (proxy)
         
-        self._controller_id_camera = self._stageHub.get_camera_controller().get_identifier()
-        self._controller_id_xy = self.ctrl_xy.get_identifier()
-        self._controller_id_z = self.ctrl_z.get_identifier()
+        try: self._controller_id_camera = self._stageHub.get_camera_controller().get_identifier()
+        except: self._controller_id_camera = 'failed to get camera ID'; qw.QErrorMessage(self).showMessage('Failed to get camera ID')
+        try: self._controller_id_xy = self.ctrl_xy.get_identifier()
+        except: self._controller_id_xy = 'failed to get xy ID'; qw.QErrorMessage(self).showMessage('Failed to get xy stage ID')
+        try: self._controller_id_z = self.ctrl_z.get_identifier()
+        except: self._controller_id_z = 'failed to get z ID'; qw.QErrorMessage(self).showMessage('Failed to get z stage ID')
         
-        self._current_coor:np.array = np.zeros(3)  # The current coordinates of the stage, only to be used internally!
+        self._current_coor:np.ndarray = np.zeros(3)  # The current coordinates of the stage, only to be used internally!
         self._flg_ontarget_gotocoor = threading.Event() # A flag to check if the stage is on target for the go to coordinates
         
         # Connection flag
         self._flg_connectionReady_xyz = threading.Event()  # A flag to check if the reconnection is in progress
         self._flg_connectionReady_xyz.set()
         
-        # Add sub-frames
-        sfrm_xyz_ctrl = tk.Frame(self._frm_mctrl)           # Hosts the xy stage and z stage controller ssubframes
-        sfrm_xyzhome = tk.Frame(self._frm_mctrl)            # Hosts the calibration/home buttons
-        ssfrm_xy_ctrl = tk.Frame(sfrm_xyz_ctrl)             # Hosts the xy stage controller
-        ssfrm_z_ctrl = tk.Frame(sfrm_xyz_ctrl)              # Hosts the z stage controller
-        sfrm_MotorParamSetup = tk.Frame(self._frm_mctrl)    # Hosts the motor parameter setup
-        sfrm_jogConfig = tk.Frame(self._frm_mctrl)          # Hosts the jogging configuration
-        
-        # Pack the sub-frames
-        sfrm_jogConfig.pack(side=tk.BOTTOM,padx=10, pady=5)
-        sfrm_xyz_ctrl.pack(side=tk.BOTTOM,padx=10, pady=5)
-        sfrm_xyzhome.pack(side=tk.BOTTOM,padx=10, pady=5)
-        ssfrm_xy_ctrl.pack(side=tk.LEFT,padx=10, pady=5)
-        ssfrm_z_ctrl.pack(side=tk.RIGHT,padx=10, pady=5)
-        sfrm_MotorParamSetup.pack(side=tk.BOTTOM,padx=10, pady=5)
-        
     # >>> Continuous motion controller widgets <<<
-        # Add the buttons (disabled until controller initialisation)
-        self.btn_xy_up = tk.Button(ssfrm_xy_ctrl,text='up',state='disabled')
-        self.btn_xy_down = tk.Button(ssfrm_xy_ctrl,text='down',state='disabled')
-        self.btn_xy_right= tk.Button(ssfrm_xy_ctrl,text='right',state='disabled')
-        self.btn_xy_left = tk.Button(ssfrm_xy_ctrl,text='left',state='disabled')
-        
-        self.btn_z_up = tk.Button(ssfrm_z_ctrl,text='up',state='disabled')
-        self.btn_z_down = tk.Button(ssfrm_z_ctrl,text='down',state='disabled')
-        
-        self._btn_z_breathing = tk.Button(ssfrm_z_ctrl,text='Breathing',state='disabled',command=self._move_breathing_z)
-        
-        self.btn_xy_home = tk.Button(sfrm_xyzhome,text='XY-Home/Calibration',
-                                     state='disabled',command=lambda: self.motion_button_manager('xyhome'))
-        self.btn_z_home = tk.Button(sfrm_xyzhome,text='Z-Home/Calibration',state='disabled',
-                                    command= lambda: self.motion_button_manager('zhome'))
-        
-        self.btn_xy_reinit = tk.Button(sfrm_xyzhome,text='Reset XY connection',state='disabled',
-                                     command=lambda: self.reinitialise_connection('xy'))
-        self.btn_z_reinit = tk.Button(sfrm_xyzhome,text='Reset Z connection',state='disabled',
-                                    command=lambda: self.status_update('Z re-initialisation is not yet implemented',bg_colour='yellow'))
-        
-        # Assign the buttons
-        self.btn_xy_up.bind("<Button-1>", lambda event: self.motion_button_manager('yfwd'))
-        self.btn_xy_down.bind("<Button-1>", lambda event: self.motion_button_manager('yrev'))
-        self.btn_xy_right.bind("<Button-1>", lambda event: self.motion_button_manager('xfwd'))
-        self.btn_xy_left.bind("<Button-1>", lambda event: self.motion_button_manager('xrev'))
-        
-        self.btn_z_up.bind("<Button-1>", lambda event: self.motion_button_manager('zfwd'))
-        self.btn_z_down.bind("<Button-1>", lambda event: self.motion_button_manager('zrev'))
-        
-        self.btn_xy_up.bind("<ButtonRelease-1>", lambda event: self.motion_button_manager('ystop'))
-        self.btn_xy_down.bind("<ButtonRelease-1>", lambda event: self.motion_button_manager('ystop'))
-        self.btn_xy_right.bind("<ButtonRelease-1>", lambda event: self.motion_button_manager('xstop'))
-        self.btn_xy_left.bind("<ButtonRelease-1>", lambda event: self.motion_button_manager('xstop'))
-        
-        self.btn_z_up.bind("<ButtonRelease-1>", lambda event: self.motion_button_manager('zstop'))
-        self.btn_z_down.bind("<ButtonRelease-1>", lambda event: self.motion_button_manager('zstop'))
-        
-        # Pack the buttons into a layout
-        self.btn_xy_up.pack(side=tk.TOP)
-        self.btn_xy_down.pack(side=tk.BOTTOM)
-        self.btn_xy_left.pack(side=tk.LEFT)
-        self.btn_xy_right.pack(side=tk.RIGHT)
-        
-        self.btn_z_up.pack(side=tk.TOP)
-        self.btn_z_down.pack(side=tk.TOP,pady=(0,10))
-        self._btn_z_breathing.pack(side=tk.TOP)
-        
-        row_count=0
-        self.btn_xy_home.grid(row=row_count,column=0)
-        self.btn_z_home.grid(row=row_count,column=1)
-        row_count+=1
-        self.btn_xy_reinit.grid(row=row_count,column=0)
-        self.btn_z_reinit.grid(row=row_count,column=1)
+        self._init_xyz_control_widgets(self._wdg_stage)
         
     # >>> Jogging configuration widgets <<<
-        self._bool_jog_enabled = tk.BooleanVar(value=False)  # A flag to check if the jogging is enabled
-        self.chk_jog_enabled = tk.Checkbutton(sfrm_jogConfig,text='Jogging mode',variable=self._bool_jog_enabled)
-        lbl_info_jog = tk.Label(sfrm_jogConfig,text='OR right click on the direction buttons to jog',background='yellow')
-        
-        self.chk_jog_enabled.grid(row=0,column=0,columnspan=2,sticky='ew')
-        lbl_info_jog.grid(row=1,column=0,columnspan=2,sticky='ew')
+        self._init_xyz_jog_widgets(self._wdg_stage)
 
     # >>> Go to coordinate widgets <<<
-        # Sub-frame setup
-        sfrm_goto = tk.Frame(self._frm_GoToCoord)            # Hosts the go to coordinate entry
-        sfrm_goto.grid(row=0,column=0)
-        
         # Add the entry boxes
-        self.ent_coor_x = tk.Entry(sfrm_goto)
-        self.ent_coor_y = tk.Entry(sfrm_goto)
-        self.ent_coor_z = tk.Entry(sfrm_goto)
-        
-        # Add the labels
-        lbl_coor_x = tk.Label(sfrm_goto,text='X-coordinate: [μm]')
-        lbl_coor_y = tk.Label(sfrm_goto,text='Y-coordinate: [μm]')
-        lbl_coor_z = tk.Label(sfrm_goto,text='Z-coordinate: [μm]')
-        
-        # Add the go to button
-        btn_goto = tk.Button(sfrm_goto,text='Go to',command=lambda: self._move_go_to(),
-            state='disabled')
-        
-        # Bind: Enter to go to the coordinates
-        self.ent_coor_x.bind('<Return>',lambda event: self._move_go_to())
-        self.ent_coor_y.bind('<Return>',lambda event: self._move_go_to())
-        self.ent_coor_z.bind('<Return>',lambda event: self._move_go_to())
-        
-        # Pack the widgets
-        lbl_coor_x.grid(row=0,column=0)
-        lbl_coor_y.grid(row=1,column=0)
-        lbl_coor_z.grid(row=2,column=0)
-        self.ent_coor_x.grid(row=0, column=1)
-        self.ent_coor_y.grid(row=1, column=1)
-        self.ent_coor_z.grid(row=2, column=1)
-        btn_goto.grid(row=3, column=0, columnspan=2, sticky='ew')
-        
-        # Grid configuration
-        self._frm_GoToCoord.grid_rowconfigure(0,weight=0)
-        self._frm_GoToCoord.grid_rowconfigure(1,weight=0)
-        self._frm_GoToCoord.grid_rowconfigure(2,weight=0)
-        self._frm_GoToCoord.grid_columnconfigure(0,weight=1)
-        
+        self._init_gotocoor_widgets(self._wdg_stage)
+
     # >>> Motor parameter setup widgets <<<
-        # Add the entry boxes, label, and button for the speed parameter setups
-        self.lbl_speed_xy = tk.Label(sfrm_MotorParamSetup,text='XY speed: %')
-        self.lbl_speed_z = tk.Label(sfrm_MotorParamSetup,text='Z speed: %')
-        self.ent_speed_xy = tk.Entry(sfrm_MotorParamSetup,state='disabled')
-        self.ent_speed_z = tk.Entry(sfrm_MotorParamSetup,state='disabled')
-        self.btn_SetSpeed = tk.Button(sfrm_MotorParamSetup,text='Set speed',state='disabled',
-                                      command=lambda: self._set_vel_acc_params())
-        
-        # Bind: Enter to set motor parameters
-        self.ent_speed_xy.bind('<Return>',lambda event: self._set_vel_acc_params())
-        self.ent_speed_z.bind('<Return>',lambda event: self._set_vel_acc_params())
-        
-        # Pack the widgets
-        self.lbl_speed_xy.grid(row=0,column=0)
-        self.lbl_speed_z.grid(row=1,column=0)
-        self.ent_speed_xy.grid(row=0,column=1)
-        self.ent_speed_z.grid(row=1,column=1)
-        self.btn_SetSpeed.grid(row=2,column=0,columnspan=2,sticky='ew')
-        
-        # Add the entry boxes, label, and button for the jogging parameter setup
-        self.lbl_jog_xy = tk.Label(sfrm_MotorParamSetup,text='XY step size: [µm]')
-        self.lbl_jog_z = tk.Label(sfrm_MotorParamSetup,text='Z step size: [µm]')
-        self.ent_jog_xy = tk.Entry(sfrm_MotorParamSetup,state='disabled')
-        self.ent_jog_z = tk.Entry(sfrm_MotorParamSetup,state='disabled')
-        self.btn_SetJog = tk.Button(sfrm_MotorParamSetup,text='Set jog',state='disabled',
-                                   command=lambda: self._set_jog_params())
-        
-        # Bind: Enter to set motor parameters
-        self.ent_jog_xy.bind('<Return>',lambda event: self._set_jog_params())
-        self.ent_jog_z.bind('<Return>',lambda event: self._set_jog_params())
-        
-        # Pack the widgets
-        self.lbl_jog_xy.grid(row=3,column=0)
-        self.lbl_jog_z.grid(row=4,column=0)
-        self.ent_jog_xy.grid(row=3,column=1)
-        self.ent_jog_z.grid(row=4,column=1)
-        self.btn_SetJog.grid(row=5,column=0,columnspan=2,sticky='ew')
-        
-        # Bind the buttons to the jogging method (right click)
-        self.btn_xy_up.bind("<Button-3>", lambda event: self.move_jog('yfwd'))
-        self.btn_xy_down.bind("<Button-3>", lambda event: self.move_jog('yrev'))
-        self.btn_xy_right.bind("<Button-3>", lambda event: self.move_jog('xfwd'))
-        self.btn_xy_left.bind("<Button-3>", lambda event: self.move_jog('xrev'))
-        
-        self.btn_z_up.bind("<Button-3>", lambda event: self.move_jog('zfwd'))
-        self.btn_z_down.bind("<Button-3>", lambda event: self.move_jog('zrev'))
+        self._init_stageparam_widgets(self._wdg_stage)
         
     # >>> Status update <<<
-        self.status_update('Initialising the motion controllers')
+        self.sig_statbar_message.connect(self.status_update)
+        self.sig_statbar_message.emit('Initialising the motion controllers','yellow')
         self._motion_controller_initialisation()
+        self._init_workers()
+        self.video_initialise()
+
+    def _init_stageparam_widgets(self, widget:StageControl):
+        """
+        Initialises the widgets for the motor parameter setup
+
+        Args:
+            widget (StageControl): The widget to add the motor parameter setups to
+        """
+        # Coordinate reporting
+        # > Coordinate reporting
+        self._lbl_coor = widget.lbl_coor_um
         
-        if main: self.initialise_auto_updater()
+        # Add the entry boxes, label, and button for the speed parameter setups
+        self.lbl_speed_xy = widget.lbl_speedxy
+        self.lbl_speed_z = widget.lbl_speedz
+        self.ent_speed_xy = widget.ent_speedxy
+        self.ent_speed_z = widget.ent_speedz
+        
+        # Bind the functions
+        self.ent_speed_xy.returnPressed.connect(lambda: self._set_vel_acc_params())
+        self.ent_speed_z.returnPressed.connect(lambda: self._set_vel_acc_params())
+        
+        # Disable the widgets until the controller is initialised
+        self.ent_speed_xy.setEnabled(False)
+        self.ent_speed_z.setEnabled(False)
+
+        # Add the entry boxes, label, and button for the jogging parameter setup
+        self.lbl_jog_xy = widget.lbl_stepsizexy
+        self.lbl_jog_z = widget.lbl_stepsizez
+        self.ent_jog_xy = widget.ent_stepxy_um
+        self.ent_jog_z = widget.ent_stepz_um
+
+        # Bind the functions
+        self.ent_jog_xy.returnPressed.connect(lambda: self._set_jog_params())
+        self.ent_jog_z.returnPressed.connect(lambda: self._set_jog_params())
+        
+        # Disable the widgets until the controller is initialised
+        self.ent_jog_xy.setEnabled(False)
+        self.ent_jog_z.setEnabled(False)
+
+    def _init_xyz_jog_widgets(self, widget: StageControl):
+        """
+        Initialises the widgets for the jogging configuration
+
+        Args:
+            widget (StageControl): The widget to add the jogging configuration to
+        """
+        self._chkbox_jog_enabled = widget.chk_stepmode
+        self._chkbox_jog_enabled.setChecked(False)  # A flag to check if the jogging is enabled
+
+    def _init_gotocoor_widgets(self, widget:StageControl):
+        """
+        Initialises the widgets for the go to coordinate setup
+
+        Args:
+            widget (StageControl): The widget to add the go to coordinate controls to
+        """
+        self.ent_coor_x = widget.ent_goto_x_um
+        self.ent_coor_y = widget.ent_goto_y_um
+        self.ent_coor_z = widget.ent_goto_z_um
+
+        # Bind: Enter to go to the coordinates
+        self.ent_coor_x.returnPressed.connect(lambda: self._move_go_to())
+        self.ent_coor_y.returnPressed.connect(lambda: self._move_go_to())
+        self.ent_coor_z.returnPressed.connect(lambda: self._move_go_to())
+        
+        # Add the go to button
+        btn_goto = widget.btn_goto
+        btn_goto.released.connect(lambda: self._move_go_to())
+        btn_goto.setEnabled(False)
+
+    def _init_xyz_control_widgets(self, widget:StageControl):
+        """
+        Initialises the widgets for the xyz stage control.
+
+        Args:
+            widget (StageControl): The widget to add the stage control buttons to
+        """
+        # Add the buttons (disabled until controller initialisation)
+        ## Add the buttons for the xy stage
+        self.btn_xy_up = CustomButton('up')
+        self.btn_xy_down = CustomButton('down')
+        self.btn_xy_right= CustomButton('right')
+        self.btn_xy_left = CustomButton('left')
+        
+        # Disable the buttons until the controller is initialised
+        self.btn_xy_up.setEnabled(False)
+        self.btn_xy_down.setEnabled(False)
+        self.btn_xy_right.setEnabled(False)
+        self.btn_xy_left.setEnabled(False)
+        
+        # Bind the functions
+        self.btn_xy_up.set_left_click_function(lambda: self.motion_button_manager('yfwd'))
+        self.btn_xy_down.set_left_click_function(lambda: self.motion_button_manager('yrev'))
+        self.btn_xy_right.set_left_click_function(lambda: self.motion_button_manager('xfwd'))
+        self.btn_xy_left.set_left_click_function(lambda: self.motion_button_manager('xrev'))
+        
+        self.btn_xy_up.set_left_release_function(lambda: self.motion_button_manager('ystop'))
+        self.btn_xy_down.set_left_release_function(lambda: self.motion_button_manager('ystop'))
+        self.btn_xy_right.set_left_release_function(lambda: self.motion_button_manager('xstop'))
+        self.btn_xy_left.set_left_release_function(lambda: self.motion_button_manager('xstop'))
+        
+        self.btn_xy_up.set_right_click_function(lambda: self.move_jog('yfwd'))
+        self.btn_xy_down.set_right_click_function(lambda: self.move_jog('yrev'))
+        self.btn_xy_right.set_right_click_function(lambda: self.move_jog('xfwd'))
+        self.btn_xy_left.set_right_click_function(lambda: self.move_jog('xrev'))
+        
+        # Layout configuration
+        sslyt_xy_move = widget.lyt_xy
+        sslyt_xy_move.addWidget(self.btn_xy_up,0,1)
+        sslyt_xy_move.addWidget(self.btn_xy_left,1,0)
+        sslyt_xy_move.addWidget(self.btn_xy_right,1,2)
+        sslyt_xy_move.addWidget(self.btn_xy_down,2,1)
+        
+        ## Add the buttons for the z stage
+        self.btn_z_up = CustomButton('up')
+        self.btn_z_down = CustomButton('down')
+        self._btn_z_breathing = qw.QPushButton('Breathing')
+        
+        # Disable the buttons until the controller is initialised
+        self.btn_z_up.setEnabled(False)
+        self.btn_z_down.setEnabled(False)
+        self._btn_z_breathing.setEnabled(False)
+        
+        # Bind the functions
+        self.btn_z_up.set_left_click_function(lambda: self.motion_button_manager('zfwd'))
+        self.btn_z_down.set_left_click_function(lambda: self.motion_button_manager('zrev'))
+        self._btn_z_breathing.released.connect(lambda: self._start_breathing_z())
+        
+        self.btn_z_up.set_left_release_function(lambda: self.motion_button_manager('zstop'))
+        self.btn_z_down.set_left_release_function(lambda: self.motion_button_manager('zstop'))
+        
+        self.btn_z_up.set_right_click_function(lambda: self.move_jog('zfwd'))
+        self.btn_z_down.set_right_click_function(lambda: self.move_jog('zrev'))
+        
+        # Layout configuration
+        sslyt_z_move = widget.lyt_z
+        sslyt_z_move.addWidget(self.btn_z_up)
+        sslyt_z_move.addWidget(self.btn_z_down)
+        sslyt_z_move.addStretch(1)
+        sslyt_z_move.addWidget(self._btn_z_breathing)
+        
+        ## Home/Calibration buttons
+        self.btn_xy_home = widget.btn_home_xy
+        self.btn_z_home = widget.btn_home_z
+        
+        self.btn_xy_home.setEnabled(False)
+        self.btn_z_home.setEnabled(False)
+        
+        self.btn_xy_home.released.connect(lambda: self.motion_button_manager('xyhome'))
+        self.btn_z_home.released.connect(lambda: self.motion_button_manager('zhome'))
+        
+    def _init_video_widgets(self, stageHub: DataStreamer_StageCam, wdg_video: BrightfieldController):
+        """
+        Initialises the video widgets and layouts
+
+        Args:
+            stageHub (DataStreamer_StageCam): The stage hub for video streaming
+            wdg_video (BrightfieldController): The widget for the video feed
+        """
+        # > Video
+        lyt = qw.QVBoxLayout()
+        self._lbl_video = ResizableQLabel(min_height=1,parent=wdg_video)    # A label to show the video feed
+
+        wdg_video.wdg_video.setLayout(lyt)
+        lyt.addWidget(self._lbl_video)
+        
+        # > Video controllers
+        self._btn_videotoggle = wdg_video.btn_camera_onoff
+        self._btn_reinit_conn = wdg_video.pushButton_2
+        self._btn_videotoggle.released.connect(lambda: self.video_initialise())
+        # self._btn_reinit_conn.released.connect(lambda: self.reinitialise_connection('camera'))
+        self._btn_reinit_conn.setEnabled(False)
+        self._btn_videotoggle.setStyleSheet('background-color: yellow')
+        self._btn_reinit_conn.setStyleSheet('background-color: yellow')
+        
+        self._chkbox_crosshair = wdg_video.chk_crosshair
+        self._chkbox_scalebar = wdg_video.chk_scalebar
+        self._chkbox_crosshair.setChecked(False)
+        self._chkbox_scalebar.setChecked(True)
+        
+        btn_set_imgproc_gain = wdg_video.btn_setffgain
+        btn_set_flatfield = wdg_video.btn_setff
+        btn_save_flatfield = wdg_video.btn_saveff
+        btn_load_flatfield = wdg_video.btn_loadff
+        btn_set_imgproc_gain.released.connect(lambda: self._set_imageProc_gain())
+        btn_set_flatfield.released.connect(lambda: self._set_flatfield_correction_camera())
+        btn_save_flatfield.released.connect(lambda: self._save_flatfield_correction())
+        btn_load_flatfield.released.connect(lambda: self._load_flatfield_correction())
+        
+        # Video corrections
+        self._dict_vidcorrection = {}
+        self._combo_vidcorrection = wdg_video.combo_image_correction
+        self._combo_vidcorrection.addItems(list(stageHub.Enum_CamCorrectionType.__members__))
+        self._combo_vidcorrection.setCurrentIndex(0)
+        
+    
+    def _init_workers(self):
+        """
+        Initialises the auto-updaters to be used post widget initialisations
+        (ALL THREADS) to prevent the main thread from being blocked
+        """
+        # For the coordinate status bar
+        self._worker_coor_report = Motion_AutoCoorReport_Worker(stageHub=self._stageHub)
+        self._worker_coor_report.sig_coor.connect(self._lbl_coor.setText)
+        
+        self._thread_coor_report = QThread(self)
+        self._worker_coor_report.moveToThread(self._thread_coor_report)
+        
+        self._thread_coor_report.started.connect(self._worker_coor_report.start)
+        self._thread_coor_report.finished.connect(self._worker_coor_report.deleteLater)
+        self._thread_coor_report.finished.connect(self._thread_coor_report.deleteLater)
+        # Defer thread start until after initialization is complete
+        QTimer.singleShot(0, self._thread_coor_report.start)
+        self.destroyed.connect(self._thread_coor_report.quit)
+        
+        # For _worker_get_coordinates_closest_mm
+        self._worker_getcoorclosest = Motion_GetCoordinatesClosest_mm_Worker(stageHub=self._stageHub)
+        self._thread_getcoorclosest = QThread(self)
+        self._worker_getcoorclosest.moveToThread(self._thread_getcoorclosest)
+        self._thread_getcoorclosest.finished.connect(self._worker_getcoorclosest.deleteLater)
+        self._thread_getcoorclosest.finished.connect(self._thread_getcoorclosest.deleteLater)
+        # Defer thread start until after initialization is complete
+        QTimer.singleShot(0, self._thread_getcoorclosest.start)
+        self.destroyed.connect(self._thread_getcoorclosest.quit)
+        
+        # For _worker_go_to_coordinates
+        self._worker_gotocoor = Motion_GoToCoor_Worker(
+            stageHub=self._stageHub,
+            ctrl_xy=self.ctrl_xy,
+            ctrl_z=self.ctrl_z)
+        self._worker_gotocoor.sig_mvmt_started.connect(self._statbar.showMessage)
+        self._sig_go_to_coordinates.connect(self._worker_gotocoor.work)
+        
+        self._thread_gotocoor = QThread(self)
+        self._worker_gotocoor.moveToThread(self._thread_gotocoor)
+        self._thread_gotocoor.finished.connect(self._worker_gotocoor.deleteLater)
+        self._thread_gotocoor.finished.connect(self._thread_gotocoor.deleteLater)
+        # Defer thread start until after initialization is complete
+        QTimer.singleShot(0, self._thread_gotocoor.start)
+        self.destroyed.connect(self._thread_gotocoor.quit)
+        
+        # self.destroyed.connect(self.terminate)
+        
+    def get_goto_worker(self) -> Motion_GoToCoor_Worker:
+        """
+        Returns the worker to command the stage to go to specific coordinates
+
+        Returns:
+            Motion_GoToCoor_Worker: The worker to perform the goto coordinate command.
+        """
+        return self._worker_gotocoor
         
     def _set_imageProc_gain(self):
         """
@@ -362,15 +765,23 @@ class Frm_MotionController(tk.Frame):
         try:
             init_gain = self._stageHub.get_flatfield_gain()
             new_gain = messagebox_request_input(
-                'Set gain',
-                'Set gain for the image processing (not camera gain)',
-                str(init_gain))
+                parent=self,
+                title='Set gain',
+                message='Set gain for the image processing (not camera gain)',
+                default=str(init_gain),
+                validator=validator_float_greaterThanZero,
+                invalid_msg='Gain must be a positive number',
+                loop_until_valid=True,
+            )
+            if new_gain is None:
+                qw.QMessageBox.information(self, 'Gain not set', 'Gain not changed')
+                return
             
             self._stageHub.set_flatfield_gain(float(new_gain))
-            messagebox.showinfo('Gain set','Gain set to {}'.format(self._stageHub.get_flatfield_gain()))
+            qw.QMessageBox.information(self, 'Gain set', 'Gain set to {}'.format(self._stageHub.get_flatfield_gain()))
         except Exception as e:
-            messagebox.showerror('Error','Failed to set gain:\n' + str(e))
-        
+            qw.QMessageBox.critical(self, 'Error', 'Failed to set gain:\n' + str(e))
+            
     def _set_flatfield_correction_camera(self):
         """
         Sets the flatfield correction using the camera's current image
@@ -380,103 +791,110 @@ class Frm_MotionController(tk.Frame):
             img_arr = np.array(img)
             
             self._stageHub.set_flatfield_reference(img_arr)
-            messagebox.showinfo('Flatfield correction','Flatfield correction set to the current camera image')
+            qw.QMessageBox.information(self, 'Flatfield correction', 'Flatfield correction set to the current camera image')
         except Exception as e:
-            messagebox.showerror('Error','Failed to set flatfield correction:\n' + str(e))
+            qw.QMessageBox.critical(self, 'Error', 'Failed to set flatfield correction:\n' + str(e))
             
     def _save_flatfield_correction(self):
         """
         Saves the flatfield correction to a file
         """
         try:
-            filename = filedialog.asksaveasfilename(title='Save flatfield correction file',
-                                                    defaultextension='.npy',
-                                                    filetypes=[('Numpy files', '*.npy'),
-                                                               ('All files', '*.*')])
+            filename = qw.QFileDialog.getSaveFileName(
+                parent=None,
+                caption='Save flatfield correction file',
+                filter='Numpy files (*.npy);;All files (*)',
+            )[0]
             if filename == '': raise ValueError('No file selected')
             self._stageHub.save_flatfield_reference(filename)
         except Exception as e:
-            messagebox.showerror('Error','Failed to save flatfield correction:\n' + str(e))
+            qw.QMessageBox.critical(self, 'Error', 'Failed to save flatfield correction:\n' + str(e))
             
     def _load_flatfield_correction(self):
         """
         Loads the flatfield correction from a file
         """
         try:
-            filename = filedialog.askopenfilename(title='Select flatfield correction file',
-                                                  filetypes=[('Numpy files', '*.npy'),
-                                                                ('All files', '*.*')])
+            filename = qw.QFileDialog.getOpenFileName(
+                parent=None,
+                caption='Select flatfield correction file',
+                filter='Numpy files (*.npy);;All files (*)',
+            )[0]
             if filename == '': raise ValueError('No file selected')
             
             self._stageHub.load_flatfield_reference(filename)
-            messagebox.showinfo('Flatfield correction','Flatfield correction loaded from {}'.format(filename))
+            qw.QMessageBox.information(self, 'Flatfield correction', 'Flatfield correction loaded from {}'.format(filename))
         except Exception as e:
-            messagebox.showerror('Error','Failed to load flatfield correction:\n' + str(e))
-        
+            qw.QMessageBox.critical(self, 'Error', 'Failed to load flatfield correction:\n' + str(e))
+
     def set_camera_exposure(self):
         """
         Sets the camera exposure time in microseconds
         """
+        main_window = self.window()
         if not hasattr(self._camera_ctrl,'set_exposure_time') or not hasattr(self._camera_ctrl,'get_exposure_time'):
-            messagebox.showerror('Error','Camera does not support exposure time setting')
+            qw.QMessageBox.critical(main_window, 'Error', 'Camera does not support exposure time setting')
             return
         try:
             init_exposure_time = self._camera_ctrl.get_exposure_time()
-            new_exposure_time = messagebox_request_input('Set exposure time',
-                                                        'Set exposure time in device unit',
-                                                        str(init_exposure_time))
+            new_exposure_time = messagebox_request_input(
+                parent=main_window,
+                title='Set exposure time',
+                message='Set exposure time in device unit',
+                default=str(init_exposure_time),
+                validator=validator_float_greaterThanZero,
+                invalid_msg='Exposure time must be a positive number',
+                loop_until_valid=True,
+            )
+            if new_exposure_time is None: 
+                qw.QMessageBox.information(main_window, 'Exposure time not set', 'Exposure time not changed')
+                return
             self._camera_ctrl.set_exposure_time(float(new_exposure_time))
-            messagebox.showinfo('Exposure time set','Exposure time set to {} ms'.format(self._camera_ctrl.get_exposure_time()))
+            qw.QMessageBox.information(main_window, 'Exposure time set', 'Exposure time set to {} ms'.format(self._camera_ctrl.get_exposure_time()))
         except Exception as e:
-            messagebox.showerror('Error','Failed to set exposure time:\n' + str(e))
+            qw.QMessageBox.critical(main_window, 'Error', 'Failed to set exposure time:\n' + str(e))
+
+    # @thread_assign
+    # def reinitialise_connection(self,unit:Literal['xy','z','camera']) -> threading.Thread:
+    #     """
+    #     Reinitialises the connection to the stage or camera
         
-    @thread_assign
-    def reinitialise_connection(self,unit:Literal['xy','z','camera']) -> threading.Thread:
-        """
-        Reinitialises the connection to the stage or camera
-        
-        Args:
-            unit (Literal['xy','z','camera']): The unit to reinitialise
+    #     Args:
+    #         unit (Literal['xy','z','camera']): The unit to reinitialise
             
-        Returns:
-            threading.Thread: The thread started
-        """
-        if unit == 'xy':
-            self.ctrl_xy.reinitialise_connection()
-            self.status_update('XY stage re-initialised')
-        elif unit == 'z':
-            self.ctrl_z.reinitialise_connection()
-            self.status_update('Z stage re-initialised')
-        elif unit == 'camera':
-            self._camera_ctrl.reinitialise_connection()
-            self.status_update('Camera re-initialised')
-        else:
-            raise ValueError('Invalid unit for reinitialisation')
+    #     Returns:
+    #         threading.Thread: The thread started
+    #     """
+    #     if unit == 'xy':
+    #         self.ctrl_xy.reinitialise_connection()
+    #         self.signal_statbar_message.emit('XY stage re-initialised', None)
+    #     elif unit == 'z':
+    #         self.ctrl_z.reinitialise_connection()
+    #         self.signal_statbar_message.emit('Z stage re-initialised', None)
+    #     elif unit == 'camera':
+    #         self._camera_ctrl.reinitialise_connection()
+    #         self.signal_statbar_message.emit('Camera re-initialised', None)
+    #     else:
+    #         raise ValueError('Invalid unit for reinitialisation')
         
     def disable_overlays(self):
         """
         Disables the overlays on the video feed
         """
-        self._bool_crosshair.set(False)
-        self._bool_scalebar.set(False)
+        self._chkbox_crosshair.setChecked(False)
+        self._chkbox_scalebar.setChecked(False)
         return
         
-    def initialise_auto_updater(self):
-        """
-        Initialises the auto-updaters to be used post widget initialisations
-        (ALL THREADS) to prevent the main thread from being blocked
-        """
-        self.video_initialise()
-        # For the coordinate status bar
-        threading.Thread(target=self.coordinate_updater, daemon=False).start()
-    
     def video_terminate(self):
         self._flg_isvideorunning = False
         # By turning this flag off, the video autoupdater should automatically terminate, 
         # disconnect from the camera, and resets all the parameters for next use.
         
         # Turn the button back into a camera on button
-        self._btn_videotoggle.configure(text='Turn camera ON',command=lambda: self.video_initialise(),bg='yellow')
+        self._btn_videotoggle.released.disconnect()
+        self._btn_videotoggle.setText('Turn camera ON')
+        self._btn_videotoggle.released.connect(lambda: self.video_initialise())
+        self._btn_videotoggle.setStyleSheet('background-color: yellow')
     
     def video_initialise(self):
         """
@@ -493,41 +911,49 @@ class Frm_MotionController(tk.Frame):
             threading.Thread(target=self.video_update, daemon=True).start()
             
             # Turn the button into a video stop button
-            self._btn_videotoggle.configure(text='Turn camera OFF',command=lambda: self.video_terminate(),bg='red')
+            self._btn_videotoggle.released.disconnect()
+            self._btn_videotoggle.setText('Turn camera OFF')
+            self._btn_videotoggle.released.connect(lambda: self.video_terminate())
+            self._btn_videotoggle.setStyleSheet('background-color: red')
         except Exception as e:
-            print('Video feed cannot start:\n' + e)
+            print(f'Video feed cannot start:\n{e}')
         
-    @thread_assign
-    def _move_breathing_z(self) -> threading.Thread:
+    def _start_breathing_z(self) -> None:
         """
         Moves the z-stage up and down for a few cycles
 
         Returns:
             threading.Thread: The thread started
         """
-        flg_done = threading.Event()
-        self._btn_z_breathing.configure(text='STOP Breathing',command=flg_done.set)
+        # Store references to prevent premature destruction
+        self._breathing_z_worker = Motion_MoveBreathingZ_Worker(self.ctrl_z)
+        self._breathing_z_worker.signal_breathing_finished.connect(self.sig_breathing_stopped)
+        self._breathing_z_thread = QThread(self)
+        self._breathing_z_worker.moveToThread(self._breathing_z_thread)
+        self._breathing_z_thread.started.connect(self._breathing_z_worker.start)
+        self._breathing_z_thread.finished.connect(self._breathing_z_worker.deleteLater)
+
+        # Change the button to a stop button
+        self._btn_z_breathing.released.disconnect()
+        self._btn_z_breathing.setText('STOP Breathing')
+        self._btn_z_breathing.setStyleSheet('background-color: red')
+        self._btn_z_breathing.released.connect(self._breathing_z_worker.stop)
+
+        # Connect the breathing stopped signal to the stop function
+        self._breathing_z_worker.signal_breathing_finished.connect(self._stop_breathing_and_thread)
+
+        self._breathing_z_thread.start()
         
-        try:
-            while True:
-                self.ctrl_z.move_jog('zfwd')
-                time.sleep(0.01)
-                if flg_done.is_set(): break
-                self.ctrl_z.move_jog('zrev')
-                time.sleep(0.01)
-                if flg_done.is_set(): break
-                self.ctrl_z.move_jog('zrev')
-                time.sleep(0.01)
-                if flg_done.is_set(): break
-                self.ctrl_z.move_jog('zfwd')
-                if flg_done.is_set(): break
-        except Exception as e:
-            print('Breathing failed: ' + e)
-        finally:
-            flg_done.set()
-            self._btn_z_breathing.configure(text='Breathing',command=self._move_breathing_z)
+    def _stop_breathing_and_thread(self) -> None:
+        """
+        Stops the breathing thread and resets the button
+        """
+        self._breathing_z_thread.quit()
+        self._btn_z_breathing.released.disconnect()
+        self._btn_z_breathing.setText('Breathing')
+        self._btn_z_breathing.released.connect(self._start_breathing_z)
+        self._btn_z_breathing.setStyleSheet('')
         
-    @thread_assign
     def move_jog(self,dir:str):
         """
         Moves the stage per request from the button presses
@@ -536,18 +962,21 @@ class Frm_MotionController(tk.Frame):
             dir (str): 'yfwd', 'xfwd', 'zfwd', 'yrev', 'xrev', 'zrev'
             as described in self.motion_button_manager
         """
-        def clear_status_bar(self:Frm_MotionController):
-            time.sleep(2)
-            self.status_update()
+        def _move_jog():
+            self.sig_statbar_message.emit(f'Jogging to: {dir}', 'yellow')
             
-        if dir not in ['yfwd','xfwd','zfwd','yrev','xrev','zrev']:
-            self.status_update('Invalid jogging direction','yellow')
-            clear_status_bar(self)
-            return
-        elif dir in ['xfwd','xrev','yfwd','yrev']:
-            self.ctrl_xy.move_jog(dir)
-        elif dir in ['zfwd','zrev']:
-            self.ctrl_z.move_jog(dir)
+            if dir not in ['yfwd','xfwd','zfwd','yrev','xrev','zrev']:
+                raise SyntaxError('move_jog: Invalid direction input')
+            elif dir in ['xfwd','xrev','yfwd','yrev']:
+                self.ctrl_xy.move_jog(dir)
+            elif dir in ['zfwd','zrev']:
+                self.ctrl_z.move_jog(dir)
+                
+            self.sig_statbar_message.emit(None, None)
+            
+        if hasattr(self,'_thread_jog') and self._thread_jog.is_alive(): return
+        self._thread_jog = threading.Thread(target=_move_jog)
+        self._thread_jog.start()
         
     def _update_set_jog_labels(self):
         """
@@ -559,25 +988,25 @@ class Frm_MotionController(tk.Frame):
         jog_x_um = float(jog_x_mm * 10**3)
         jog_y_um = float(jog_y_mm * 10**3)
         if jog_x_um!=jog_y_um:
-            self.status_update('Jogging parameters XY are not the same','yellow')
+            self.sig_statbar_message.emit('Jogging parameters XY are not the same','yellow')
             print('Jogging parameters XY are not the same. Jog x: {:.1f}µm Jog y: {:.1f}µm'.format(jog_x_mm,jog_y_mm))
         jog_xy_um = jog_x_um
         jog_z_um = float(jog_z_mm * 10**3)
-        
-        self.after(10,self.lbl_jog_xy.configure(text='XY step size: {:.1f}µm'.format(jog_xy_um)))
-        self.after(10,self.lbl_jog_z.configure(text='Z step size: {:.1f}µm'.format(jog_z_um)))
-        
+
+        self.lbl_jog_xy.setText(f'{jog_xy_um:.1f}')
+        self.lbl_jog_z.setText(f'{jog_z_um:.1f}')
+
     def _set_jog_params(self):
         """
         Sets the motors jogging parameters according to the widget entries in [µm]
         """
         # Convert it to mm for the controller
-        jog_xy_ent = self.ent_jog_xy.get()
+        jog_xy_ent = self.ent_jog_xy.text()
         if jog_xy_ent != '': 
             jog_xy_mm = float(jog_xy_ent)*10**-3
             self.ctrl_xy.set_jog(dist_mm=jog_xy_mm)
         
-        jog_z_ent = self.ent_jog_z.get()
+        jog_z_ent = self.ent_jog_z.text()
         if jog_z_ent != '':
             jog_z_mm = float(jog_z_ent)*10**-3
             self.ctrl_z.set_jog(dist_mm=jog_z_mm)
@@ -595,9 +1024,9 @@ class Frm_MotionController(tk.Frame):
         z_speed = float(z_speed)
         
         if isinstance(xy_speed,float) and isinstance(z_speed,float):
-            self.after(10,self.lbl_speed_xy.configure(text='XY speed: {:.2f}%'.format(xy_speed)))
-            self.after(10,self.lbl_speed_z.configure(text='Z speed: {:.2f}%'.format(z_speed)))
-        
+            self.lbl_speed_xy.setText(f'{xy_speed:.2f}')
+            self.lbl_speed_z.setText(f'{z_speed:.2f}')
+
     def get_controller_identifiers(self) -> tuple:
         """
         Returns the controller identifiers for the camera, xy-stage, and z-stage
@@ -658,17 +1087,18 @@ class Frm_MotionController(tk.Frame):
             float: The velocity in percentage, relative to the device's maximum velocity
         """
         return self.ctrl_xy.calculate_vel_relative(vel_xy_mmPerSec)
-        
-    def set_vel_relative(self,vel_xy:float=None,vel_z:float=None):
+    
+    @Slot(float,float,threading.Event)
+    def set_vel_relative(self,vel_xy:float=-1.0,vel_z:float=-1.0,event_finish:threading.Event|None=None):
         """
         Sets the velocity parameters for the motors
         
         Args:
-            vel_xy (float, optional): Velocity (percentage) for the xy-stage. Must be between 0[%] and 100[%]. Defaults to None.
-            vel_z (float, optional): Velocity (percentage) for the z-stage. Must be between 0[%] and 100[%]. Defaults to None.
+            vel_xy (float, optional): Velocity (percentage) for the xy-stage. Must be between 0[%] and 100[%]. If -1, uses the current velocity. Defaults to None.
+            vel_z (float, optional): Velocity (percentage) for the z-stage. Must be between 0[%] and 100[%]. If -1, uses the current velocity. Defaults to None.
         """
-        if isinstance(vel_xy,type(None)): vel_xy = self.ctrl_xy.get_vel_acc_relative()[1]
-        if isinstance(vel_z,type(None)): vel_z = self.ctrl_z.get_vel_acc_relative()[1]
+        if vel_xy <= 0.0 or vel_xy > 100.0: vel_xy = self.ctrl_xy.get_vel_acc_relative()[1]
+        if vel_z <= 0.0 or vel_z > 100.0: vel_z = self.ctrl_z.get_vel_acc_relative()[1]
         
         assert isinstance(vel_xy,(float,int)) and isinstance(vel_z,(float,int)), 'Invalid input type for the velocity parameters'
         
@@ -678,7 +1108,9 @@ class Frm_MotionController(tk.Frame):
         speed_xy = self.ctrl_xy.get_vel_acc_relative()[1]
         speed_z = self.ctrl_z.get_vel_acc_relative()[1]
         
-        self.after(10,self._update_set_vel_labels())
+        if isinstance(event_finish,threading.Event): event_finish.set()
+        
+        self._update_set_vel_labels()
         
     def _set_vel_acc_params(self):
         """
@@ -686,12 +1118,12 @@ class Frm_MotionController(tk.Frame):
         """
         def clear_status():
             time.sleep(2)
-            self.status_update()
+            self.sig_statbar_message.emit('Motor parameters have been set', 'green')
             
         try:
-            speed_xy = self.ent_speed_xy.get()
-            speed_z = self.ent_speed_z.get()
-            
+            speed_xy = self.ent_speed_xy.text()
+            speed_z = self.ent_speed_z.text()
+
             if speed_xy == '':
                 speed_xy = self.ctrl_xy.get_vel_acc_relative()[1]
             if speed_z == '':
@@ -703,49 +1135,36 @@ class Frm_MotionController(tk.Frame):
             self.ctrl_xy.set_vel_acc_relative(vel_homing=speed_xy,vel_move=speed_xy)
             self.ctrl_z.set_vel_acc_relative(vel_homing=speed_z,vel_move=speed_z)
             
-            self.after(10,self.status_update('Motor parameters have been set','green'))
+            self.sig_statbar_message.emit('Motor parameters have been set', 'green')
         except:
-            self.after(10,self.status_update('Invalid input for the motor parameters','yellow'))
-            
-        self.after(10,self._update_set_vel_labels())
+            self.sig_statbar_message.emit('Invalid input for the motor parameters', 'yellow')
+        finally:
+            self._update_set_vel_labels()
         
     def _move_go_to(self):
         """
         Moves the stage to specific coordinates using the coordinates given in the entry boxes
         """
-        coor_x_um = self.ent_coor_x.get()
-        coor_y_um = self.ent_coor_y.get()
-        coor_z_um = self.ent_coor_z.get()
+        coor_x_um_str = self.ent_coor_x.text()
+        coor_y_um_str = self.ent_coor_y.text()
+        coor_z_um_str = self.ent_coor_z.text()
         
-        coor_x_current,coor_y_current = self.ctrl_xy.get_coordinates()
-        coor_z_current = self.ctrl_z.get_coordinates()
+        coor_x_current_mm,coor_y_current_mm = self.ctrl_xy.get_coordinates()
+        coor_z_current_mm = self.ctrl_z.get_coordinates()
         
-        if coor_x_um == '':
-            coor_x_um = coor_x_current
-        if coor_y_um == '':
-            coor_y_um = coor_y_current
-        if coor_z_um == '':
-            coor_z_um = coor_z_current
+        try: coor_x_mm = float(coor_x_um_str)/1e3
+        except: coor_x_mm = coor_x_current_mm
+        try: coor_y_mm = float(coor_y_um_str)/1e3
+        except: coor_y_mm = coor_y_current_mm
+        try: coor_z_mm = float(coor_z_um_str)/1e3
+        except: coor_z_mm = coor_z_current_mm
         
-        coor_x_mm = float(coor_x_um)/1e3
-        coor_y_mm = float(coor_y_um)/1e3
-        coor_z_mm = float(coor_z_um)/1e3
-        
-        threading.Thread(target=self.go_to_coordinates,args=[coor_x_mm,coor_y_mm,coor_z_mm]).start()
+        self.go_to_coordinates(coor_x_mm,coor_y_mm,coor_z_mm)
         
         # Empty the entry boxes
-        self.ent_coor_x.delete(0,tk.END)
-        self.ent_coor_y.delete(0,tk.END)
-        self.ent_coor_z.delete(0,tk.END)
-    
-    def isontarget_gotocoor(self) -> bool:
-        """
-        Returns the status of the target reached for the go to coordinates
-        
-        Returns:
-            bool: True if the target is reached, False otherwise
-        """
-        return self._flg_ontarget_gotocoor.is_set()
+        self.ent_coor_x.setText('')
+        self.ent_coor_y.setText('')
+        self.ent_coor_z.setText('')
         
     def check_coordinates(self,coor_mm:tuple[float,float,float]) -> bool:
         """
@@ -761,81 +1180,33 @@ class Frm_MotionController(tk.Frame):
         pass
         return True
     
-    def go_to_coordinates(self,coor_x_mm = None, coor_y_mm = None, coor_z_mm = None, override_controls:bool=False, timeout=10.0):
+    @Slot(tuple,bool,threading.Event)
+    def go_to_coordinates(
+        self,
+        coors_mm:tuple[float|None,float|None,float|None]=(None,None,None),
+        override_controls:bool=False,
+        event_finish:threading.Event|None=None):
         """
-        Moves the stage to specific coordinates, except if None is provided
+        Moves the stage to specific coordinates, except if None is provided. (Asynchronous)
 
         Args:
-            coor_x (Decimal, optional): x-channel xy-stage coordinate. Defaults to None.
-            coor_y (Decimal, optional): y-channel xy-stage coordinate. Defaults to None.
-            coor_z (Decimal, optional): z-stage coordinate. Defaults to None.
-            override_controls (bool, optional): If True, does not automatically disable/enable the controls. Defaults to False.
-            timeout (float, optional): Timeout in seconds. Defaults to 10.0.
+            coors_mm (tuple[float|None,float|None,float|None], optional): A tuple of x, y, and z coordinates in mm to move to. If None
+            override_controls (bool, optional): If True, does not disable/enable the controls. Defaults to False.
+            event_finish (threading.Event, optional): An event to set when the movement is finished. Defaults to None.
             
         Raises:
             TimeoutError: If the stage does not move within the timeout
         """
-        def wait_for_target():
-            """
-            Waits for the target to be reached, the coordinate doesn't update within the timeout, raises a TimeoutError
-                
-            Raises:
-                TimeoutError: If the target is not reached within the timeout
-            """
-            nonlocal self,thread_xy_move,thread_z_move,timeout
-            
-            start_time = time.time()
-            coor = self._current_coor.copy()
-            while True:
-                if thread_xy_move.is_alive() or thread_z_move.is_alive():
-                    thread_xy_move.join(timeout=0.1)
-                    thread_z_move.join(timeout=0.1)
-                else:
-                    self._flg_ontarget_gotocoor.set()
-                    break
-                
-                if time.time() - start_time > timeout:
-                    raise TimeoutError('Timeout waiting for the target to be reached')
-                
-                coor_new = self._current_coor.copy()
-                # Resets the timer if the coordinates are not the same
-                if np.allclose(coor,coor_new,atol=0.001): start_time = time.time()
-                coor = coor_new
+        coor_x_mm,coor_y_mm,coor_z_mm = coors_mm
+        if not override_controls: self.disable_widgets()
+        self._sig_go_to_coordinates.emit((coor_x_mm,coor_y_mm,coor_z_mm), event_finish)
         
-        if not override_controls: self.disable_controls()
-        
-        # If None is provided, assign the current coordinates (i.e., do not move)
-        if any([coor_x_mm is None,coor_y_mm is None,coor_z_mm is None]):
-            coor_x_current,coor_y_current,coor_z_current = self.get_coordinates_closest_mm()
-            if coor_x_mm is None:
-                coor_x_mm = coor_x_current
-            if coor_y_mm is None:
-                coor_y_mm = coor_y_current
-            if coor_z_mm is None:
-                coor_z_mm = coor_z_current
-        
-        # Let the user know that it's currently moving
-        self.status_update('Going to: {:.3f}X {:.3f}Y {:.3f}Z'
-                           .format(coor_x_mm,coor_y_mm,coor_z_mm),bg_colour='yellow')
-        
-        # Add a check
-        self._flg_ontarget_gotocoor.clear()
-        
-        # Operate both stages at once
-        thread_xy_move = threading.Thread(target=self.ctrl_xy.move_direct,args=((coor_x_mm,coor_y_mm),))
-        thread_z_move = threading.Thread(target=self.ctrl_z.move_direct,args=(coor_z_mm,))
-        
-        thread_xy_move.start()
-        thread_z_move.start()
-        
-        wait_for_target()
-        
-        if not override_controls: self.enable_controls()
+        if not override_controls: self.enable_widgets()
         
         # Resets the statusbar, let the user know that it's done moving
-        self.status_update()
-        
-    def get_coordinates_closest_mm(self) -> tuple[float,float,float]:
+        self.sig_statbar_message.emit('Stage movement complete', None)
+
+    def get_coordinates_closest_mm(self) -> tuple[float|None,float|None,float|None]:
         """
         Returns the current coordinate of both channels x, y, and z of the stages.
 
@@ -845,20 +1216,13 @@ class Frm_MotionController(tk.Frame):
         timestamp_req = get_timestamp_us_int()
         result = self._stageHub.get_coordinates_closest(timestamp_req)
         
-        if result is None: return None
+        if result is None: return (None,None,None)
         coor_x,coor_y,coor_z = result
         
         self._current_coor = np.array([coor_x,coor_y,coor_z])
         
-        # list_coor = result[1]
-        # coor_x,coor_y,coor_z = list_coor[-1][0],list_coor[-1][1],list_coor[-1][2]
-        
-        # coor_x,coor_y = self.ctrl_xy.get_coordinates()
-        # coor_z = self.ctrl_z.get_coordinates()
-        
         return coor_x,coor_y,coor_z
     
-    @thread_assign
     def motion_button_manager(self,dir):
         """
         Moves the stage per request from the button presses and releases.
@@ -870,20 +1234,34 @@ class Frm_MotionController(tk.Frame):
             'xyhome' and 'zhome' are for calibrating and homing the xy and z stage respectively.
             Note that 'xstop' and 'ystop' will stop both x and y motors.
         """
-        if self._bool_jog_enabled.get(): self.move_jog(dir); return
+        if self._chkbox_jog_enabled.isChecked(): self.move_jog(dir); return
         
-        if dir in ['yfwd','xfwd','yrev','xrev']:
-            self.ctrl_xy.move_continuous(dir)
-        elif dir in ['zfwd','zrev']:
-            self.ctrl_z.move_continuous(dir)
-        elif dir in ['xstop','ystop']:
-            self.ctrl_xy.stop_move()
-        elif dir == 'zstop':
-            self.ctrl_z.stop_move()
-        elif dir == 'xyhome':
-            self.ctrl_xy.homing_n_coor_calibration()
-        elif dir == 'zhome':
-            self.ctrl_z.homing_n_coor_calibration()
+        def _move():
+            if dir not in ['yfwd','xfwd','zfwd','yrev','xrev','zrev','xyhome','zhome']:
+                self.sig_statbar_message.emit(f'Moving: {dir}', 'yellow')
+            elif dir in ['xstop','ystop','zstop']:
+                self.sig_statbar_message.emit(f'Stopping: {dir}', None)
+            
+            if dir in ['yfwd','xfwd','yrev','xrev']:
+                self.ctrl_xy.move_continuous(dir)
+            elif dir in ['zfwd','zrev']:
+                self.ctrl_z.move_continuous(dir)
+            elif dir in ['xstop','ystop']:
+                self.ctrl_xy.stop_move()
+            elif dir == 'zstop':
+                self.ctrl_z.stop_move()
+            elif dir == 'xyhome':
+                self.ctrl_xy.homing_n_coor_calibration()
+            elif dir == 'zhome':
+                self.ctrl_z.homing_n_coor_calibration()
+            else: raise SyntaxError('motion_button_manager: Invalid direction input')
+            
+            self.sig_statbar_message.emit(None, None)
+            
+        if hasattr(self,'_thread_move') and self._thread_move.is_alive(): return
+        
+        self._thread_move = threading.Thread(target=_move)
+        self._thread_move.start()
     
     def _motion_controller_initialisation(self):
         """
@@ -892,31 +1270,24 @@ class Frm_MotionController(tk.Frame):
         # Re-enables the controls
         self._update_set_vel_labels()
         self._update_set_jog_labels()
-        self.enable_controls()
+        self.enable_widgets()
         
-    def disable_controls(self):
+    def disable_widgets(self):
         """
-        Disables all stage controls
+        Disables all stage control widgets
         """
-        all_widgets = get_all_widgets(self._frm_mctrl)
-        all_widgets.extend(get_all_widgets(self._frm_GoToCoord))
-        for button in all_widgets:
-            if isinstance(button,tk.Button):
-                self.after(10,button.configure(state='disabled'))
+        all_widgets = get_all_widgets(self._wdg_stage)
+        [widget.setEnabled(False) for widget in all_widgets if isinstance(widget,(qw.QPushButton,qw.QLineEdit))]
         
-    def enable_controls(self):
+    def enable_widgets(self):
         """
-        Enables all stage controls"""
-        all_widgets = get_all_widgets(self._frm_mctrl)
-        all_widgets.extend(get_all_widgets(self._frm_GoToCoord))
-        for widget in all_widgets:
-            if isinstance(widget,tk.Button):
-                self.after(10,widget.configure(state='active'))
-            if isinstance(widget,tk.Entry):
-                self.after(10,widget.configure(state='normal'))
+        Enables all stage control widgets
+        """
+        all_widgets = get_all_widgets(self._wdg_stage)
+        [widget.setEnabled(True) for widget in all_widgets if isinstance(widget,(qw.QPushButton,qw.QLineEdit))]
         
         # Updates the statusbar
-        self.status_update('Motion controller ready')
+        self.sig_statbar_message.emit('Stage controller ready', None)
 
     def get_current_image(self, wait_newimage:bool=False) -> Image.Image|None:
         """
@@ -930,6 +1301,17 @@ class Frm_MotionController(tk.Frame):
             self._flg_isNewFrmReady.clear()
             self._flg_isNewFrmReady.wait()
         return self._currentImage
+    
+    def get_image_shape(self) -> tuple[int,int]|None:
+        """
+        Returns the shape of the current image in (width, height)
+
+        Returns:
+            tuple[int,int]|None: The shape of the current image in (width, height) or None if no image is available
+        """
+        if isinstance(self._currentImage,Image.Image):
+            return self._currentImage.size
+        return None
     
     def _overlay_scalebar(self,img:Image.Image) -> Image.Image:
         """
@@ -970,8 +1352,8 @@ class Frm_MotionController(tk.Frame):
                    (img.size[0]-line_offset, img.size[1]-line_offset)],
                   fill=(255,255,255), width=line_width)
         
-        text_params = {'text':'{:.0f} µm'.format(length_mm*1e3),
-                'font':ImageFont.truetype(font,font_size)}
+        try: text_params = {'text':'{:.0f} µm'.format(abs(length_mm*1e3)), 'font':ImageFont.truetype(font,font_size)}
+        except Exception: raise ValueError('Scalebar font file not found. Please check the font path in the configuration.')
         
         text_length = draw.textlength(**text_params)
         
@@ -995,7 +1377,6 @@ class Frm_MotionController(tk.Frame):
             return img
         
         # Initialise the camera controller and grabs the first image
-        self._camera_ctrl = self._stageHub.get_camera_controller()
         if not self._camera_ctrl.get_initialisation_status(): self._camera_ctrl.__init__()
         self._currentFrame = None            # Empties the current frame
         
@@ -1005,26 +1386,26 @@ class Frm_MotionController(tk.Frame):
             try:
                 time1 = time.time()
                 # Triggers the frame capture from the camera
-                request = self._combo_vidcorrection.get()
+                request = self._combo_vidcorrection.currentText()
                 
                 if self._stageHub.Enum_CamCorrectionType[request] == self._stageHub.Enum_CamCorrectionType.RAW:
                     img = self._camera_ctrl.img_capture()
                 else:
                     img:Image.Image = self._stageHub.get_image(request=self._stageHub.Enum_CamCorrectionType[request])
-                video_width = int(img.size[1]/img.size[0]*self._video_height)
+                # video_width = int(img.size[1]/img.size[0]*self._video_height)
                 
                 # Add a scalebar to it
-                img = self._overlay_scalebar(img) if self._bool_scalebar.get() else img
+                img = self._overlay_scalebar(img) if self._chkbox_scalebar.isChecked() else img
                 
                 # Overlay a crosshair if requested
-                if self._bool_crosshair.get(): img = draw_crosshair(img)
-                new_frame = ImageTk.PhotoImage(img.resize([self._video_height,video_width],Image.LANCZOS))
+                if self._chkbox_crosshair.isChecked(): img = draw_crosshair(img)
+                new_frame:QPixmap = ImageQt.toqpixmap(img)
                 
                 # Update the image in the app window
                 # Only update if the frame is different. Sometimes the program isn't done taking the new image.
                 # In this case, it skips the frame update
                 if self._currentFrame != new_frame:
-                    self._lbl_video.configure(image=new_frame)
+                    self._lbl_video.setPixmap(new_frame)
                     self._currentFrame = new_frame
                     self._currentImage = img
                 
@@ -1034,28 +1415,8 @@ class Frm_MotionController(tk.Frame):
                 if time_elapsed < 1/AppVideoEnum.VIDEOFEED_REFRESH_RATE.value:
                     time.sleep(1/AppVideoEnum.VIDEOFEED_REFRESH_RATE.value - time_elapsed)
             except Exception as e: print(f'Video feed failed: {e}'); time.sleep(0.02)
-        
-        # # Once done, terminate the camera and resets the self.videocapture instance
-        # self._camera_ctrl.camera_termination()
-        
-    def coordinate_updater(self):
-        while True:
-            # try:
-                # Get the coordinates
-                res = self.get_coordinates_closest_mm()
-                if res is None: continue
-                coor_x,coor_y,coor_z = res
-                coor_x_um = float(coor_x) * 1e3
-                coor_y_um = float(coor_y) * 1e3
-                coor_z_um = float(coor_z) * 1e3
-                self._lbl_coor.configure(text='x,y,z: {:.1f}, {:.1f}, {:.1f} µm'
-                                        .format(coor_x_um,coor_y_um,coor_z_um))
-                time.sleep(1/AppPlotEnum.DISPLAY_COORDINATE_REFRESH_RATE.value)
-            # except Exception as e:
-            #     print(f'Coordinate updater failed: {e}')
-            #     time.sleep(0.005)
     
-    @thread_assign
+    @Slot(str,str)
     def status_update(self,message=None,bg_colour=None):
         """
         To update the status bar at the bottom
@@ -1064,14 +1425,13 @@ class Frm_MotionController(tk.Frame):
             message (str, optional): The update message. Defualts to None
             bg_colour (str, optional): Background colour. Defaults to 'default'.
         """
-        if not bg_colour:
-            bg_colour = self._bg_colour
+        if not message: message = 'Motion controller ready'
         
-        if not message:
-            message = 'Motion controller ready'
-        
-        try: self.after(10,self._statbar.configure(text=message,background=bg_colour))
-        except Exception as e: pass
+        try:
+            self._statbar.showMessage(message)
+            self._statbar.setStyleSheet(f"background-color: {bg_colour}") if bg_colour is not None else self._statbar.setStyleSheet("")
+        except Exception as e:
+            print(f'Status bar update failed: {e}')
         
     def terminate(self):
         """
@@ -1082,26 +1442,23 @@ class Frm_MotionController(tk.Frame):
         self.ctrl_xy.terminate()
         self.ctrl_z.terminate()
         self._camera_ctrl.camera_termination()
-        self.quit()
 
-def generate_dummy_motion_controller(parent:tk.Tk|tk.Frame) -> Frm_MotionController:
+def generate_dummy_motion_controller(parent:qw.QWidget) -> Wdg_MotionController:
     """
     Generates a dummy motion controller for testing purposes.
     
     Args:
-        parent (tk.Tk|tk.Frame): The parent Tkinter widget to attach the motion controller to.
+        parent (qw.QWidget): The parent QWidget to attach the motion controller to.
     
     Returns:
         Frm_MotionController: The dummy motion controller
     """
-    from iris.gui.motion_video import Frm_MotionController
-    from iris.gui.motion_video import get_my_manager, initialise_manager_stage, initialise_proxy_stage
     from iris.multiprocessing.dataStreamer_StageCam import generate_dummy_stageHub
     
     stagehub, xyproxy, zproxy, camproxy, stage_namespace = generate_dummy_stageHub()
     stagehub.start()
 
-    frm_motion = Frm_MotionController(
+    frm_motion = Wdg_MotionController(
         parent=parent,
         xy_controller=xyproxy,
         z_controller=zproxy,
@@ -1109,23 +1466,38 @@ def generate_dummy_motion_controller(parent:tk.Tk|tk.Frame) -> Frm_MotionControl
         getter_imgcal=lambda: None
     )
     
-    frm_motion.initialise_auto_updater()
-    
     return frm_motion
 
 if __name__ == '__main__':
-    import tkinter as tk
-    from iris.gui.motion_video import generate_dummy_motion_controller
+    # Initialize the PySide6 application
+    app = qw.QApplication([])
+    root = qw.QMainWindow()
+    root.setWindowTitle('Dummy Motion Controller')
     
-    root = tk.Tk()
-    root.title('Dummy Motion Controller')
+    # Create a central widget for the main window
+    central_widget = qw.QWidget()
+    root.setCentralWidget(central_widget)
+    
+    # Create a layout for the central widget
+    layout = qw.QVBoxLayout(central_widget)
     
     # Create a dummy motion controller for testing
-    frm_motion = generate_dummy_motion_controller(root)
-    frm_motion.pack(fill=tk.BOTH, expand=True)
+    frm_motion = generate_dummy_motion_controller(central_widget)
     
-    # Start the Tkinter main loop
-    frm_motion.mainloop()
+    # Add the motion controller widget to the layout
+    layout.addWidget(frm_motion)
     
-    # Terminate the motion controller
+    # Set the size policy to allow the widget to expand
+    frm_motion.setSizePolicy(
+        qw.QSizePolicy.Policy.Expanding,
+        qw.QSizePolicy.Policy.Expanding
+    )
+    
+    # Show the main window
+    root.show()
+    
+    # Start the PySide6 application event loop
+    app.exec()
+    
+    # Terminate the motion controller after the application closes
     frm_motion.terminate()
