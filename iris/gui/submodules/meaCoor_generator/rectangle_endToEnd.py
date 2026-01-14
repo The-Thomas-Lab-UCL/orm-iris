@@ -15,7 +15,6 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
 
 from iris.gui.motion_video import Wdg_MotionController
-from iris.utils.general import *
 
 from iris.resources.coordinate_generators.rect_startend_ui import Ui_meaCoor_Rect_StartEnd
 

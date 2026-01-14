@@ -17,14 +17,12 @@ import numpy as np
 from PIL.Image import Image
 
 from iris.gui.motion_video import Wdg_MotionController
-from iris.utils.general import *
 
-from iris.data.calibration_objective import ImgMea_Cal, ImgMea_Cal_Hub
-from iris.data.measurement_image import MeaImg_Unit, MeaImg_Handler
+from iris.data.calibration_objective import ImgMea_Cal
+from iris.data.measurement_image import MeaImg_Unit
 from iris.gui.image_calibration.Canvas_ROIdefinition import Canvas_Image_Annotations
 from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image
 
-from iris.data import SaveParamsEnum
 from iris.gui import AppPlotEnum
 
 from iris.resources.coordinate_generators.rect_image_ui import Ui_Rect_Image

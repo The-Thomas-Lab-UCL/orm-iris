@@ -40,6 +40,16 @@ thorlabs = [
     "pythonnet~=3.0.3"
 ]
 
+docs = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.1",
+    "mkdocstrings[python]>=1.0.0",
+    "mkdocs-gen-files>=0.6.0",
+    "mkdocs-literate-nav>=0.6.2",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["iris*"]
+
+[docs]

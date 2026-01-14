@@ -7,8 +7,6 @@ from PySide6.QtCore import Signal, Slot, QTimer, QCoreApplication, Qt, QObject, 
 import matplotlib
 import matplotlib.backend_bases
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-from matplotlib.axes import Axes
 matplotlib.use('Agg')   # Force matplotlib to use the backend to prevent memory leak
 
 import threading
@@ -22,7 +20,7 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.utils.general import *
+from iris.utils.general import thread_assign, get_all_widgets_from_layout
 from iris.data.measurement_RamanMap import MeaRMap_Hub,MeaRMap_Unit, MeaRMap_Plotter, PlotterOptions, PlotterParams, PlotterExtraParamsBase
 
 from iris.resources.heatmap_plotter_ui import Ui_HeatmapPlotter

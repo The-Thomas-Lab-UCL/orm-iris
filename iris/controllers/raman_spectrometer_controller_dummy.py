@@ -24,7 +24,7 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
     
 
-from iris.utils.general import *
+from iris.utils.general import get_timestamp_us_int
 
 from iris.controllers.class_spectrometer_controller import Class_SpectrometerController
 
@@ -40,7 +40,7 @@ class SpectrometerController_Dummy(Class_SpectrometerController):
         self.dev_serial = None  # device serial number
         
         # Aquisition related parameters
-        self.integration_time_us = 500e3        # int: Stores the spectrometer's integration time [microsec]
+        self.integration_time_us = int(500e3)   # int: Stores the spectrometer's integration time [microsec]
         self.integration_time_min = 10*1e3      # int: Stores the spectrometer's minimum allowable integration time [microsec]
         self.integration_time_max = 10000*1e3   # int: Stores the spectrometer's maximum allowable integration time [microsec]
         self.integration_time_inc = 25*1e3      # int: Stores the spectrometer's allowable integration time increment [microsec]
@@ -199,14 +199,14 @@ class SpectrometerController_Dummy(Class_SpectrometerController):
         
         return (spectra,timestamp,self.integration_time_us)
     
-    def get_integration_time_us(self):
+    def get_integration_time_us(self) -> int:
         """
         Returns the integration time of the device in [microsec]
 
         Returns:
-            int: Integration time in [microsec]
+            int|float: Integration time in [microsec]
         """
-        return self.integration_time_us
+        return int(self.integration_time_us)
     
     def get_integration_time_limits_us(self):
         """
@@ -217,7 +217,7 @@ class SpectrometerController_Dummy(Class_SpectrometerController):
         """
         return (self.integration_time_min, self.integration_time_max, self.integration_time_inc)
     
-    def set_integration_time_us(self,integration_time):
+    def set_integration_time_us(self,integration_time:int) -> int:
         """
         Sets the integration time of the device
 
@@ -227,6 +227,7 @@ class SpectrometerController_Dummy(Class_SpectrometerController):
         Returns:
             int: Device integrationt time after set up
         """
+        if not isinstance(integration_time,int): raise ValueError("Integration time must be an integer")
         self.integration_time_us = integration_time
         return self.integration_time_us
         
@@ -257,7 +258,7 @@ class dummy_spectrometer():
 
 if __name__ == '__main__':
     r_spec = SpectrometerController_Dummy()
-    r_spec.set_integration_time_us(250e3)
+    r_spec.set_integration_time_us(int(250e3))
     
     print(r_spec.get_integration_time_us())
     

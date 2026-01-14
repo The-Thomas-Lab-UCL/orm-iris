@@ -31,9 +31,6 @@ if __name__ == '__main__':
     import os
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
-    
-
-from iris.utils.general import *
 
 from iris.controllers import ControllerSpecificConfigEnum
 from iris import DataAnalysisConfigEnum

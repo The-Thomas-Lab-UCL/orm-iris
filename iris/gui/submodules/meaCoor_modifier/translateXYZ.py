@@ -4,9 +4,8 @@ the coordinates in the X, Y and Z direction.
 """
 
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QTimer, QThread, QObject
+from PySide6.QtCore import Signal, Slot, QThread, QObject
 
-from typing import Literal
 import threading
 from enum import Enum
 
@@ -19,7 +18,7 @@ if __name__ == '__main__':
 from iris.gui.motion_video import Wdg_MotionController
 from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 
-from iris.utils.general import *
+from iris.utils.general import messagebox_request_input, thread_assign
 
 from iris.resources.coordinate_modifiers.translator_xyz_ui import Ui_translator_xyz
 

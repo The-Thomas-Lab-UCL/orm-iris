@@ -9,6 +9,7 @@ import PySide6.QtWidgets as qw
 from PySide6.QtCore import Signal, Slot, QObject, QThread
 
 from PIL import Image
+import threading
 import numpy as np
 
 from copy import deepcopy
@@ -21,7 +22,7 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.utils.general import *
+from iris.utils.general import get_timestamp_us_str
 
 from iris.gui.motion_video import Wdg_MotionController
 from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal

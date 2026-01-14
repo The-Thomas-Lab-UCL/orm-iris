@@ -27,7 +27,7 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
 
 
-from iris.utils.general import *
+from iris.utils.general import convert_timestamp_us_int_to_str, get_timestamp_us_int, get_all_widgets
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.data.measurement_Raman import MeaRaman, MeaRaman_Plotter
 from iris.multiprocessing.dataStreamer_Raman import DataStreamer_Raman, initialise_manager_raman, initialise_proxy_raman

@@ -20,7 +20,7 @@ from PIL import Image
 import multiprocessing.pool as mpp
 import threading
 
-from iris.utils.general import *
+from iris.utils.general import get_timestamp_us_str, get_timestamp_sec, get_all_widgets_from_layout
 
 from iris.data.measurement_image import MeaImg_Unit, MeaImg_Handler
 from iris.data.calibration_objective import ImgMea_Cal

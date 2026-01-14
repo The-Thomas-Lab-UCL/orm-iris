@@ -33,7 +33,7 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
     
 
-from iris.utils.general import *
+from iris.utils.general import convert_timestamp_us_int_to_str, get_timestamp_us_int
 from iris.controllers.class_spectrometer_controller import Class_SpectrometerController
 
 from iris import DataAnalysisConfigEnum

@@ -8,10 +8,8 @@ import PySide6.QtWidgets as qw
 from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication
 
 import os
-from typing import Any, Callable
+from typing import Any
 
-import queue
-import threading
 
 from fuzzywuzzy import fuzz, process
 import bisect
@@ -22,7 +20,7 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.utils.general import *
+from iris.utils.general import messagebox_request_input, get_timestamp_us_str, get_all_widgets_from_layout
 from iris.data.measurement_Raman import MeaRaman
 from iris.data.measurement_RamanMap import MeaRMap_Hub, MeaRMap_Unit, MeaRMap_Handler
 

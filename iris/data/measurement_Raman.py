@@ -44,7 +44,7 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
 
 
-from iris.utils.general import *
+from iris.utils.general import get_timestamp_us_int, convert_wavelength_to_ramanshift, convert_ramanshift_to_wavelength
 
 from iris import DataAnalysisConfigEnum
 from iris.gui import AppPlotEnum

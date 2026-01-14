@@ -14,7 +14,6 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
     
-
 from iris.controllers.class_camera_controller import Class_CameraController
 
 class CameraController_Dummy(Class_CameraController):

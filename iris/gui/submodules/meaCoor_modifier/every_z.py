@@ -3,9 +3,8 @@ A GUI module to modify the z-coordinates of a mapping coordinates list.
 """
 
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication
+from PySide6.QtCore import Signal, Slot, QObject, QThread
 
-from typing import Literal
 from enum import Enum
 import threading
 
@@ -18,7 +17,7 @@ if __name__ == '__main__':
 from iris.gui.motion_video import Wdg_MotionController
 from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 
-from iris.utils.general import *
+from iris.utils.general import messagebox_request_input, get_all_widgets_from_layout
 
 from iris.resources.coordinate_modifiers.every_z_ui import Ui_every_z
 

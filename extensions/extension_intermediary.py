@@ -10,12 +10,6 @@ if __name__ == '__main__':
     sys.path.append(os.path.dirname(SCRIPT_DIR))
     sys.path.append(os.path.dirname(EXT_DIR))
     
-from PIL import Image
-import numpy as np
-import threading
-
-from iris.utils.general import *
-
 # Basic controllers
 from iris.controllers.class_camera_controller import Class_CameraController
 from iris.controllers.class_xy_stage_controller import Class_XYController
