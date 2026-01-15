@@ -252,8 +252,8 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         self._combo_plot_SpectralPosition = wdg.combo_spectralpos
         
         # Bind selections to plot the latest measurement_data df
-        self._combo_plot_mappingUnitName.currentIndexChanged.connect(lambda: self._sig_request_update_comboboxes.emit())
-        self._combo_plot_SpectralPosition.currentIndexChanged.connect(lambda: self._sig_request_update_plot.emit())
+        self._combo_plot_mappingUnitName.currentTextChanged.connect(self._sig_request_update_comboboxes.emit)
+        self._combo_plot_SpectralPosition.currentIndexChanged.connect(self._sig_request_update_plot.emit)
         
         self._combo_plot_mappingUnitName.currentTextChanged.connect(self._emit_current_mappingUnit_name)
         
