@@ -175,7 +175,7 @@ class RamanMeasurement_Worker(QObject):
     mode_discrete = 0
     mode_continuous = 1
 
-    def __init__(self, ramanHub: DataStreamer_Raman, syncer_acquisition: Syncer_Raman) -> None:
+    def __init__(self, ramanHub: DataStreamer_Raman, syncer_acquisition: Syncer_Raman, queue_plot: queue.Queue) -> None:
         super().__init__()
         self._ramanHub = ramanHub
         self._syncer_acquisition = syncer_acquisition
@@ -183,9 +183,10 @@ class RamanMeasurement_Worker(QObject):
         
         self._acquisition_params:AcquisitionParams|None = None
         self._list_queue_observer:list[queue.Queue] = []    
+        self._queue_plot:queue.Queue = queue_plot
         
         self._last_measurement:MeaRaman|None = None
-               
+        
     @Slot(queue.Queue, threading.Event)
     def append_queue_observer_measurement(self, queue_observer: queue.Queue, done:threading.Event) -> None:
         """
@@ -279,8 +280,22 @@ class RamanMeasurement_Worker(QObject):
         self._syncer_acquisition.notify_ready()
         while self._isacquiring:
             # Wait for the trigger to start the next measurement or to stop
-            trigger = q_trigger.get()
-            print(f'\nReceived trigger command: {trigger}')
+            try: trigger = q_trigger.get_nowait()
+            except queue.Empty: # If no trigger is received, get the most recent measurement to plot
+                ts = get_timestamp_us_int()
+                list_ts_mea,list_df_mea,list_int_time_ms = self._ramanHub.get_measurement(ts,WaitForMeasurement=False,getNewOnly=False)
+                mea = MeaRaman(
+                    timestamp=list_ts_mea[-1], # pyright: ignore[reportArgumentType] ; ts_mea is int
+                    int_time_ms=list_int_time_ms[-1], # pyright: ignore[reportArgumentType] ; int_time_ms is int
+                    laserPower_mW=params['laserpower_mW'],
+                    laserWavelength_nm=params['laserwavelength_nm'],
+                    extra_metadata=params['extra_metadata'])
+                mea.set_raw_list(df_mea=list_df_mea[-1], timestamp_int=list_ts_mea[-1]) # pyright: ignore[reportArgumentType] ; list_df_mea is list
+                self._queue_plot.put(mea)
+                time.sleep(list_int_time_ms[-1]/1000/2) # Small delay to prevent overloading the CPU
+                continue
+            
+            # print(f'\nReceived trigger command: {trigger}')
             if trigger == EnumTrig.FINISH: break
             
             # Retrieve the measurements
@@ -290,15 +305,15 @@ class RamanMeasurement_Worker(QObject):
                     timestamp_start=list_timestamp_trigger[-2],
                     timestamp_end=list_timestamp_trigger[-1],
                     WaitForMeasurement=False,
-                    getNewOnly=True)
-            print(f'Acquired {len(list_spectrum)} spectra between {convert_timestamp_us_int_to_str(list_timestamp_trigger[-2])} and {convert_timestamp_us_int_to_str(list_timestamp_trigger[-1])}')
+                    getNewOnly=False)
+            # print(f'Acquired {len(list_spectrum)} spectra between {convert_timestamp_us_int_to_str(list_timestamp_trigger[-2])} and {convert_timestamp_us_int_to_str(list_timestamp_trigger[-1])}')
             list_timestamp_trigger.pop(0) # Remove the first element (not needed anymore)
             
             if trigger == EnumTrig.IGNORE:
                 self._syncer_acquisition.notify_ready()
                 continue
             
-            print('Processing acquired spectra...')
+            # print('Processing acquired spectra...')
             list_measurement = []
             for ts_int,spectrum_raw,int_time_ms in zip(list_timestamp_mea_int,list_spectrum,list_integration_time_ms):
                 measurement = MeaRaman(
@@ -310,14 +325,14 @@ class RamanMeasurement_Worker(QObject):
                 measurement.set_raw_list(df_mea=spectrum_raw, timestamp_int=ts_int)
                 list_measurement.append(measurement)
             
-            print(f'Processing and returning {len(list_measurement)} measurements...')
+            # print(f'Processing and returning {len(list_measurement)} measurements...')
             # Return the measurement result
             for mea in list_measurement:
-                print(f'Processing measurement at {convert_timestamp_us_int_to_str(mea.get_latest_timestamp())}...')
+                # print(f'Processing measurement at {convert_timestamp_us_int_to_str(mea.get_latest_timestamp())}...')
                 mea:MeaRaman
                 mea.calculate_analysed()
                 q_return.put(mea)
-                print(f'Return measurement queue size: {q_return.qsize()}')
+                # print(f'Return measurement queue size: {q_return.qsize()}')
                 self.sig_acq.emit()
                 self._notify_queue_observers(measurement=mea)
                 self._last_measurement = mea
@@ -381,6 +396,7 @@ class RamanMeasurement_Worker(QObject):
                 )
             
             self._notify_queue_observers(measurement)
+            self._queue_plot.put(measurement)
             self.sig_acq.emit()
         
         self._last_measurement = measurement
@@ -543,9 +559,11 @@ class Wdg_SpectrometerController(qw.QWidget):
     # >> Acquisition <<
         self._syncer_acquisition = Syncer_Raman()
         self._thread_acquisition = QThread(self)
+        self._q_plt_mea = queue.Queue() # Queue for plotting measurements (will plot the latest measurement only)
         self._worker_acquisition = RamanMeasurement_Worker(
             ramanHub=self._ramanHub,
-            syncer_acquisition=self._syncer_acquisition
+            syncer_acquisition=self._syncer_acquisition,
+            queue_plot=self._q_plt_mea,
         )
         self._worker_acquisition.moveToThread(self._thread_acquisition)
         self.destroyed.connect(self._thread_acquisition.quit)
@@ -582,7 +600,6 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._cont_measurement:MeaRaman = MeaRaman(reconstruct=True)    # continuous measurement
         
         # Plotter setup
-        self._q_plt_mea = queue.Queue() # Queue for plotting measurements (will plot the latest measurement only)
         self._plt_timer = QTimer()
         self._plt_timer.timeout.connect(self._auto_update_plot)
         self._plt_timer.setSingleShot(True)
@@ -689,7 +706,6 @@ class Wdg_SpectrometerController(qw.QWidget):
         # Connect the append queue observer signal to the acquisition worker
         self._sig_append_queue_observer.connect(self._worker_acquisition.append_queue_observer_measurement)
         self._sig_remove_queue_observer.connect(self._worker_acquisition.remove_queue_observer_measurement)
-        self._sig_append_queue_observer.emit(self._q_plt_mea, threading.Event())
         
         # Connect the acquisition done signal to reset the widgets and statusbar
         self._worker_acquisition.sig_acq_done.connect(lambda: self._statbar.showMessage("Raman controller ready"))

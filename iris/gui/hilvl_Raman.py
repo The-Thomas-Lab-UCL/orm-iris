@@ -85,7 +85,7 @@ class Hilvl_MeasurementStorer_Worker(QObject):
         queue_measurement:queue.Queue[MeaRaman]):
         """
         Sets the parameters for the autosaver
-
+        
         Args:
             mapping_unit (MeaRMap_Unit): The mapping unit to store the measurement data
             queue_measurement (queue.Queue): The queue to store the measurement data
@@ -316,8 +316,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 mea:MeaRaman = self._q_mea_acq.get(timeout=int_time/1000 * 10) # Waits up to 10x the integration time for the measurement
                 
                 # Send the measurement data to the autosaver
-                if i == 0: continue  # Skip the zeroth measurement to avoid initialisation artifacts
-                q_mea_out.put(mea)
+                q_mea_out.put((mea,coor))
                 
             except Exception as e:
                 self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
@@ -422,25 +421,33 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         if not self._event_isacquiring.is_set():
             self.emit_finish_signals(self.msg_mea_cancelled)
             return False
-                
+            
+        # Go to the requested coordinates
+        event_finish_goto.clear()
+        self._sig_gotocor.emit(
+                    (float(coor[0]),float(coor[1]),float(coor[2])),
+                    event_finish_goto
+                )
+        event_finish_goto.wait()
+            
         event_finish_setvel.clear()
         if coor_idx == 0:
-            print('Moving to start position...')
+            # print('Moving to start position...')
             self._syncer.set_notready()
             q_trig.put(EnumTrig.START)
             event_finish_setvel.set()
-            print('Reached start position.')
+            # print('Reached start position.')
         elif coor_idx%2 == 0:
-            print('Moving to next line end position (odd line)...')
+            # print('Moving to next line end position (odd line)...')
             self._syncer.set_notready()
             q_trig.put(EnumTrig.IGNORE)
             self._sig_setvelrel.emit(mapping_speed_rel, -1.0, event_finish_setvel)   # Set actual speed to move between x-coordinates
-            print('Reached line end position.')
+            # print('Reached line end position.')
         else:
-            print('Moving to next line end position (even line)...')
+            # print('Moving to next line end position (even line)...')
             q_trig.put(EnumTrig.STORE)
-            self._sig_setvelrel.emit(100.0, -1.0, event_finish_setvel) # Set actual speed to move between x-coordinates
-            print('Reached line end position.')
+            self._sig_setvelrel.emit(100.0, -1.0, event_finish_setvel) # Set max speed to move between each scan line
+            # print('Reached line end position.')
         self._syncer.wait_ready()
         event_finish_setvel.wait()
                 
@@ -455,9 +462,6 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                     
         while not self._q_mea_acq.empty():
             try:
-                if coor_idx == 0: # Skip the first measurement to avoid initialisation artifacts
-                    self._q_mea_acq.get()
-                    continue
                 mea:MeaRaman = self._q_mea_acq.get()
                 q_mea_out.put(mea)
             except queue.Empty:
@@ -466,14 +470,6 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
                 print('Error in run_scan_continuous (autosave):',e)
                 continue
-                    
-                # Go to the requested coordinates
-        event_finish_goto.clear()
-        self._sig_gotocor.emit(
-                    (float(coor[0]),float(coor[1]),float(coor[2])),
-                    event_finish_goto
-                )
-        event_finish_goto.wait()
         return True
         
     @Slot(str)
