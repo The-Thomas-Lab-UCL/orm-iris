@@ -11,3 +11,5 @@ build/
 orm_iris.egg-info/
 test.py
 calibrations/
+docs/.obsidian/
+
