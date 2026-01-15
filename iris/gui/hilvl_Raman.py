@@ -209,9 +209,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     _sig_stop_autosaver = Signal()
     _sig_gotocor = Signal(tuple, threading.Event)
     _sig_setvelrel = Signal(float, float, threading.Event)
-    _sig_append_queue_mea = Signal(queue.Queue, threading.Event)
-    _sig_remove_queue_mea = Signal(queue.Queue)
-    _sig_acquire_discrete_mea = Signal(AcquisitionParams)
+    _sig_acquire_discrete_mea = Signal(AcquisitionParams, queue.Queue)
     _sig_acquire_continuous_mea = Signal(AcquisitionParams, queue.Queue, queue.Queue)
     _sig_acquire_list_coors = Signal(list, threading.Event)
 
@@ -229,8 +227,6 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         self.mapping_hub = mapping_hub
         self._syncer = syncer_raman
         self._event_isacquiring = event_isacquiring
-        
-        self._q_mea_acq:queue.Queue = queue.Queue() # Queue for the acquisition to store the measurement data
     
     def _calculate_time_remaining(self, points_done:int, total_points:int, time_elapsed:float) -> str:
         """
@@ -280,16 +276,9 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         q_mea_out:queue.Queue[tuple[MeaRaman,tuple]]):
         print("Starting discrete mapping measurement...")
         
-        # Go through all the coordinates
-        while not self._q_mea_acq.empty(): self._q_mea_acq.get()   # Clear the acquisition queue
-        
-        print(params)
+        q_mea = queue.Queue()
         int_time = params['int_time_ms']
-        
-        # Append the measurement queue to the acquisition controller
-        event_append_done = threading.Event()
-        self._sig_append_queue_mea.emit(self._q_mea_acq, event_append_done)
-        event_append_done.wait()
+        accumulation = params['accumulation']
         
         time_start = time.time()
         total_points = len(mapping_coordinates)
@@ -302,7 +291,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 
                 # Go to the requested coordinates
                 event_finish = threading.Event()
-                # print('Moving to coordinates:',coor)
+                # print('\nMoving to coordinates:',coor)
                 # print('Emitting _sig_gotocor signal...')
                 self._sig_gotocor.emit(
                     (float(coor[0]),float(coor[1]),float(coor[2])),
@@ -314,12 +303,21 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 # print('Movement wait finished. Event set:', event_finish.is_set())
                 
                 # Trigger the acquisition and wait for the return queue to be filled
-                self._sig_acquire_discrete_mea.emit(params)
+                # print('Emitting _sig_acquire_discrete_mea signal...')
+                self._sig_acquire_discrete_mea.emit(params,q_mea)
                 
-                mea:MeaRaman = self._q_mea_acq.get(timeout=int_time/1000 * 10) # Waits up to 10x the integration time for the measurement
+                # print('Waiting for measurement to be acquired...')
+                mea:MeaRaman = q_mea.get(timeout=accumulation * int_time/1000 * 10) # Waits up to 10x the integration time for the measurement
+                
+                if not isinstance(mea,MeaRaman): raise TypeError('Invalid measurement data received from acquisition queue.')
                 
                 # Send the measurement data to the autosaver
                 q_mea_out.put((mea,coor))
+                # print('Measurement acquired and sent to autosaver.')
+                
+            except queue.Empty:
+                self.sig_error_during_mea.emit(self.msg_mea_error + 'Measurement acquisition timed out.')
+                print('Error in run_scan_discrete: Measurement acquisition timed out.')
                 
             except Exception as e:
                 self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
@@ -334,7 +332,6 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 self.sig_progress_update_str.emit(progress_msg)
         
         self._event_isacquiring.clear()
-        self._sig_remove_queue_mea.emit(self._q_mea_acq)
         self.emit_finish_signals(self.msg_mea_finished)
         return
 
@@ -361,9 +358,6 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         
         # Prepare the measurement queue to save the measurement data into
         # the mapping unit (set up in the main thread)
-        while not self._q_mea_acq.empty(): self._q_mea_acq.get()   # Clear the acquisition queue
-        event_ready = threading.Event()
-        self._sig_append_queue_mea.emit(self._q_mea_acq, event_ready)
         q_trig = queue.Queue()  # Queue to send the measurement trigger commands
         self._sig_acquire_continuous_mea.emit(params, q_trig, q_mea_out)
         
@@ -392,7 +386,6 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         q_trig.put(EnumTrig.FINISH)
         
         self._event_isacquiring.clear()
-        self._sig_remove_queue_mea.emit(self._q_mea_acq)
         self.emit_finish_signals(self.msg_mea_finished)
 
     def _execute_scan_continuous_step(
@@ -462,17 +455,6 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 time.sleep(0.1)
                 print(f'Waiting for the measurement buffer to clear... Current size: {q_mea_out.qsize()}')
             q_trig.put(EnumTrig.IGNORE)
-                    
-        while not self._q_mea_acq.empty():
-            try:
-                mea:MeaRaman = self._q_mea_acq.get()
-                q_mea_out.put(mea)
-            except queue.Empty:
-                break
-            except Exception as e:
-                self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
-                print('Error in run_scan_continuous (autosave):',e)
-                continue
         return True
         
     @Slot(str)
@@ -518,8 +500,6 @@ class WorkerPipelineManager(QObject):
             motion_controller.set_vel_relative,
             qc.Qt.ConnectionType.QueuedConnection
         )
-        hilvlacq_worker._sig_append_queue_mea.connect(raman_worker.append_queue_observer_measurement)
-        hilvlacq_worker._sig_remove_queue_mea.connect(raman_worker.remove_queue_observer_measurement)
         hilvlacq_worker._sig_acquire_discrete_mea.connect(raman_worker.acquire_single_measurement)
         hilvlacq_worker._sig_acquire_continuous_mea.connect(raman_worker.acquire_continuous_burst_measurement_trigger)
 

@@ -9,7 +9,7 @@ import multiprocessing.pool as mpp
 
 import threading
 import queue
-from typing import Any, TypedDict
+from typing import Any, TypedDict, Callable
 from enum import Enum
 
 import time
@@ -170,7 +170,8 @@ class RamanMeasurement_Worker(QObject):
     sig_acq = Signal() # Signal emitted when a measurement is acquired
     sig_mea_error = Signal(str) # Signal emitted when an error occurs during measurement acquisition
     
-    sig_mea = Signal(MeaRaman) # Signal emitted when a measurement is acquired (for burst mode)
+    sig_last_mea = Signal(MeaRaman) # Signal emitted when a measurement is acquired (for burst mode)
+    sig_sngl_mea = Signal(MeaRaman) # Signal emitted when a single measurement is acquired
     
     mode_discrete = 0
     mode_continuous = 1
@@ -182,7 +183,7 @@ class RamanMeasurement_Worker(QObject):
         self._isacquiring = False
         
         self._acquisition_params:AcquisitionParams|None = None
-        self._list_queue_observer:list[queue.Queue] = []    
+        self._list_queue_observer:list[queue.Queue] = []
         self._queue_plot:queue.Queue = queue_plot
         
         self._last_measurement:MeaRaman|None = None
@@ -227,12 +228,12 @@ class RamanMeasurement_Worker(QObject):
         self._isacquiring = True
         self._schedule_next_acquisition_cycle(params)
         
-    @Slot(AcquisitionParams)
-    def acquire_single_measurement(self, params:AcquisitionParams):
+    @Slot(AcquisitionParams, queue.Queue)
+    def acquire_single_measurement(self, params:AcquisitionParams, q_return:queue.Queue):
         self._acquisition_params = params
         self._ramanHub.resume_auto_measurement()
         
-        self._acquire_one_measurement(params)
+        self._acquire_one_measurement(params, q_return)
         
         self.sig_acq_done.emit()
         self._ramanHub.pause_auto_measurement()
@@ -290,7 +291,7 @@ class RamanMeasurement_Worker(QObject):
                     laserPower_mW=params['laserpower_mW'],
                     laserWavelength_nm=params['laserwavelength_nm'],
                     extra_metadata=params['extra_metadata'])
-                mea.set_raw_list(df_mea=list_df_mea[-1], timestamp_int=list_ts_mea[-1]) # pyright: ignore[reportArgumentType] ; list_df_mea is list
+                mea.append_raw_list(df_mea=list_df_mea[-1], timestamp_int=list_ts_mea[-1]) # pyright: ignore[reportArgumentType] ; list_df_mea is list
                 self._queue_plot.put(mea)
                 time.sleep(list_int_time_ms[-1]/1000/2) # Small delay to prevent overloading the CPU
                 continue
@@ -322,7 +323,7 @@ class RamanMeasurement_Worker(QObject):
                     laserPower_mW=params['laserpower_mW'],
                     laserWavelength_nm=params['laserwavelength_nm'],
                     extra_metadata=params['extra_metadata'])
-                measurement.set_raw_list(df_mea=spectrum_raw, timestamp_int=ts_int)
+                measurement.append_raw_list(df_mea=spectrum_raw, timestamp_int=ts_int)
                 list_measurement.append(measurement)
             
             # print(f'Processing and returning {len(list_measurement)} measurements...')
@@ -363,13 +364,13 @@ class RamanMeasurement_Worker(QObject):
             self.sig_acq_done.emit()
             self._ramanHub.pause_auto_measurement()
 
-    def _acquire_one_measurement(self, params:AcquisitionParams):
+    def _acquire_one_measurement(self, params:AcquisitionParams, q_return:queue.Queue):
         """
         Acquire a single measurement
 
         Args:
-            params (AcquisitionParams | None, optional): The acquisition parameters. Defaults to None.
-            continuous (bool, optional): Whether the acquisition is continuous. Defaults to False.
+            params (AcquisitionParams): The acquisition parameters.
+            q_return (queue.Queue): The return queue to put the measurement in.
         """
         # try: print(f'Gap between measurements: {(time.time()-self._t1)*1e3:.0f} ms')
         # except: pass
@@ -389,15 +390,16 @@ class RamanMeasurement_Worker(QObject):
             result = self._ramanHub.get_measurement(timestamp_request,WaitForMeasurement=False,getNewOnly=True)
             spectrum_raw = result[1][-1]
             
-            measurement.set_raw_list(
+            measurement.append_raw_list(
                 df_mea=spectrum_raw,
                 timestamp_int=timestamp_request,
                 max_accumulation=params['accumulation']
                 )
             
-            self._notify_queue_observers(measurement)
-            self._queue_plot.put(measurement)
-            self.sig_acq.emit()
+        self._notify_queue_observers(measurement)
+        q_return.put(measurement)
+        self._queue_plot.put(measurement)
+        self.sig_acq.emit()
         
         self._last_measurement = measurement
         time.sleep(0.001) # Small delay to prevent overloading the CPU
@@ -408,7 +410,7 @@ class RamanMeasurement_Worker(QObject):
         Returns the last acquired measurement.
         """
         if self._last_measurement is not None:
-            self.sig_mea.emit(self._last_measurement)
+            self.sig_last_mea.emit(self._last_measurement)
         
     def _notify_queue_observers(self, measurement:MeaRaman) -> None:
         """
@@ -521,6 +523,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         controller:Controller_Spectrometer,
         ramanHub:DataStreamer_Raman,
         dataHub:Wdg_DataHub_Mapping|None,
+        getter_objective_info:Callable[[], str]|None=None,
         main:bool=False
         ) -> None:
         """
@@ -532,6 +535,7 @@ class Wdg_SpectrometerController(qw.QWidget):
             controller (raman_spectrometer_controller): The Raman spectrometer controller
             ramanHub (RamanMeasurementHub): The Raman measurement hub to retrieve measurements from
             dataHub (Frm_DataHub): The data hub for the measurements
+            getter_objective_info (Callable[[], str], optional): A callable to get objective information. Defaults to None.
             main (bool, optional): If true, initialises the spectrometer and analyser. Defaults to False.
         
         Note:
@@ -543,8 +547,8 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._controller = controller   # Raman spectrometer controller
         self._ramanHub = ramanHub       # Raman measurement hub
         self._dataHub = dataHub         # Data hub for the measurements
+        self._getter_objective_info = getter_objective_info if getter_objective_info is not None else (lambda: "N/A")
         
-
 # >>> Threading and worker setups <<<
     # >> Communciation with the controller <<
         self._thread_controller = QThread(self)
@@ -637,7 +641,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         @Slot(MeaRaman)
         def _put_lastmea_into_plotqueue(measurement: MeaRaman): self._q_plt_mea.put(measurement)
 
-        self._worker_acquisition.sig_mea.connect(_put_lastmea_into_plotqueue)
+        self._worker_acquisition.sig_last_mea.connect(_put_lastmea_into_plotqueue)
         self._sig_request_lastmea.connect(self._worker_acquisition.request_last_measurement)
 
         [widget.textChanged.connect(self._sig_request_lastmea.emit)\
@@ -681,12 +685,11 @@ class Wdg_SpectrometerController(qw.QWidget):
         # Metadata parameters
         self._laserpower_mW = DataAnalysisConfigEnum.LASER_POWER_MILLIWATT.value
         self._laserwavelength_nm = DataAnalysisConfigEnum.LASER_WAVELENGTH_NM.value
-        self._objective_info = DataAnalysisConfigEnum.OBJECTIVE_INFO.value
         
         # Metadata widgets
         self._lbl_laserpower = widget.lbl_laserpower_mW
         self._lbl_laserwavelength = widget.lbl_laserwavelength_nm
-        self._lbl_objectiveinfo = qw.QLabel('Objective info: {}'.format(self._objective_info))
+        self._lbl_objectiveinfo = qw.QLabel('Objective info: {}'.format(self._getter_objective_info()))
         qw.QErrorMessage().showMessage('Objective info save not implemented yet!')
         
         # Entry widgets and button to set the metadata
@@ -779,8 +782,10 @@ class Wdg_SpectrometerController(qw.QWidget):
         Returns:
             dict: The metadata dictionary
         """
+        obj_info = self._getter_objective_info()
+        obj_info = 'N/A' if obj_info == '' else obj_info
         dict_metadata = {
-            'objective_info': self._objective_info,
+            'objective_info': obj_info,
             'spectrometer_id': self._controller_id
         }
         return dict_metadata
@@ -813,6 +818,8 @@ class Wdg_SpectrometerController(qw.QWidget):
         if accum is not None:
             self._lbl_dev_stat_accum.setText(f'{accum}')
             self._accumulation = accum
+        else:
+            self._lbl_dev_stat_accum.setText(f'{self._accumulation}')
 
     def set_accumulation(self,new_value):
         """

@@ -313,7 +313,7 @@ class MeaRaman():
         """
         return self._spectrum_rawlist
     
-    def set_raw_list(self,df_mea:pd.DataFrame,timestamp_int:int,max_accumulation:int=1000) -> list[pd.DataFrame]:
+    def append_raw_list(self,df_mea:pd.DataFrame,timestamp_int:int,max_accumulation:int=1000) -> list[pd.DataFrame]:
         """
         Adds a measurement dataframe to the stored list of continuous measurements
         
@@ -549,7 +549,7 @@ class MeaRaman():
         self._dict_metadata['laser_wavelength_nm'] = laser_wavelength
         
         # Set the raw list
-        self.set_raw_list(df,timestamp)
+        self.append_raw_list(df,timestamp)
         self.check_uptodate(autoupdate=True)
         
 class MeaRaman_Handler():

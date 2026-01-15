@@ -1969,7 +1969,7 @@ def generate_dummy_mappingHub(numx:int=6,numy:int=8,repeat:int=3) -> MeaRMap_Hub
                 laserPower_mW=DAEnum.LASER_POWER_MILLIWATT.value,laserWavelength_nm=DAEnum.LASER_WAVELENGTH_NM.value)
             for _ in range(repeat):
                 df,_,_ = spectrometer.measure_spectrum()
-                mea_single.set_raw_list(df_mea=df,timestamp_int=get_timestamp_us_int())
+                mea_single.append_raw_list(df_mea=df,timestamp_int=get_timestamp_us_int())
         
             mea_single.check_uptodate(autoupdate=True)
             

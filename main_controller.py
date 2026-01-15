@@ -111,7 +111,9 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
             processor=self._processor,
             controller=raman_controller,
             ramanHub=raman_hub,
-            dataHub=self._dataHub_map)
+            dataHub=self._dataHub_map,
+            getter_objective_info=self._dataHub_imgcal.get_selected_calibration_id
+            )
         self.lytRaman.addWidget(self._raman)
         
         self._hilvl_coorGen = Wdg_Hilvl_CoorGenerator(

@@ -130,6 +130,15 @@ class Wdg_DataHub_ImgCal(Ui_wdg_objectives,qw.QWidget):
         if cal_id: return self._CalHub.get_calibration(cal_id)
         else: return self._empty_cal
         
+    def get_selected_calibration_id(self) -> str:
+        """
+        Get the selected calibration ID from the combobox.
+
+        Returns:
+            str: Selected calibration ID
+        """
+        return self._combo_cal.currentText()
+        
     def update_combobox(self) -> None:
         """
         Updates the combo box list of values based on the calibrations in the ImageMeasurement_Calibration_Hub.
