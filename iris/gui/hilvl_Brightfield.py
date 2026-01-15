@@ -16,36 +16,25 @@ To set the calibration parameters, take all of them as they are:
 """
 import sys
 import os
-from typing import Callable
 
 if __name__ == '__main__':
     SCRIPT_DIR = os.path.abspath(r'.\iris')
     sys.path.append(os.path.dirname(SCRIPT_DIR))
 
 import PySide6.QtWidgets as qw
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem
-from PySide6.QtGui import QMouseEvent, QPixmap, QPen, QColor, QFont, QPainter
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication, QPointF, QSize, Qt
-
-import multiprocessing as mp
 import multiprocessing.pool as mpp
-
-from PIL.Image import Image
-
-from iris.utils.general import *
 
 from iris.gui.motion_video import Wdg_MotionController
 
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
-from iris.gui.hilvl_coorGen import Wdg_Hilvl_CoorGenerator
 
 from iris.gui.image_calibration.plotter_heatmap_overlay import Wdg_HeatmapOverlay
 from iris.gui.image_calibration.objective_calibration import Wdg_Calibration
 from iris.gui.submodules.image_tiling import Wdg_HiLvlTiling
 from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam
 
-from iris.data.measurement_coordinates import List_MeaCoor_Hub, MeaCoor_mm
+from iris.data.measurement_coordinates import List_MeaCoor_Hub
 
 from iris.gui import AppPlotEnum
 

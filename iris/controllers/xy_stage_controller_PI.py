@@ -16,12 +16,13 @@ from pipython import GCS30Device
 from pipython import GCS30Commands
 from pipython import pitools
 
-from iris.utils.general import *
+from iris.utils.general import thread_assign
 from iris.controllers.class_xy_stage_controller import Class_XYController
 from iris.controllers import ControllerSpecificConfigEnum
 
 import numpy as np
 import time
+import threading
 
 from iris.controllers import ControllerConfigEnum,ControllerDirectionEnum
 

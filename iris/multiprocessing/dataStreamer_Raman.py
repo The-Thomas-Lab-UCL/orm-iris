@@ -35,16 +35,13 @@ Techinical notes (for myself):
 import os
 
 import multiprocessing as mp
-from multiprocessing.synchronize import Event as EventClass
 import multiprocessing.managers as mpm
 import multiprocessing.connection as mpc
-import multiprocessing.pool as mpp
 
 import threading
-import queue
+import time
 
 import pandas as pd
-import numpy as np
 
 if __name__ == '__main__':
     import sys
@@ -53,14 +50,12 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
 
 
-from iris.utils.general import *
-from iris.calibration.calibration_generator import CalibrationParams, SpectrometerCalibrator, Wdg_SpectrometerCalibrationGenerator
-from iris.data.measurement_Raman import MeaRaman, MeaRaman_Plotter
+from iris.utils.general import convert_timestamp_us_int_to_str, get_timestamp_us_int
+from iris.calibration.calibration_generator import SpectrometerCalibrator, Wdg_SpectrometerCalibrationGenerator
 from iris.multiprocessing.basemanager import MyManager,get_my_manager, SyncManager
 
 from iris.controllers import Controller_Spectrometer
 
-from iris import DataAnalysisConfigEnum
 from iris.multiprocessing import MPMeaHubEnum
 
 class DataStreamer_Raman(mp.Process):

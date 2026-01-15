@@ -1,22 +1,20 @@
 """
 This program is to control a Raman imaging microscope consisting of an XY stage, Z stage, brightfield camera, and a spectrometer.
 """
+import os
+import sys
+
 if __name__ == "__main__":
     print('>>>>> IRIS: IMPORTING LIBRARIES <<<<<')
-    import sys
-    import os
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
     
-import sys
 import multiprocessing as mp
 import multiprocessing.pool as mpp
-import time
 
 from PySide6.QtGui import QCloseEvent
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Qt # For context
-from PySide6.QtCore import Signal, Slot, QTimer, QThread
+from PySide6.QtCore import QTimer
 
 from iris.controllers import Controller_Spectrometer, Controller_XY, Controller_Z
 
@@ -36,13 +34,13 @@ from iris.gui.shortcut_handler import ShortcutHandler
 
 from iris.data.measurement_coordinates import List_MeaCoor_Hub
 
-from iris.calibration.calibration_generator import Wdg_SpectrometerCalibrationGenerator, MainWindow_SpectrometerCalibrationGenerator
+from iris.calibration.calibration_generator import MainWindow_SpectrometerCalibrationGenerator
 
 from iris.multiprocessing.basemanager import MyManager
 from iris.multiprocessing.dataStreamer_Raman import DataStreamer_Raman,initialise_manager_raman,initialise_proxy_raman
 from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam,initialise_manager_stage,initialise_proxy_stage
 
-from iris.utils.general import *
+from iris.utils.general import messagebox_request_input
 
 from main_analyser import main_analyser
 
@@ -113,7 +111,9 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
             processor=self._processor,
             controller=raman_controller,
             ramanHub=raman_hub,
-            dataHub=self._dataHub_map)
+            dataHub=self._dataHub_map,
+            getter_objective_info=self._dataHub_imgcal.get_selected_calibration_id
+            )
         self.lytRaman.addWidget(self._raman)
         
         self._hilvl_coorGen = Wdg_Hilvl_CoorGenerator(

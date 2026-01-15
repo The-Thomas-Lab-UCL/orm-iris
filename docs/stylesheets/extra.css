@@ -1,0 +1,4 @@
+.md-content {
+    text-align: justify;
+    hyphens: auto; /* Helps prevent large gaps between words */
+}

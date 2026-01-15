@@ -20,8 +20,6 @@ from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates
 from iris.data.calibration_objective import ImgMea_Cal, generate_dummy_calibrationHub
 from iris.data.measurement_coordinates import List_MeaCoor_Hub, MeaCoor_mm
 
-from iris.utils.general import *
-
 from iris.resources.tiling_method_control_ui import Ui_tiling_method_control
 
 class TilingMethodControl_Design(Ui_tiling_method_control, qw.QWidget):

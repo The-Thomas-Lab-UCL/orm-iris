@@ -16,7 +16,7 @@ if __name__ == '__main__':
 from PySide6.QtGui import QCloseEvent
 import PySide6.QtWidgets as qw
 from PySide6.QtCore import Qt # For context
-from PySide6.QtCore import Signal, Slot, QTimer, QThread, QObject
+from PySide6.QtCore import Signal, Slot, QTimer, QObject
 
 import threading
 import queue
@@ -31,11 +31,11 @@ from extensions.extension_template import Extension_MainWindow
 from extensions.extension_intermediary import Ext_DataIntermediary as Intermediary
 
 from iris.controllers.class_spectrometer_controller import Class_SpectrometerController as Spectrometer
-from iris.gui.raman import Wdg_SpectrometerController as Frm_Raman, RamanMeasurement_Worker
+from iris.gui.raman import Wdg_SpectrometerController as Frm_Raman
 from iris.data.measurement_Raman import MeaRaman
 from iris import DataAnalysisConfigEnum as DAEnum
 
-from iris.utils.general import *
+from iris.utils.general import convert_ramanshift_to_wavelength
 from extensions.optics_calibration_aid.optics_calibration_aid_ui import Ui_optics_calibration_aid
 
 class OpticsCalibrationAid_Design(Ui_optics_calibration_aid, qw.QWidget):

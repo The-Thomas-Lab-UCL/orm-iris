@@ -24,7 +24,7 @@ if __name__ == '__main__':
 from iris.controllers import ControllerSpecificConfigEnum
 from iris.controllers.class_spectrometer_controller import Class_SpectrometerController
 
-from iris.utils.general import *
+from iris.utils.general import get_timestamp_us_int
 
 from iris import DataAnalysisConfigEnum
 

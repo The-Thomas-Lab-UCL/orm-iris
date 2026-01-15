@@ -1,17 +1,5 @@
-# Welcome to MkDocs
+# ORM-IRIS
+Open Raman Microscopy - Integrated Raman Imaging Software (ORM-IRIS or IRIS) is a complementary controller software of the modular [Open Raman Microscopy (ORM) system](www.openramanmicroscopy.org). IRIS is a **GUI-based app** to easily control a motorised Raman microscope (XY-stage, Z-stage, brightfield camera, and a spectrometer) for Raman imaging, offering full instrument controls, automatic Raman imaging, brightfield imaging and tiling, data management, basic data analyses, and more. It supports instruments from various manufacturers and is designed to be **completely modular**, including Ocean Optics, Andor, Princeton Instruments, Thorlabs, Physik Instrumente, Zaber, and more, such that controllers can be easily swapped within seconds by simply changing the chosen instruments in the config file.
 
-For full documentation visit [mkdocs.org](https://www.mkdocs.org).
-
-## Commands
-
-* `mkdocs new [dir-name]` - Create a new project.
-* `mkdocs serve` - Start the live-reloading docs server.
-* `mkdocs build` - Build the documentation site.
-* `mkdocs -h` - Print help message and exit.
-
-## Project layout
-
-    mkdocs.yml    # The configuration file.
-    docs/
-        index.md  # The documentation homepage.
-        ...       # Other markdown pages, images and other files.
+## GUI example
+<img width="452" height="239" alt="image" src="https://github.com/user-attachments/assets/a31565e7-f03e-4eca-aaa8-e7f5365b04cd" />

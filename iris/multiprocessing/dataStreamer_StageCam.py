@@ -36,11 +36,11 @@ import os
 import multiprocessing as mp
 import multiprocessing.managers as mpm
 import multiprocessing.connection as mpc
-import types
 
-from typing import cast, Any
+from typing import Any
 from enum import Enum
 
+import time
 import threading
 
 import numpy as np
@@ -56,8 +56,8 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
 
 
-from iris.utils.general import *
-from iris.multiprocessing.basemanager import MyManager, get_my_manager, StageNamespace
+from iris.utils.general import convert_timestamp_us_int_to_str, get_timestamp_us_int
+from iris.multiprocessing.basemanager import get_my_manager, StageNamespace
 
 from iris.controllers import ControllerConfigEnum
 from iris.controllers import Controller_XY, Controller_Z, CameraController

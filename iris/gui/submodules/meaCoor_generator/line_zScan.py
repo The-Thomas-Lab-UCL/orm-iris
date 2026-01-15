@@ -9,13 +9,13 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
 
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot
+from PySide6.QtCore import Slot
 
 import numpy as np
 from typing import Callable
-    
-from iris.gui.motion_video import Wdg_MotionController
-from iris.utils.general import *
+import threading
+
+from iris.utils.general import get_timestamp_us_str
 
 from iris.resources.coordinate_generators.convert_2Dto3D_ui import Ui_converter_2Dto3D
 

@@ -2,11 +2,9 @@
 A GUI to visualize the topology of a mapping coordinates
 """
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication
+from PySide6.QtCore import Signal, Slot, QObject, QThread
 
-from typing import Literal
 
-import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
@@ -20,7 +18,6 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
 
 from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
-from iris.utils.general import *
 
 from iris.gui import AppPlotEnum
 

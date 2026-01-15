@@ -12,8 +12,6 @@ if __name__ == '__main__':
     SCRIPT_DIR = os.path.abspath(r'.\iris')
     sys.path.append(os.path.dirname(SCRIPT_DIR))
 
-from iris.utils.general import *
-
 from iris.controllers.class_xy_stage_controller import Class_XYController
 
 import numpy as np
@@ -50,7 +48,7 @@ class XYController_Dummy(Class_XYController):
     def get_identifier(self) -> str:
         return "Dummy XY Stage Controller"
         
-    def initialisation(self,commport:str):
+    def initialisation(self):
         """
         Initialises the device, setup the connection, channels, motors and their parameters, etc.
         

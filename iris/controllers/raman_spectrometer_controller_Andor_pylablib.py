@@ -11,6 +11,7 @@ pylablib for the library that provides the interface to the spectrometer.
 import os
 import sys
 import time
+import threading
 import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -26,7 +27,7 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
     
 
-from iris.utils.general import *
+from iris.utils.general import thread_assign, get_timestamp_us_int
 from iris.controllers.class_spectrometer_controller import Class_SpectrometerController
 
 from iris import DataAnalysisConfigEnum
@@ -281,11 +282,11 @@ class SectrometerController_AndorSDK2(Class_SpectrometerController):
         int_time_us = self._integration_time_devUnit*1e6
         return int_time_us
     
-    def set_integration_time_us(self,integration_time:int) -> int:
+    def set_integration_time_us(self,integration_time:int|float) -> int:
         """Sets the integration time of the device
 
         Args:
-            integration_time (int): Integration time in [device unit] 
+            integration_time (int|float): Integration time in [device unit] 
             (microseconds for the QE Pro)
 
         Returns:

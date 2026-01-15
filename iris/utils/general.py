@@ -285,6 +285,7 @@ def get_all_widgets_from_layout(parent_layout:qw.QLayout,get_all=True) -> list[q
     list_widget = []
     for i in range(parent_layout.count()):
         item = parent_layout.itemAt(i)
+        if item is None: continue
         if item.widget():
             list_widget.append(item.widget())
             if get_all and isinstance(item.widget(), qw.QWidget):

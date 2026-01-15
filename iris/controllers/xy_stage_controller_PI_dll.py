@@ -16,13 +16,14 @@ from pipython import GCS2Device
 from pipython import GCS30Commands
 from pipython import pitools, datarectools
 
-from iris.utils.general import *
+from iris.utils.general import thread_assign, get_timestamp_us_int
 from iris.controllers.class_xy_stage_controller import Class_XYController
 
 from typing import OrderedDict, Literal
 
 import numpy as np
 import pandas as pd
+import threading
 import time
 
 from multiprocessing import Lock, Event

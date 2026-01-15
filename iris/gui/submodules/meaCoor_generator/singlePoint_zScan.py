@@ -2,10 +2,9 @@
 An instance that manages a basic mapping method in tkinter
 """
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QTimer, QThread, QObject
+from PySide6.QtCore import Signal, Slot, QThread, QObject
 
 import numpy as np
-from math import floor
 
 if __name__ == '__main__':
     import sys
@@ -14,7 +13,6 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
 
 from iris.gui.motion_video import Wdg_MotionController
-from iris.utils.general import *
 
 from iris.resources.coordinate_generators.point_zScanLinear_ui import Ui_singlePointZScan
 

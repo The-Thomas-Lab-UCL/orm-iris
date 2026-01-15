@@ -3,11 +3,10 @@ A GUI module to modify the z-coordinates of a mapping coordinates list.
 """
 
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication
+from PySide6.QtCore import Signal, Slot, QObject, QThread
 
 from typing import Literal
 from enum import Enum
-import threading
 
 import numpy as np
 from scipy.interpolate import griddata
@@ -18,10 +17,9 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.gui.motion_video import Wdg_MotionController
 from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 
-from iris.utils.general import *
+from iris.utils.general import messagebox_request_input
 
 from iris.resources.coordinate_modifiers.zInterpolate_ui import Ui_zInterpolate
 

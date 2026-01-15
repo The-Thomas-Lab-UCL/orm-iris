@@ -1,15 +1,12 @@
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QTimer, QCoreApplication, QObject, QThread
+from PySide6.QtCore import Signal, Slot, QObject, QThread
 
 import matplotlib
-from matplotlib.figure import Figure
-from matplotlib.axes import Axes
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 matplotlib.use('Agg')   # Force matplotlib to use the backend to prevent memory leak
 
 from scipy.signal import find_peaks
-import bisect
-from dataclasses import dataclass, fields, asdict
+from dataclasses import dataclass, asdict
 from typing import Dict
 
 if __name__ == '__main__':
@@ -18,7 +15,7 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.utils.general import *
+from iris.utils.general import convert_wavelength_to_ramanshift, get_all_widgets_from_layout
 
 from iris.data.measurement_Raman import MeaRaman, MeaRaman_Plotter, MeaRaman_Handler
 

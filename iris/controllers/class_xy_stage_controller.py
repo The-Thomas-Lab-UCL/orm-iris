@@ -10,7 +10,6 @@ if __name__ == '__main__':
     sys.path.append(os.path.dirname(SCRIPT_DIR))
     
 
-from iris.utils.general import *
 from iris.controllers import ControllerConfigEnum, ControllerDirectionEnum
 
 

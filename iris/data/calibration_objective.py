@@ -27,8 +27,6 @@ import uuid
 
 from dataclasses import dataclass,asdict
 
-from iris.utils.general import *
-
 
 @dataclass
 class ImgMea_Cal:
