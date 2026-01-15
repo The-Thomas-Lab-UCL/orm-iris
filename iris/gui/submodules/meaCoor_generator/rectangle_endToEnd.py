@@ -78,25 +78,17 @@ class Wdg_Rect_StartEnd(qw.QWidget):
         self._ent_yres = wdg.ent_res_pt_y
         
         # Bind return to the set_coor buttons
-        self._ent_startx_um.textChanged.connect(self._update_resolution_field_um)
-        self._ent_starty_um.textChanged.connect(self._update_resolution_field_um)
-        self._ent_startx_um.returnPressed.connect(self._update_resolution_field_um)
-        self._ent_starty_um.returnPressed.connect(self._update_resolution_field_um)
+        self._ent_startx_um.editingFinished.connect(self._update_resolution_field_um)
+        self._ent_starty_um.editingFinished.connect(self._update_resolution_field_um)
         
-        self._ent_endx_um.textChanged.connect(self._update_resolution_field_um)
-        self._ent_endy_um.textChanged.connect(self._update_resolution_field_um)
-        self._ent_endx_um.returnPressed.connect(self._update_resolution_field_um)
-        self._ent_endy_um.returnPressed.connect(self._update_resolution_field_um)
+        self._ent_endx_um.editingFinished.connect(self._update_resolution_field_um)
+        self._ent_endy_um.editingFinished.connect(self._update_resolution_field_um)
         
-        self._ent_xres.textChanged.connect(self._update_resolution_field_um)
-        self._ent_yres.textChanged.connect(self._update_resolution_field_um)
-        self._ent_xres.returnPressed.connect(self._update_resolution_field_um)
-        self._ent_yres.returnPressed.connect(self._update_resolution_field_um)
+        self._ent_xres.editingFinished.connect(self._update_resolution_field_um)
+        self._ent_yres.editingFinished.connect(self._update_resolution_field_um)
         
-        self._widget.ent_res_um_x.textChanged.connect(self._update_resolution_field_points)
-        self._widget.ent_res_um_y.textChanged.connect(self._update_resolution_field_points)
-        self._widget.ent_res_um_x.returnPressed.connect(self._update_resolution_field_points)
-        self._widget.ent_res_um_y.returnPressed.connect(self._update_resolution_field_points)
+        self._widget.ent_res_um_x.editingFinished.connect(self._update_resolution_field_points)
+        self._widget.ent_res_um_y.editingFinished.connect(self._update_resolution_field_points)
         
         self._btn_storexy_start.clicked.connect(self._grab_startxy)
         self._btn_storexy_end.clicked.connect(self._grab_endxy)
@@ -190,6 +182,17 @@ class Wdg_Rect_StartEnd(qw.QWidget):
         
         return res_x_um,res_y_um
     
+    def _block_signals_resolution(self,block:bool):
+        """
+        Blocks or unblocks the resolution entry field signals
+        
+        Args:
+            block (bool): True to block, False to unblock
+        """
+        self._widget.ent_res_um_x.blockSignals(block)
+        self._widget.ent_res_um_y.blockSignals(block)
+        self._widget.ent_res_pt_x.blockSignals(block)
+        self._widget.ent_res_pt_y.blockSignals(block)
     
     @Slot()
     def _update_resolution_field_points(self):
@@ -206,15 +209,19 @@ class Wdg_Rect_StartEnd(qw.QWidget):
             self._ent_xres.setPlaceholderText('Set coordinates first')
             self._ent_yres.setPlaceholderText('Set coordinates first')
             return
-
+        
+        self.blockSignals(True)
+        
         distx = x2 - x1
         disty = y2 - y1
         
-        resx_pt = ceil((distx*1000)/x_um)
-        resy_pt = ceil((disty*1000)/y_um)
+        resx_pt = ceil((distx*1000)/x_um)+1
+        resy_pt = ceil((disty*1000)/y_um)+1
         
         self._ent_xres.setText('{}'.format(resx_pt))
         self._ent_yres.setText('{}'.format(resy_pt))
+        
+        self.blockSignals(False)
     
     @Slot()
     def _update_resolution_field_um(self):
@@ -231,15 +238,19 @@ class Wdg_Rect_StartEnd(qw.QWidget):
             self._ent_xres.setPlaceholderText('Set coordinates first')
             self._ent_yres.setPlaceholderText('Set coordinates first')
             return
-
+        
+        self.blockSignals(True)
+        
         distx = x2 - x1
         disty = y2 - y1
         
-        resx_um = (distx/x_pts)*1000
-        resy_um = (disty/y_pts)*1000
+        resx_um = (distx/(x_pts-1))*1000
+        resy_um = (disty/(y_pts-1))*1000
         
         self._widget.ent_res_um_x.setText('{:.2f}'.format(resx_um))
         self._widget.ent_res_um_y.setText('{:.2f}'.format(resy_um))
+        
+        self.blockSignals(False)
     
     def _grab_z(self):
         """
