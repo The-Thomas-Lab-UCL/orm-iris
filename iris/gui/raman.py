@@ -220,13 +220,13 @@ class RamanMeasurement_Worker(QObject):
         """
         self._isacquiring = False
         
-    @Slot(AcquisitionParams)
-    def acquire_continuous_measurement(self, params: AcquisitionParams):
+    @Slot(AcquisitionParams, queue.Queue)
+    def acquire_continuous_measurement(self, params: AcquisitionParams, q_return: queue.Queue):
         self._acquisition_params = params
         self._ramanHub.resume_auto_measurement()
         
         self._isacquiring = True
-        self._schedule_next_acquisition_cycle(params)
+        self._schedule_next_acquisition_cycle(params, q_return)
         
     @Slot(AcquisitionParams, queue.Queue)
     def acquire_single_measurement(self, params:AcquisitionParams, q_return:queue.Queue):
@@ -344,8 +344,8 @@ class RamanMeasurement_Worker(QObject):
         self._ramanHub.pause_auto_measurement()
         self._syncer_acquisition.notify_ready()
         
-    @Slot(AcquisitionParams)
-    def _schedule_next_acquisition_cycle(self, params:AcquisitionParams):
+    @Slot(AcquisitionParams, queue.Queue)
+    def _schedule_next_acquisition_cycle(self, params:AcquisitionParams, q_return: queue.Queue):
         """
         Executes one measurement unit and schedules the next one if still running.
         This is the core of the non-blocking loop.
@@ -356,8 +356,8 @@ class RamanMeasurement_Worker(QObject):
             return
             
         try:
-            self._acquire_one_measurement(params)
-            QTimer.singleShot(0, lambda: self._schedule_next_acquisition_cycle(params))
+            self._acquire_one_measurement(params, q_return)
+            QTimer.singleShot(0, lambda: self._schedule_next_acquisition_cycle(params, q_return))
         except Exception as e:
             self._isacquiring = False
             self.sig_mea_error.emit(f'Critical error in acquisition cycle: {e}')
@@ -395,10 +395,11 @@ class RamanMeasurement_Worker(QObject):
                 timestamp_int=timestamp_request,
                 max_accumulation=params['accumulation']
                 )
+            self._queue_plot.put(measurement)
             
         self._notify_queue_observers(measurement)
         q_return.put(measurement)
-        self._queue_plot.put(measurement)
+        self.sig_sngl_mea.emit(measurement)
         self.sig_acq.emit()
         
         self._last_measurement = measurement
@@ -506,8 +507,8 @@ class Wdg_SpectrometerController(qw.QWidget):
     """
     sig_set_integration_time_us = Signal(int)
     
-    _sig_request_mea_sngl = Signal(AcquisitionParams)
-    _sig_request_mea_cont = Signal(AcquisitionParams)
+    _sig_request_mea_sngl = Signal(AcquisitionParams, queue.Queue)
+    _sig_request_mea_cont = Signal(AcquisitionParams, queue.Queue)
     sig_request_mea_stop = Signal()
     
     _sig_request_lastmea = Signal() # Signal to request the last measurement from the acquisition worker
@@ -677,9 +678,12 @@ class Wdg_SpectrometerController(qw.QWidget):
     # >>> Data management widgets setup <<<
         # Datasave widget
         self._btn_saveto_datahub = widget.btn_savetomanager
+        @Slot()
+        def save_to_datahub_callback():
+            if self._dataHub is None: qw.QErrorMessage(self).showMessage('DataHub is not available!'); return
+            self._dataHub.append_RamanMeasurement_multi(self._sngl_measurement)
         if isinstance(self._dataHub,Wdg_DataHub_Mapping):
-            self._btn_saveto_datahub.clicked.connect(
-                lambda data=self._sngl_measurement: self._dataHub.append_RamanMeasurement_multi(data)) # type: ignore ; it is guaranteed to be Frm_DataHub_Mapping here
+            self._btn_saveto_datahub.clicked.connect(save_to_datahub_callback)
         else: self._btn_saveto_datahub.setEnabled(False)
         
         # Metadata parameters
@@ -715,9 +719,16 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._worker_acquisition.sig_acq_done.connect(lambda: self._statbar.setStyleSheet(""))
         self._worker_acquisition.sig_acq_done.connect(lambda: self.reset_enable_widgets())
         
+        # Connect the acquisition mea signal to store the single measurement
+        def _store_sngl_mea(measurement:MeaRaman): self._sngl_measurement = measurement
+        self._worker_acquisition.sig_sngl_mea.connect(_store_sngl_mea)
+        
     # >>> Finalise the setup <<<
         # Update the statusbar
         self._statbar.showMessage("Raman controller ready")
+        
+    # >>> Others (unimportant) <<<
+        self._queue_trash = queue.Queue()  # A trash queue to discard unwanted data
     
     def _init_worker_plotter(self) -> None:
         """
@@ -965,7 +976,10 @@ class Wdg_SpectrometerController(qw.QWidget):
         dict_params = self.generate_acquisition_params()
         
         # Start the measurement
-        self._sig_request_mea_cont.emit(dict_params)
+        while not self._queue_trash.empty():
+            try: self._queue_trash.get()
+            except queue.Empty: break
+        self._sig_request_mea_cont.emit(dict_params, self._queue_trash)
         
     def generate_acquisition_params(self) -> AcquisitionParams:
         """
@@ -1004,7 +1018,10 @@ class Wdg_SpectrometerController(qw.QWidget):
         dict_params = self.generate_acquisition_params()
         
         # Start the measurement
-        self._sig_request_mea_sngl.emit(dict_params)
+        while not self._queue_trash.empty():
+            try: self._queue_trash.get()
+            except queue.Empty: break
+        self._sig_request_mea_sngl.emit(dict_params, self._queue_trash)
         
     def _append_remove_observer_queue_to_worker(self, queue_observer:queue.Queue):
         """
