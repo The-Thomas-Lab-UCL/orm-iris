@@ -15,7 +15,7 @@ necessary interface to the dll in Python.
 import os
 import sys
 import time
-import matplotlib
+import ctypes
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -34,7 +34,7 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
     
 
-from iris.utils.general import *
+from iris.utils.general import get_timestamp_us_int
 from iris.controllers.class_spectrometer_controller import Class_SpectrometerController
 
 from iris import DataAnalysisConfigEnum
@@ -368,7 +368,10 @@ class SpectrometerController_PI(Class_SpectrometerController):
         Returns:
             tuple: A tuple containing the minimum, maximum, and increment of the integration time in [device unit] (microseconds for the QE Pro)
         """
-        return (self.integration_time_min*1e3, self.integration_time_max*1e3, self.integration_time_inc*1e3)
+        return (
+            int(self.integration_time_min*1e3),
+            int(self.integration_time_max*1e3),
+            int(self.integration_time_inc*1e3))
     
     def get_integration_time_us(self, fromdev:bool=True) -> int:
         """
@@ -389,9 +392,9 @@ class SpectrometerController_PI(Class_SpectrometerController):
             self._integration_time_local_us = int(int_time_ms*1000)
         else:
             int_time_ms = self._integration_time_local_us/1000
-        return int_time_ms*1000
+        return int(int_time_ms*1000)
     
-    def set_integration_time_us(self,integration_time_us:int) -> int:
+    def set_integration_time_us(self,integration_time:int) -> int:
         """
         Sets the integration time of the device
         
@@ -402,8 +405,8 @@ class SpectrometerController_PI(Class_SpectrometerController):
         Returns:
             int: Device integrationt time after set up [us]
         """
-        assert isinstance(integration_time_us,int), "Integration time must be an integer"
-        int_time_ms = int(integration_time_us/1000)
+        assert isinstance(integration_time,int), "Integration time must be an integer"
+        int_time_ms = int(integration_time/1000)
         
         with self._lock:
             camera_handle = self._cameraHandle

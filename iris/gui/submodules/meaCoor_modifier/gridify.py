@@ -5,15 +5,13 @@ the coordinates in the X, Y and Z direction.
 
 from PySide6.QtGui import QCloseEvent
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QTimer, QThread, QObject, QModelIndex
+from PySide6.QtCore import Signal, Slot, QTimer, QModelIndex
 
-from typing import Self
 from enum import Enum
 import threading
-from queue import Queue, Empty
 
 import numpy as np
-from PIL import Image, ImageQt
+from PIL import ImageQt
 
 if __name__ == '__main__':
     import sys
@@ -21,10 +19,9 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.gui.motion_video import Wdg_MotionController, Motion_GoToCoor_Worker, ResizableQLabel
+from iris.gui.motion_video import Wdg_MotionController, ResizableQLabel
 from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 
-from iris.utils.general import *
 from iris.utils.gridify import generate_warped_grid
 
 from iris.resources.coordinate_modifiers.gridify_setup_ui import Ui_gridify_setup

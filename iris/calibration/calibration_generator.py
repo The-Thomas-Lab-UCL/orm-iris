@@ -4,6 +4,7 @@ and the intensity calibration of a Raman spectrometer
 """
 import os
 import sys
+import time
 from typing import Any, Callable
 
 import threading
@@ -34,7 +35,6 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
 
 
-from iris.utils.general import *
 from iris import LibraryConfigEnum, DataAnalysisConfigEnum
 
 from iris.resources.spectrometer_calibration_ui import Ui_spectrometerCalibrator

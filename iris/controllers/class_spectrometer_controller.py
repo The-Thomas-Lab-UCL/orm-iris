@@ -14,7 +14,8 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
     
 
-from iris.utils.general import *
+from iris.utils.general import get_timestamp_us_int
+from iris import DataAnalysisConfigEnum
 
 class Class_SpectrometerController():
     def __init__(self) -> None:
@@ -124,7 +125,7 @@ class Class_SpectrometerController():
         pass
 
 if __name__ == '__main__':
-    r_spec = raman_spectrometer_controller()
+    r_spec = Class_SpectrometerController()
     r_spec.self_test()
     
     spectra = r_spec.measure_spectrum()[0]

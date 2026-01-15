@@ -16,7 +16,7 @@ from matplotlib.axes import Axes
 matplotlib.use('Agg')   # Force matplotlib to use the backend to prevent memory leak
 
 # Import general functions and global parameters
-from iris.utils.general import *
+from iris.utils.general import convert_wavelength_to_ramanshift
 
 
 # Import image processors
@@ -294,7 +294,7 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
             if not isinstance(new_cal,ImgMea_Cal):
                 qw.QMessageBox.critical(self, 'Save calibration','Failed to get the new calibration object.')
                 return
-            new_id = messagebox_request_input('Calibration ID','Enter the new calibration ID to save the calibration changes',default=new_cal.id)
+            new_id = qw.QInputDialog.getText(self, 'Save calibration','Enter new calibration ID:', text=new_cal.id)[0]
             if not isinstance(new_id,str) or new_id == '':
                 qw.QMessageBox.warning(self, 'Save calibration','Invalid calibration ID.')
                 return

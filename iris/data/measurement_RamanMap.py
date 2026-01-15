@@ -11,6 +11,7 @@ import pandas as pd
 import bisect
 from copy import deepcopy
 
+import time
 import threading
 import queue
 from dataclasses import dataclass
@@ -37,7 +38,8 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
     
 
-from iris.utils.general import *
+from iris.utils.general import convert_wavelength_to_ramanshift, convert_ramanshift_to_wavelength, thread_assign,\
+    get_timestamp_us_int, get_timestamp_us_str, get_timestamp_sec
 from iris.data.measurement_Raman import MeaRaman
 
 from iris import DataAnalysisConfigEnum as DAEnum
@@ -867,7 +869,7 @@ class MeaRMap_Hub():
             try: callback()
             except Exception as e: print(f'_run_callbacks: Error in callback: {e}')
         
-    def copy_mapping_unit(self,source_unit_id:str,dest_unit_name:str,appendToHub:False) -> MeaRMap_Unit:
+    def copy_mapping_unit(self,source_unit_id:str,dest_unit_name:str,appendToHub:bool=False) -> MeaRMap_Unit:
         """
         Copies the mapping unit data from the source to the destination unit ID
         
@@ -1651,7 +1653,7 @@ class MeaRMap_Handler():
     
     @thread_assign
     def save_MappingHub_pickle(self,mappingHub:MeaRMap_Hub,savedirpath:str,
-                               savename:str,q_return:queue.Queue=None) -> threading.Thread:
+                               savename:str,q_return:queue.Queue|None=None) -> threading.Thread:
         """
         Saves the mapping measurement data into a database or pickle file.
         
@@ -1879,6 +1881,8 @@ class MeaRMap_Handler():
             
         for unitid in mapping_measurement.get_list_MappingUnit_ids():
             hub.append_mapping_unit(mapping_measurement.get_MappingUnit(unitid))
+            
+        return hub
     
     def load_choose(self,mappingHub:MeaRMap_Hub,callback_fast:Callable|None=None,
                     callback:Callable|None=None) -> threading.Thread:
@@ -2274,7 +2278,8 @@ def test_datasaveload_system(storage_main:MeaRMap_Hub|None=None):
     thread.join()
     
     print('>>>>> Loading the data <<<<<')
-    loaded_main = handler.load_MappingMeasurementHub_database(loadpath=savepath)
+    hub = MeaRMap_Hub()
+    loaded_main = handler.load_MappingMeasurementHub_database(hub, loadpath=savepath)
     
     print('>>>>> Retrieving the unit <<<<<')
     list_id = loaded_main.get_list_MappingUnit_ids()

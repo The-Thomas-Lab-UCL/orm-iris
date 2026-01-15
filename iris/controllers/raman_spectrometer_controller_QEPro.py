@@ -15,7 +15,7 @@ from typing import Literal
 # matplotlib.use('Agg')
 
 from iris.controllers import ControllerSpecificConfigEnum
-from iris.utils.general import *
+from iris.utils.general import get_timestamp_us_int
 from iris.controllers.class_spectrometer_controller import Class_SpectrometerController
 
 # Import Ocean Direct using the wrapper to handle SDK import issues

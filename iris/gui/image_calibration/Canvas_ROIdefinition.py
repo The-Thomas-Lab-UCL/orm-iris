@@ -14,8 +14,6 @@ from PIL import Image, ImageQt
 import threading
 from typing import Callable
 
-from iris.utils.general import *
-
 from iris.gui import AppPlotEnum
 
 class Canvas_Image_Annotations(QGraphicsView):

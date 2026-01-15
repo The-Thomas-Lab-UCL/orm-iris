@@ -12,6 +12,7 @@ no code from it has been reused in this controller.
 #%% Main import
 import os
 import sys
+import threading
 import time
 import matplotlib
 import matplotlib.pyplot as plt
@@ -29,9 +30,9 @@ if __name__ == '__main__':
     import sys
     import os
     libdir = os.path.abspath(r'.\iris')
-    sys.path.insert(0, os.path.dirname(libdir))    
+    sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.utils.general import *
+from iris.utils.general import get_timestamp_us_int, get_timestamp_us_str
 from iris.controllers.class_spectrometer_controller import Class_SpectrometerController
 
 from iris import DataAnalysisConfigEnum
@@ -510,7 +511,7 @@ def abortAcquisition() -> None:
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to abort acquisition: {msg}")
 
-def waitForAcquisitionTimeOut(timeout_ms:int) -> bool:
+def waitForAcquisitionTimeOut(timeout_ms:int|float) -> bool:
     """
     Wait for the acquisition to complete or time out.
 
@@ -641,6 +642,7 @@ def setTriggerMode(mode:Literal[ '0. Internal', '1. External', '6. External Star
     elif ret == ErrorCodes.DRV_NOT_INITIALIZED.value: raise RuntimeError('System not initialized.')
     elif ret == ErrorCodes.DRV_ACQUIRING.value: raise RuntimeError('Acquisition in progress.')
     elif ret == ErrorCodes.DRV_P1INVALID.value: raise ValueError('Invalid trigger mode.')
+    else: raise RuntimeError(f"Failed to set trigger mode: {read_return_message(ret)}")
 
 def setKineticCycleTime(time_sec: float) -> None:
     """
@@ -973,7 +975,7 @@ def continuous_acquisition_test(integration_time_ms:float=30.0) -> None:
     while True:
         t1 = time.time()
         sendSoftwareTrigger()
-        waitForAcquisitionTimeOut(kinetic_cycle_time_sec*1e3*1.5)
+        waitForAcquisitionTimeOut(int(kinetic_cycle_time_sec*1e3*1.5))
         
         t2 = time.time()
         img = getMostRecentImage(pixelx,1,pixelx*1)
@@ -1200,7 +1202,7 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         with self._lock:
             timestamp = get_timestamp_us_int()
             sendSoftwareTrigger()
-            waitForAcquisitionTimeOut(self._theoretical_wait_time_sec * 1e3 * 1.5)
+            waitForAcquisitionTimeOut(int(self._theoretical_wait_time_sec * 1e3 * 1.5))
             intensity = getMostRecentImage(self._x_pixel,self._y_pixel,self._total_pixel)
         
         intensity = np.sum(intensity, axis=0).reshape(-1).tolist()

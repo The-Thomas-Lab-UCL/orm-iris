@@ -3,7 +3,8 @@ import os
 import multiprocessing.pool as mpp
 
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, Qt as qc
+import PySide6.QtCore as qc
+from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer
 
 import queue
 from enum import Enum
@@ -17,7 +18,9 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.utils.general import *
+import threading
+import time
+from iris.utils.general import messagebox_request_input, get_all_widgets
 
 from iris.gui.motion_video import Wdg_MotionController, Motion_GoToCoor_Worker
 from iris.gui.raman import Wdg_SpectrometerController, RamanMeasurement_Worker, AcquisitionParams, Enum_ContinuousMeasurementTrigger as EnumTrig, Syncer_Raman
