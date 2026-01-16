@@ -70,11 +70,39 @@ Instrument configurations can be easily done in the config.ini file generated du
 2. Open the config.ini file using your text editor (notepad) or your code editor.
 3. Navigate to the 'CONTROLLER CHOICES' section and modify the controllers accordingly
    - At the moment, it should all be 'dummy'. Simply replace it with your instrument (the options are provided in the same line, after the ';' symbol. Be careful not to remove the ';' symbol). e.g., replace 'dummy' with 'thorlabs_mono' for a Thorlabs monochrome camera.
+   - See the config file example below
 4. Save the config.ini file
 5.  Run the IRIS app to check if the instrument is running properly (by running the 'main_controller.py' file to open the GUI)
 6. Repeat step 1 to 5 for each instrument.
 
 Note: All the instruments can technically be installed simultaneously, but installing them one at a time is much easier to troubleshoot if a problem occurs.
+
+### Example config file
+```
+...
+[CONTROLLER CHOICES]
+camera_controller = "thorlabs_color"	; select between: "dummy", "webcam", "thorlabs_mono", "thorlabs_color"
+spectrometer_controller = "qepro"	; select between: "dummy", "pi", "qepro", "andor", "wasatch_enlighten"
+stagexy_controller = "zaber"	; select between: "dummy", "m30xym", "zaber", "pi"
+stagez_controller = "mcm301"	; select between: "dummy", "z825b", "mcm301", "pfm450"
+...
+[CONTROLLER SPECIFIC PARAMETERS]
+oceaninsight_api_dirpath = "C:\Program Files\Ocean Insight\OceanDirect SDK\Python\oceandirect"	; Path to the Ocean Optics OceanDirect API module
+oceaninsight_mode = "continuous"	; Select between "discrete" and "continuous" mode. "continuous" collects spectra consecutively without waiting for the "measure_spectrum()" to be called. Default: "discrete"
+...
+thorlabs_camera_dll_path = "C:\[redacted]\ThorCam dlls\64_lib"	; Path to the Thorlabs camera DLL
+thorlabs_camera_exposure_time = 100	; Camera exposure time in [us], default: 10000
+thorlabs_camera_framepertrigger = 0	; Number of frames per trigger, default: 0 for continuous acquisition mode
+thorlabs_camera_imagepoll_timeout = 1000	; Timeout for the image polling in [ms], default: 1000
+...
+zaber_comport = "COM3"	; COM (communication) port for the Zaber stage controller
+...
+mcm301_sdk_dirpath = "C:\Program Files (x86)\Thorlabs\MCM301\Sample\Thorlabs_MCM301_PythonSDK"	; Dirpath to the MCM301 Thorlabs stage's Python SDK
+...
+```
+Notes:
+* In this example, the thorlabs_color camera, qepro spectrometer, zaber xy-stage, and mcm301 z-stage were used in the setup.
+* Notice how the relevant \[CONTROLLER SPECIFIC PARMAETERS\] values have to be defined for each respective instrument (thorlabs_camera, oceaninsight, zaber, and mcm301 respectively)
 
 ## Instrument controller package installation
 Please follow these step-by-step instructions to install your instrument controllers, and do not hesitate to contact us if any problem occurs.
