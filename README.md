@@ -40,12 +40,12 @@ There are two main formats to save the data:
 
 .csv and .txt formats are simple and can be easily imported into other files, but they can take a lot more space than the other formats (currently supporting .parquet and .feather). For this reason, we have developed our own structure using an SQLite3 database format (the .db format) in conjunction with the parquet file format. This allows users to see into the data saved using an online database viewer, but also keeps the savefiles small in a separate './data' subfolder in parquet files. This saves more than 95% of the disk space used compared to .txt and .csv files. Additionally, these database files can also be loaded back into IRIS to review previous measurements. In short, we recommend using the **database format for long-term storage** and the **tabular format for importing into other software**.
 
-## Installation
+## Installation (Windows)
 At the moment, we are still in the middle of creating a detailed installation instruction. In the meantime, please contact us at kevin.uning.23@ucl.ac.uk. We would be happy to have a video call to assist with your installations.
 But if you would like to attempt this on your own:
-1. Install Python (preferably 3.12.x or 3.13.x)
+1. Install Python (preferably 3.13.x, and it currently only supports >= 3.13)
    - Make sure to check the 'Documentation', 'pip', 'tcl/tk and IDLE', and 'py launcher' during the installation under the 'Optional Features' window (see the screenshot below).
-   - If this step is missed, finish installing Python, and restart the computer, and rerun the installation file. This should allow you to modify the previous installation and to enable these features.
+   - If this step is missed, finish installing Python, restart the computer, and rerun the installation file. This should allow you to modify the previous installation and to enable these features.
 3. Install the 'GitHub Desktop' app (this makes it easy to track changes and to keep using the same version)
 4. Install your preferred code editor (e.g., Visual Studio Code)
 5. Restart the computer (this prevents any potential unfinished installation issues)
@@ -63,6 +63,28 @@ Optionally, a virtual environment can be set up before running step 7 (but this 
 
 https://www.alphr.com/wp-content/uploads/2022/08/install-5.png<img width="660" height="402" alt="image" src="https://github.com/user-attachments/assets/7479ecd4-bb4d-455c-931a-19439ca35901" />
 (Screenshot obtained from: https://www.alphr.com/install-pip-windows/ on the 22nd October 2025)
+
+### Other OS
+The instrument controls have only been developed for Windows and so, usage on Linux or macOS to control the microscope is not recommended. However, the app and IRIS package do install (and work) as intended on Linux and macOS, which you might find helpful for non-control-related operations such as opening/modifying/format-changing a saved measurement file, developing extensions, coupling the IRIS package to your project, etc.
+
+IRIS can be installed in unix/CLI as follows:
+```
+git clone git@github.com:The-Thomas-Lab-UCL/orm-iris.git
+```
+
+Note that `python -m pip install .` does not work (even with `--user`); You must create a venv (installable with python3.13-venv package):
+
+```
+sudo aptitude install python3.13-venv
+python3.13 -m venv ../.virtual-env
+source ../.virtual-env/bin/activate # to activate the virtual environment
+python3.13 -m pip install --upgrade pip
+python3.13 -m pip install .
+# to actually run the program:
+python3.13 main_controller.py
+deactivate # the virtual environment when done
+```
+
 
 ## Configuring the instruments
 Instrument configurations can be easily done in the config.ini file generated during the first run. To do so:
