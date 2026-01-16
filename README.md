@@ -45,7 +45,7 @@ At the moment, we are still in the middle of creating a detailed installation in
 But if you would like to attempt this on your own:
 1. Install Python (preferably 3.13.x, and it currently only supports >= 3.13)
    - Make sure to check the 'Documentation', 'pip', 'tcl/tk and IDLE', and 'py launcher' during the installation under the 'Optional Features' window (see the screenshot below).
-   - If this step is missed, finish installing Python, restart the computer, and rerun the installation file. This should allow you to modify the previous installation and to enable these features.
+   - If this step is missed, finish installing Python, restart the computer, and rerun the installation file. This should allow you to modify the previous installation and enable these features.
 3. Install the 'GitHub Desktop' app (this makes it easy to track changes and to keep using the same version)
 4. Install your preferred code editor (e.g., Visual Studio Code)
 5. Restart the computer (this prevents any potential unfinished installation issues)
@@ -56,7 +56,7 @@ But if you would like to attempt this on your own:
 10. Open and run main_controller.py
     - This should open the GUI (similar to the screenshot above).
     - And should create a config.ini and config_shortcuts.ini files in the root directory.
-    - If you could see the GUI, congratulations! You have successfully installed the 
+    - If you could see the GUI, congratulations! You have successfully installed the app!
 11. Turn off the app and follow the instructions in the next section to configure the config.ini file according to your microscope instruments.
 
 Optionally, a virtual environment can be set up before running step 7 (but this can cause a lot of confusion during the installation process, so unless familiar with the process, feel free to leave this out).
@@ -82,15 +82,15 @@ python3.13 -m pip install --upgrade pip
 python3.13 -m pip install .
 # to actually run the program:
 python3.13 main_controller.py
-deactivate # the virtual environment when done
+deactivate # to the virtual environment when done
 ```
 
 
 ## Configuring the instruments
-Instrument configurations can be easily done in the config.ini file generated during the first run. To do so:
+Instrument configurations can be easily done in the config.ini file generated during the first run. If it does not exist, try running main_controller.py again. To do so:
 1. Install the necessary packages related to the instrument. Please refer to the following 'Instrument controller package installation' subsection before proceeding.
 2. Open the config.ini file using your text editor (notepad) or your code editor.
-3. Navigate to the 'CONTROLLER CHOICES' section and modify the controllers accordingly
+3. Navigate to the `[CONTROLLER CHOICES]` section and modify the controllers accordingly
    - At the moment, it should all be 'dummy'. Simply replace it with your instrument (the options are provided in the same line, after the ';' symbol. Be careful not to remove the ';' symbol). e.g., replace 'dummy' with 'thorlabs_mono' for a Thorlabs monochrome camera.
    - See the config file example below
 4. Save the config.ini file
@@ -124,7 +124,7 @@ mcm301_sdk_dirpath = "C:\Program Files (x86)\Thorlabs\MCM301\Sample\Thorlabs_MCM
 ```
 Notes:
 * In this example, the thorlabs_color camera, qepro spectrometer, zaber xy-stage, and mcm301 z-stage were used in the setup.
-* Notice how the relevant \[CONTROLLER SPECIFIC PARMAETERS\] values have to be defined for each respective instrument (thorlabs_camera, oceaninsight, zaber, and mcm301 respectively)
+* Notice how the relevant `[CONTROLLER SPECIFIC PARMAETERS]` values have to be defined for each respective instrument (thorlabs_camera, oceaninsight, zaber, and mcm301 respectively)
 
 ## Instrument controller package installation
 Please follow these step-by-step instructions to install your instrument controllers, and do not hesitate to contact us if any problem occurs.
