@@ -13,6 +13,7 @@ import threading
 import queue
 from typing import Any
 from dataclasses import dataclass, fields
+from uuid import uuid4
 
 if __name__ == '__main__':
     import sys
@@ -140,6 +141,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         
         super().__init__(parent)
         self._mappingHub:MeaRMap_Hub = mappingHub
+        self._id = str(uuid4().hex)
         
     # >>> Main widget setup <<<
         self._widget = HeatmapPlotter_Design(self)
@@ -251,6 +253,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         
         # Bind selections to plot the latest measurement_data df
         self._combo_plot_mappingUnitName.currentTextChanged.connect(lambda: self._sig_request_update_comboboxes.emit())
+        self._combo_plot_mappingUnitName.currentTextChanged.connect(lambda: self._sig_request_update_plot.emit())
         self._combo_plot_SpectralPosition.currentIndexChanged.connect(lambda: self._sig_request_update_plot.emit())
         
         self._combo_plot_mappingUnitName.currentTextChanged.connect(self._emit_current_mappingUnit_name)
@@ -420,7 +423,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         """
         self._eve_combo_req.set()
         
-    def _update_comboboxes(self, set_unit_name:str|None=None, set_wavelength:float|None=None) -> None:
+    def _update_comboboxes(self) -> None:
         """
         Refreshes the plotter's combobox according to the mappingUnits in the mappingHub
         
@@ -434,11 +437,13 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
             self._eve_combo_req.set()   # Re-request the update later
             return
         
+        # print(f'\n{self._id} Updating comboboxes...')
+        
         self._isupdating_comboboxes = True
         self._combo_plot_mappingUnitName.blockSignals(True)
         self._combo_plot_SpectralPosition.blockSignals(True)
         
-        if set_unit_name is None: set_unit_name = self._combo_plot_mappingUnitName.currentText()
+        set_unit_name = self._combo_plot_mappingUnitName.currentText()
         set_wavelength = self.get_current_wavelength()
         
         # Check if there are any measurements in the mappingHub for the refresh. Returns if not
@@ -456,11 +461,15 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         # Get the mappingUnit to be set
         list_names = self._mappingHub.get_list_MappingUnit_names()
         if set_unit_name in list_valid_names:
+            # print(f'{self._id} Setting mapping unit for combobox update: {set_unit_name}')
             mappingUnit = self._mappingHub.get_MappingUnit(unit_name=set_unit_name)
         elif self._current_mappingUnit.get_unit_name() in list_valid_names and\
             self._current_mappingUnit.check_measurement_and_metadata_exist():
+            # print(f'{self._id} Keeping current mapping unit for combobox update: {self._current_mappingUnit.get_unit_name()}')
             mappingUnit = self._current_mappingUnit
-        else: mappingUnit = self._mappingHub.get_MappingUnit(unit_name=list_valid_names[0])
+        else:
+            # print(f'{self._id} Setting mapping unit for combobox update to first valid unit: {list_valid_names[0]}')
+            mappingUnit = self._mappingHub.get_MappingUnit(unit_name=list_valid_names[0])
         unit_name = mappingUnit.get_unit_name()
         
         # Get the wavelength or Raman shift list to be set
@@ -560,9 +569,18 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         Get the currently selected mapping unit from the combo box.
         
         Returns:
-            MappingMeasurement_Unit: The currently selected mapping unit.
+            MeaRMap_Unit|None: The currently selected mapping unit.
         """
-        return self._current_mappingUnit
+        mappingUnit_name = self._combo_plot_mappingUnitName.currentText()
+        try:
+            mappingUnit = self._mappingHub.get_MappingUnit(unit_name=mappingUnit_name)
+            if mappingUnit.check_measurement_and_metadata_exist():
+                return mappingUnit
+            else:
+                return None
+        except Exception as e:
+            print('get_selected_mappingUnit',e)
+            return None
     
     def _update_currentMappingUnit_observer(self, mappingUnit_name:str) -> None:
         """
@@ -615,15 +633,16 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         assert isinstance(self._mappingHub,MeaRMap_Hub),\
             "plot_heatmap: Measurement data is not of the correct type. Expected: MappingMeasurement_Hub"
         
-        mappingUnit = self._current_mappingUnit
-        if not isinstance(mappingUnit, MeaRMap_Unit) or not mappingUnit.check_measurement_and_metadata_exist(): return
+        mappingUnit = self.get_selected_mappingUnit()
+        if mappingUnit is None:
+            self.request_combobox_update()
+            return
 
         # >>> Find the wavelength
         wavelength = self.get_current_wavelength()
         if wavelength is None: return
         
         self._isplotting = True
-        self._current_mappingUnit = mappingUnit
         
         #PlotterOptions, PlotterParams, PlotterExtraParamsBase, XYLimits
         options = self._get_plotter_option()
@@ -632,6 +651,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
             wavelength=wavelength,
             clim=None,
         )
+        # print(f'{self._id} Plotting heatmap for unit: {mappingUnit.get_unit_name()}, wavelength: {wavelength}nm')
         params_extra = self._get_plotter_extra_params()
         limits_xy = self._get_plot_xylim()
         
