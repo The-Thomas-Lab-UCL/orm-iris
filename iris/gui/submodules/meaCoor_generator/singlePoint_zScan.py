@@ -175,10 +175,10 @@ class singlePoint_zScan(Ui_singlePointZScan, qw.QWidget):
         coor_xy_um = self.spin_coorx.value(), self.spin_coory.value()
         coor_z1_um = self.spin_coorZStart.value()
         coor_z2_um = self.spin_coorZEnd.value()
-        res_z_um = self.spin_resPt.value()
+        res_z_pt = self.spin_resPt.value()
         
         # Generate the mapping coordinates
-        list_z_um = np.linspace(coor_z1_um,coor_z2_um,num=int(abs(coor_z2_um-coor_z1_um)/res_z_um)+1)
+        list_z_um = np.linspace(coor_z1_um,coor_z2_um,num=res_z_pt)
         list_mapping_coor_mm = [(coor_xy_um[0]/1e3,coor_xy_um[1]/1e3,z/1e3) for z in list_z_um]
         
         return list_mapping_coor_mm

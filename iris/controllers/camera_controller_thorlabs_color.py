@@ -186,7 +186,7 @@ class CameraController_ThorlabsColor(Class_CameraController):
             exposure_time_us (int | float): Exposure time in microseconds
         """
         with self._lock:
-            try: self.camera.exposure_time_us = exposure_time_us
+            try: self.camera.exposure_time_us = int(exposure_time_us)
             except Exception as e: print('set_exposure_time error:\n{}'.format(e))
             
     def get_exposure_time(self) -> int|float|None:
