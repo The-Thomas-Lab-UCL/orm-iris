@@ -124,7 +124,7 @@ class Wdg_DataHub_Mapping_Ui(qw.QWidget, Ui_DataHub_mapping):
 
 class Wdg_DataHub_Mapping(qw.QWidget):
     
-    _sig_modify_tree = Signal()     # Emitted when the treeview needs to be modified (internal)
+    _sig_req_update_tree = Signal()     # Emitted when the treeview needs to be updated (internal)
     sig_tree_changed = Signal()     # Emitted when the treeview is changed
     sig_tree_selection = Signal()   # Emitted when the treeview selection is changed
     sig_tree_selection_str = Signal(str)   # Emitted when the treeview selection is changed, with the selected unit name as argument
@@ -156,7 +156,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         if isinstance(mappingHub, MeaRMap_Hub): self._MappingHub = mappingHub
         else: self._MappingHub = MeaRMap_Hub()
         # Defer observer registration to prevent signals during initialization
-        QTimer.singleShot(0, lambda: self._MappingHub.add_observer(self._sig_modify_tree.emit))
+        QTimer.singleShot(0, lambda: self._MappingHub.add_observer(self._sig_req_update_tree.emit))
         
         # Save parameters
         self._sessionid = get_timestamp_us_str()
@@ -210,7 +210,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
 
         # Other connection setup
         self._save_worker.sig_save_done.connect(self._handle_saveload_result)
-        self._sig_modify_tree.connect(self.update_tree)
+        self._sig_req_update_tree.connect(self.update_tree)
         
     # > Autosave info <
         # Autosave parameters
@@ -376,7 +376,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
                 if ok: unit.set_unitName_and_unitID(new_unitName)
                 else: break
                 
-        self._sig_modify_tree.emit()
+        self._sig_req_update_tree.emit()
                 
     def extend_MappingUnit(self, list_unit:list[MeaRMap_Unit], persist:bool=True):
         """
@@ -388,6 +388,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         """
         for unit in list_unit: self.append_MappingUnit(unit, persist=persist)
     
+    @Slot()
     def rename_unit(self):
         """
         Rename the selected MappingMeasurement_Unit in the MappingMeasurement_Hub
@@ -404,13 +405,15 @@ class Wdg_DataHub_Mapping(qw.QWidget):
             
             unit_name = selections[0].text(0)
             unit = self._MappingHub.get_MappingUnit(unit_name=unit_name)
+            unit_id = unit.get_unit_id()
             new_name, ok = qw.QInputDialog.getText(None, "Rename Mapping Unit", "Enter the new name for the selected Mapping Unit:",
                                                     text=unit.get_unit_name())
-            if ok: self._MappingHub.rename_mapping_unit(unit_name, new_name)
+            if ok: self._MappingHub.rename_mapping_unit(unit_id, new_name)
             self._flg_issaved = False
-        except Exception as e: qw.QErrorMessage().showMessage("Error in renaming the Mapping Unit\n" + str(e))
-        finally: self._sig_modify_tree.emit()
+        except Exception as e: qw.QMessageBox.warning(None, "Rename error", f"Error in renaming the Mapping Unit:\n{e}")
+        finally: self._sig_req_update_tree.emit()
     
+    @Slot()
     def delete_unit(self):
         """
         Delete the selected MappingMeasurement_Unit from the MappingMeasurement_Hub
@@ -435,7 +438,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
             self._MappingHub.remove_mapping_unit_name(unit_name)
         
         if len(selections) > 0: self._flg_issaved = False
-        self._sig_modify_tree.emit()
+        self._sig_req_update_tree.emit()
         
     @Slot()
     def _save_unit_ext(self) -> None:
@@ -528,16 +531,21 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         """
         if message != Save_worker.save_success and message != Save_worker.load_success:
             qw.QErrorMessage().showMessage(message)
-        else: qw.QMessageBox.information(None, "Save/Load operation", message)
+        elif message == Save_worker.save_success:
+            qw.QMessageBox.information(None, "Save/Load operation", message)
+            self._flg_issaved = True
+        elif message == Save_worker.load_success:
+            qw.QMessageBox.information(None, "Save/Load operation", message)
+            self._flg_issaved = False
         self._reset_reenable_saveload_buttons()
-        self._sig_modify_tree.emit()
+        self._sig_req_update_tree.emit()
         
     def _handle_hub_change(self):
         """
         Handle changes in the MappingMeasurement_Hub
         """
         self._flg_issaved = False
-        self._sig_modify_tree.emit()
+        self._sig_req_update_tree.emit()
         
     def append_RamanMeasurement_multi(self, measurement:MeaRaman, coor:tuple=(0,0,0)):
         """
