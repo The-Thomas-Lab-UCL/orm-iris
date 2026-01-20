@@ -288,6 +288,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
 
         # > Set up the Raman shift / wavelength toggle
         self._chk_plot_in_RamanShift = wdg.chk_Ramanshift
+        self._chk_plot_in_RamanShift.stateChanged.connect(self._update_comboboxes)
         
     def _init_plotter_options_widgets(self):
         """
