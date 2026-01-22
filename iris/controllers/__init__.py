@@ -23,6 +23,7 @@ dict_controller_options_default = {
     'stage_invertx': False,     # Flip the stage x-axis coordinate system direction
     'stage_inverty': False,     # Flip the stage y-axis coordinate system direction
     'stage_flipxy': False, # Flip the XY stage coordinate system
+    'stage_tiling_waittime_sec': 0.2,  # Wait time after each stage movement during tiling measurements in [s]
     # > Camera <
     'camera_index': 0,          # Index of the camera device to be used for capturing
     'videofeed_height': 250,    # Height of the video feed window
@@ -43,6 +44,7 @@ dict_controller_options_comments = {
     'stage_invertx': 'Flip the stage x-axis coordinate system direction',
     'stage_inverty': 'Flip the stage y-axis coordinate system direction',
     'stage_flipxy': 'Flip the x and y axis of the XY stage coordinate system',
+    'stage_tiling_waittime_sec': 'Wait time after each stage movement during tiling measurements in seconds',
     # > Camera <
     'camera_index': 'Index of the camera device to be used for capturing',
     'videofeed_height': 'Height of the video feed window',
@@ -118,6 +120,7 @@ class ControllerConfigEnum(Enum):
     STAGE_INVERTX = dict_controller_options_read['stage_invertx']
     STAGE_INVERTY = dict_controller_options_read['stage_inverty']
     STAGE_FLIPXY = dict_controller_options_read['stage_flipxy']
+    STAGE_TILING_WAITTIME_SEC = dict_controller_options_read['stage_tiling_waittime_sec']
 
     # > Camera <
     CAMERA_INDEX = dict_controller_options_read['camera_index']

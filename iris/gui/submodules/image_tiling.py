@@ -25,6 +25,8 @@ if __name__ == '__main__':
 
 from iris.utils.general import get_timestamp_us_str
 
+from iris.controllers import ControllerConfigEnum
+
 from iris.gui.motion_video import Wdg_MotionController
 from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
 from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates
@@ -150,7 +152,7 @@ class ImageProcessor_Worker(QObject):
             self.sig_gotocoor.emit(coor, flg_mvmt_done)
             flg_mvmt_done.wait()
             
-            time.sleep(0.3)  # Allow time for stage to settle
+            time.sleep(ControllerConfigEnum.STAGE_TILING_WAITTIME_SEC.value)  # Allow time for stage to settle
             
             img = self._motion_ctrl.get_current_image(wait_newimage=True)
             
