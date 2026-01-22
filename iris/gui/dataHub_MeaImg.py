@@ -7,7 +7,7 @@ from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer
 
 import sys
 import os
-from typing import Callable
+from typing import Callable, Literal
 
 if __name__ == '__main__':
     import sys
@@ -214,9 +214,13 @@ class Image_SaverLoader_Worker(QObject):
     finished = Signal(str)
     error = Signal(str)
     
-    msg_save_db = 'ImageMeasurementHub saved successfully (.db).'
-    msg_load_db = 'ImageMeasurementHub loaded successfully (.db).'
-    msg_save_png = 'ImageMeasurementUnit saved successfully as PNG.'
+    msg_save_db = 'ImageMeasurementHub saved successfully (.db): '
+    msg_load_db = 'ImageMeasurementHub loaded successfully (.db): '
+    msg_save_png = 'ImageMeasurementUnit saved successfully as PNG: '
+    
+    msg_error_save = 'Error saving ImageMeasurementHub (.db): '
+    msg_error_load = 'Error loading ImageMeasurementHub (.db): '
+    msg_error_save_png = 'Error saving ImageMeasurementUnit as PNG: '
     
     def __init__(self):
         super().__init__()
@@ -237,7 +241,7 @@ class Image_SaverLoader_Worker(QObject):
             thread.join()
             self.finished.emit(self.msg_save_db)
         except Exception as e:
-            self.error.emit(str(e))
+            self.error.emit(self.msg_error_save + str(e))
             
     @Slot(MeaImg_Hub,str)
     def load_ImageMeasurementHub(self, hub:MeaImg_Hub, file_path:str):
@@ -254,7 +258,7 @@ class Image_SaverLoader_Worker(QObject):
             handler.load_ImageMeasurementHub_database(file_path,hub)
             self.finished.emit(self.msg_load_db)
         except Exception as e:
-            self.error.emit(str(e))
+            self.error.emit(self.msg_error_load + str(e))
             
     @Slot(MeaImg_Unit,str,float)
     def save_ImageMeasurementUnit_png(self, unit:MeaImg_Unit, dirpath:str, resolution:float):
@@ -272,7 +276,7 @@ class Image_SaverLoader_Worker(QObject):
             stitched_img.save(os.path.join(dirpath, f'{unit.get_IdName()[1]}.png'))
             self.finished.emit(f'{self.msg_save_png} {unit.get_IdName()[1]}')
         except Exception as e:
-            self.error.emit(str(e))
+            self.error.emit(f'{self.msg_error_save_png} {unit.get_IdName()[1]}: {str(e)}')
 
 class Wdg_DataHub_Image(qw.QWidget):
     """
@@ -328,10 +332,10 @@ class Wdg_DataHub_Image(qw.QWidget):
         self._btn_remove = wdg.btn_remove
         self._btn_save_png = wdg.btn_save_png
         
-        self._btn_save.clicked.connect(lambda: self.save_ImageMeasurementHub())
-        self._btn_load.clicked.connect(lambda: self.load_ImageMeasurementHub())
-        self._btn_remove.clicked.connect(lambda: self.remove_selected_ImageMeasurementUnit())
-        self._btn_save_png.clicked.connect(lambda: self.export_selected_as_png())
+        self._btn_save.clicked.connect(self.save_ImageMeasurementHub)
+        self._btn_load.clicked.connect(self.load_ImageMeasurementHub)
+        self._btn_remove.clicked.connect(self.remove_selected_ImageMeasurementUnit)
+        self._btn_save_png.clicked.connect(self.export_selected_as_png)
         
         self._txt_btn_save = self._btn_save.text()
         self._txt_btn_load = self._btn_load.text()
@@ -353,8 +357,8 @@ class Wdg_DataHub_Image(qw.QWidget):
         self.sig_load.connect(self._worker.load_ImageMeasurementHub)
         self.sig_save_png.connect(self._worker.save_ImageMeasurementUnit_png)
         
-        self._worker.finished.connect(self.on_worker_finished)
-        self._worker.error.connect(lambda msg: qw.QMessageBox.critical(self, 'Error', msg))
+        self._worker.finished.connect(self._handle_worker_finished)
+        self._worker.error.connect(self._handle_worker_error)
         
         self._thread.finished.connect(self._thread.deleteLater)
         self._thread.finished.connect(self._worker.deleteLater)
@@ -365,7 +369,7 @@ class Wdg_DataHub_Image(qw.QWidget):
         # Signals
         self.sig_updateTree.connect(self.update_tree)
         
-    def on_worker_finished(self, msg:str):
+    def _handle_worker_finished(self, msg:str):
         """
         Slot to handle the finished signal from the worker.
         
@@ -374,84 +378,113 @@ class Wdg_DataHub_Image(qw.QWidget):
         """
         if msg == self._worker.msg_save_db:
             self._flg_issaved = True
+            self.reset_buttons('save')
         elif msg == self._worker.msg_load_db:
             self._flg_issaved = True
+            self.reset_buttons('load')
             self.sig_updateTree.emit()
+        elif msg.startswith(self._worker.msg_save_png):
+            self.reset_buttons('save_png')
+        else: raise ValueError('Unknown finished message from worker.')
         
         qw.QMessageBox.information(self, 'Success', msg)
         
-        self.reset_buttons()
+    def _handle_worker_error(self, error_msg:str):
+        """
+        Slot to handle the error signal from the worker.
         
-    def reset_buttons(self):
+        Args:
+            error_msg (str): Error message from the worker
+        """
+        qw.QMessageBox.critical(self, 'Error', error_msg)
+        if error_msg.startswith(self._worker.msg_error_save):
+            self.reset_buttons('save')
+        elif error_msg.startswith(self._worker.msg_error_load):
+            self.reset_buttons('load')
+        elif error_msg.startswith(self._worker.msg_error_save_png):
+            self.reset_buttons('save_png')
+        else: raise ValueError('Unknown error message from worker.')
+        
+    def reset_buttons(self, option:Literal['save','load','remove','save_png']):
         """
         Reset the button texts and states to their original values.
         """
-        self._btn_save.setEnabled(True)
-        self._btn_save.setText(self._txt_btn_save)
+        if option == 'save':
+            self._btn_save.setEnabled(True)
+            self._btn_save.setText(self._txt_btn_save)
+        elif option == 'load':
+            self._btn_load.setEnabled(True)
+            self._btn_load.setText(self._txt_btn_load)
+        elif option == 'remove':
+            self._btn_remove.setEnabled(True)
+            self._btn_remove.setText(self._txt_btn_remove)
+        elif option == 'save_png':
+            self._btn_save_png.setEnabled(True)
+            self._btn_save_png.setText(self._txt_btn_save_png)
+        else: raise ValueError('Unknown option for resetting buttons.')
         
-        self._btn_load.setEnabled(True)
-        self._btn_load.setText(self._txt_btn_load)
-        
-        self._btn_remove.setEnabled(True)
-        self._btn_remove.setText(self._txt_btn_remove)
-        
-        self._btn_save_png.setEnabled(True)
-        self._btn_save_png.setText(self._txt_btn_save_png)
-        
-    def disable_buttons(self):
+    def disable_buttons(self, option:Literal['save','load','remove','save_png']):
         """
         Disable all buttons in the frame.
         """
-        self._btn_save.setEnabled(False)
-        self._btn_load.setEnabled(False)
-        self._btn_remove.setEnabled(False)
-        self._btn_save_png.setEnabled(False)
+        if option == 'save': self._btn_save.setEnabled(False)
+        elif option == 'load': self._btn_load.setEnabled(False)
+        elif option == 'remove': self._btn_remove.setEnabled(False)
+        elif option == 'save_png': self._btn_save_png.setEnabled(False)
+        else: raise ValueError('Unknown option for disabling buttons.')
         
+    @Slot()
     def load_ImageMeasurementHub(self) -> None:
         """
         Load the ImageMeasurement_Hub data from the database file.
         """
-        self.disable_buttons()
+        self.disable_buttons('load')
         self._btn_load.setText('Loading...')
         file_path = qw.QFileDialog.getOpenFileName(self, 'Open Image Measurement Hub',
                                                     filter='Database files (*.db)')[0]
         
         if os.path.isfile(file_path) is False:
-            qw.QMessageBox.warning(self, 'Error', 'No file selected or file doesn\'t exist.')
+            qw.QMessageBox.warning(self, 'Error', "No file selected or file doesn't exist.")
+            self.reset_buttons('load')
             return
         
         self._flg_issaved = True
         self.sig_load.emit(self.ImageHub, file_path)
         
+    @Slot()
     def save_ImageMeasurementHub(self) -> None:
         """
         Save the ImageMeasurement_Hub data to a database file.
         """
-        self.disable_buttons()
+        self.disable_buttons('save')
         self._btn_save.setText('Saving to .db ...')
         file_path = qw.QFileDialog.getSaveFileName(
             self, 'Save Image Measurement Hub',
             filter='Database files (*.db)'
         )[0]
         
-        if not file_path: raise Exception('No file selected.')
+        if not file_path:
+            qw.QMessageBox.warning(self, 'Error', 'No file selected.')
+            self.reset_buttons('save')
+            return
         
         initdir = os.path.dirname(file_path)
         savename = os.path.basename(file_path)
         
         self.sig_save.emit(self.ImageHub, initdir, savename)
         
+    @Slot()
     def export_selected_as_png(self):
         """
         Exports the selected ImageMeasurement_Units as PNG files.
         """
-        self.disable_buttons()
+        self.disable_buttons('save_png')
         self._btn_save_png.setText('Saving to .png ...')
         
         res = qw.QInputDialog.getDouble(
             self, 'Export Resolution', 'Enter the resolution (percentage) for the PNG export:', 100, 0.1, 100, 1
         )
-        if not res[1]: self.reset_buttons(); return
+        if not res[1]: self.reset_buttons('save_png'); return
         
         resolution = res[0]
         
@@ -460,19 +493,20 @@ class Wdg_DataHub_Image(qw.QWidget):
             self, 'Select the folder to save the PNG files'
         )
         if not os.path.isdir(dirpath):
-            qw.QMessageBox.critical(self, 'Error', 'Invalid folder selected.'); self.reset_buttons(); return
+            qw.QMessageBox.critical(self, 'Error', 'Invalid folder selected.'); self.reset_buttons('save_png')
+            return
         
         tree = self._tree
         selections = tree.selectedItems()
         if len(selections) == 0:
-            qw.QMessageBox.critical(self, 'Error', 'No entry selected.'); self.reset_buttons()
+            qw.QMessageBox.critical(self, 'Error', 'No entry selected.'); self.reset_buttons('save_png')
             return
         
         for item in selections:
             unit_id = item.text(0)
             unit = self.ImageHub.get_ImageMeasurementUnit(unit_id=unit_id)
             self.sig_save_png.emit(unit, dirpath, resolution)
-                
+            
     def append_ImageMeasurementUnit(self, unit:MeaImg_Unit, flg_nameprompt:bool=True):
         """
         Appends the given ImageMeasurement_Unit to the ImageMeasurement_Hub and
@@ -508,6 +542,7 @@ class Wdg_DataHub_Image(qw.QWidget):
             if retry == qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes exists
                 self.append_ImageMeasurementUnit(unit, True)
         
+    @Slot()
     def remove_selected_ImageMeasurementUnit(self):
         """
         Remove the selected ImageMeasurementUnit from the ImageMeasurement_Hub.
@@ -518,8 +553,16 @@ class Wdg_DataHub_Image(qw.QWidget):
             qw.QMessageBox.warning(self, 'Error', 'No entry selected.')
             return
         
-        for item in selection:
-            unit_id = item.text(0)
+        list_unit_id = [item.text(0) for item in selection]
+        confirm = qw.QMessageBox.question(
+            self, 'Confirm Removal',
+            f'Are you sure you want to remove the selected ImageMeasurementUnit(s)?\nThis action cannot be undone.',
+            qw.QMessageBox.Yes | qw.QMessageBox.No # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes/No exists
+        )
+        if confirm != qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes exists
+            return
+        
+        for unit_id in list_unit_id:
             self.ImageHub.remove_ImageMeasurementUnit(unit_id)
         
         self._flg_issaved = False
