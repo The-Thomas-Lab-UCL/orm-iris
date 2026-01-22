@@ -266,22 +266,26 @@
          </item>
         </layout>
        </widget>
-       <widget class="QWidget" name="tab_heatmapoverlay">
-        <attribute name="title">
-         <string>Heatmap overlay plotter</string>
-        </attribute>
-        <layout class="QVBoxLayout" name="verticalLayout_7">
-         <item>
-          <layout class="QVBoxLayout" name="lyt_heatmapoverlay_holder"/>
-         </item>
-        </layout>
-       </widget>
       </widget>
      </item>
     </layout>
    </item>
   </layout>
  </widget>
+ <tabstops>
+  <tabstop>tab_main</tabstop>
+  <tabstop>tab_mappingoptions</tabstop>
+  <tabstop>rb_raster</tabstop>
+  <tabstop>rb_snake</tabstop>
+  <tabstop>rb_xdir</tabstop>
+  <tabstop>rb_ydir</tabstop>
+  <tabstop>btn_discrete</tabstop>
+  <tabstop>btn_continuous</tabstop>
+  <tabstop>btn_stop</tabstop>
+  <tabstop>chk_randomise</tabstop>
+  <tabstop>chk_skipover</tabstop>
+  <tabstop>spin_skipover</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

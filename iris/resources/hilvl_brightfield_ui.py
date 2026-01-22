@@ -49,16 +49,6 @@ class Ui_Hilvl_Brightfield(object):
         self.verticalLayout_5.addLayout(self.lyt_heatmapOverlay)
 
         self.tabWidget.addTab(self.tab_heatmapOverlay, "")
-        self.tab_objectiveSetup = QWidget()
-        self.tab_objectiveSetup.setObjectName(u"tab_objectiveSetup")
-        self.verticalLayout_7 = QVBoxLayout(self.tab_objectiveSetup)
-        self.verticalLayout_7.setObjectName(u"verticalLayout_7")
-        self.lyt_holder_objSetup = QVBoxLayout()
-        self.lyt_holder_objSetup.setObjectName(u"lyt_holder_objSetup")
-
-        self.verticalLayout_7.addLayout(self.lyt_holder_objSetup)
-
-        self.tabWidget.addTab(self.tab_objectiveSetup, "")
 
         self.main_layout.addWidget(self.tabWidget)
 
@@ -78,6 +68,5 @@ class Ui_Hilvl_Brightfield(object):
         Hilvl_Brightfield.setWindowTitle(QCoreApplication.translate("Hilvl_Brightfield", u"Form", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_tiling), QCoreApplication.translate("Hilvl_Brightfield", u"Image tiling", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_heatmapOverlay), QCoreApplication.translate("Hilvl_Brightfield", u"Heatmap overlay", None))
-        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_objectiveSetup), QCoreApplication.translate("Hilvl_Brightfield", u"Objective setup", None))
     # retranslateUi
 

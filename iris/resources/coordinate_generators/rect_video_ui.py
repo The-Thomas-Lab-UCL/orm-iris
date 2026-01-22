@@ -216,6 +216,14 @@ class Ui_Rect_Video(object):
 
         self.verticalLayout_2.addLayout(self.main_layout)
 
+        QWidget.setTabOrder(self.btn_defineROI, self.btn_instruction)
+        QWidget.setTabOrder(self.btn_instruction, self.chk_lres)
+        QWidget.setTabOrder(self.chk_lres, self.spin_z)
+        QWidget.setTabOrder(self.spin_z, self.btn_storeZ)
+        QWidget.setTabOrder(self.btn_storeZ, self.spin_resXPt)
+        QWidget.setTabOrder(self.spin_resXPt, self.spin_resYPt)
+        QWidget.setTabOrder(self.spin_resYPt, self.spin_resXum)
+        QWidget.setTabOrder(self.spin_resXum, self.spin_resYum)
 
         self.retranslateUi(Rect_Video)
 
@@ -225,7 +233,7 @@ class Ui_Rect_Video(object):
     def retranslateUi(self, Rect_Video):
         Rect_Video.setWindowTitle(QCoreApplication.translate("Rect_Video", u"Form", None))
         self.groupBox.setTitle(QCoreApplication.translate("Rect_Video", u"Image-based coordinate selection", None))
-        self.chk_lres.setText(QCoreApplication.translate("Rect_Video", u"Use low-resolution image (faster processing)", None))
+        self.chk_lres.setText(QCoreApplication.translate("Rect_Video", u"Show low-resolution image (faster processing)", None))
         self.btn_defineROI.setText(QCoreApplication.translate("Rect_Video", u"Define ROI", None))
         self.btn_instruction.setText(QCoreApplication.translate("Rect_Video", u"Show instructions", None))
         self.label_11.setText(QCoreApplication.translate("Rect_Video", u"X:", None))

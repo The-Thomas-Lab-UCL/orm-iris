@@ -75,6 +75,8 @@ class Ui_tiling_method(object):
 
         self.main_layout.addWidget(self.btn_capture)
 
+        QWidget.setTabOrder(self.chk_lres, self.combo_img)
+        QWidget.setTabOrder(self.combo_img, self.btn_capture)
 
         self.retranslateUi(tiling_method)
 
@@ -83,7 +85,7 @@ class Ui_tiling_method(object):
 
     def retranslateUi(self, tiling_method):
         tiling_method.setWindowTitle(QCoreApplication.translate("tiling_method", u"Form", None))
-        self.chk_lres.setText(QCoreApplication.translate("tiling_method", u"Use low-resolution image (faster processing)", None))
+        self.chk_lres.setText(QCoreApplication.translate("tiling_method", u"Show low-resolution image (faster processing)", None))
         self.btn_capture.setText(QCoreApplication.translate("tiling_method", u"Perform image tiling", None))
     # retranslateUi
 

@@ -53,6 +53,7 @@ class Ui_wdg_objectives(object):
 
         self.horizontalLayout.addLayout(self.main_layout)
 
+        QWidget.setTabOrder(self.combo_objective, self.btn_objectiveSetup)
 
         self.retranslateUi(wdg_objectives)
 

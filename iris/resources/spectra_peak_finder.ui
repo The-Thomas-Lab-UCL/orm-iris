@@ -167,6 +167,17 @@
    </item>
   </layout>
  </widget>
+ <tabstops>
+  <tabstop>btn_savePlotPng</tabstop>
+  <tabstop>btn_savePlotTxt</tabstop>
+  <tabstop>ent_xmin</tabstop>
+  <tabstop>ent_xmax</tabstop>
+  <tabstop>ent_ymin</tabstop>
+  <tabstop>ent_ymax</tabstop>
+  <tabstop>btn_resetLimits</tabstop>
+  <tabstop>chk_RamanShift</tabstop>
+  <tabstop>tree_peaks</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

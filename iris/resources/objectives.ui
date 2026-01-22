@@ -43,6 +43,10 @@
    </item>
   </layout>
  </widget>
+ <tabstops>
+  <tabstop>combo_objective</tabstop>
+  <tabstop>btn_objectiveSetup</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

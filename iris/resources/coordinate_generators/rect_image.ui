@@ -51,7 +51,7 @@
           <item row="2" column="0" colspan="3">
            <widget class="QCheckBox" name="chk_lres">
             <property name="text">
-             <string>Use low-resolution image (faster processing)</string>
+             <string>Show low-resolution image (faster processing)</string>
             </property>
             <property name="checked">
              <bool>true</bool>

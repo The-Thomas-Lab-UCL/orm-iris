@@ -357,6 +357,19 @@
    </layout>
   </widget>
  </widget>
+ <tabstops>
+  <tabstop>spin_centrex</tabstop>
+  <tabstop>spin_centrey</tabstop>
+  <tabstop>btn_storecentre</tabstop>
+  <tabstop>spin_widx</tabstop>
+  <tabstop>spin_heiy</tabstop>
+  <tabstop>spin_z</tabstop>
+  <tabstop>btn_storez</tabstop>
+  <tabstop>spin_resxpt</tabstop>
+  <tabstop>spin_resypt</tabstop>
+  <tabstop>spin_resxum</tabstop>
+  <tabstop>spin_resyum</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

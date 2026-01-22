@@ -72,6 +72,13 @@
    </item>
   </layout>
  </widget>
+ <tabstops>
+  <tabstop>tree_coor</tabstop>
+  <tabstop>btn_rename</tabstop>
+  <tabstop>btn_remove</tabstop>
+  <tabstop>btn_load</tabstop>
+  <tabstop>btn_save</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

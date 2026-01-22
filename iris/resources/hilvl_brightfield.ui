@@ -41,16 +41,6 @@
          </item>
         </layout>
        </widget>
-       <widget class="QWidget" name="tab_objectiveSetup">
-        <attribute name="title">
-         <string>Objective setup</string>
-        </attribute>
-        <layout class="QVBoxLayout" name="verticalLayout_7">
-         <item>
-          <layout class="QVBoxLayout" name="lyt_holder_objSetup"/>
-         </item>
-        </layout>
-       </widget>
       </widget>
      </item>
     </layout>

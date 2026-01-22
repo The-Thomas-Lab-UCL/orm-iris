@@ -170,6 +170,17 @@ class Ui_every_z(object):
 
         self.verticalLayout_2.addLayout(self.main_layout)
 
+        QWidget.setTabOrder(self.combo_mappingCoor, self.btn_start)
+        QWidget.setTabOrder(self.btn_start, self.spin_newZUm)
+        QWidget.setTabOrder(self.spin_newZUm, self.btn_storeZ)
+        QWidget.setTabOrder(self.btn_storeZ, self.chk_autoNextCoor)
+        QWidget.setTabOrder(self.chk_autoNextCoor, self.rad_lastFilled)
+        QWidget.setTabOrder(self.rad_lastFilled, self.rad_originalZ)
+        QWidget.setTabOrder(self.rad_originalZ, self.btn_goToNext)
+        QWidget.setTabOrder(self.btn_goToNext, self.btn_goToPrev)
+        QWidget.setTabOrder(self.btn_goToPrev, self.btn_cancel)
+        QWidget.setTabOrder(self.btn_cancel, self.btn_finishAndSave)
+        QWidget.setTabOrder(self.btn_finishAndSave, self.btn_showInstructions)
 
         self.retranslateUi(every_z)
 
