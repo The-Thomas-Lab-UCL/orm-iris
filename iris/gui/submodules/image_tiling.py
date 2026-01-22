@@ -11,6 +11,7 @@ from PySide6.QtCore import Signal, Slot, QObject, QThread
 from PIL import Image
 import threading
 import numpy as np
+import time
 
 from copy import deepcopy
 
@@ -148,6 +149,8 @@ class ImageProcessor_Worker(QObject):
             flg_mvmt_done = threading.Event()
             self.sig_gotocoor.emit(coor, flg_mvmt_done)
             flg_mvmt_done.wait()
+            
+            time.sleep(0.3)  # Allow time for stage to settle
             
             img = self._motion_ctrl.get_current_image(wait_newimage=True)
             
