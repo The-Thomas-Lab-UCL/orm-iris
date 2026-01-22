@@ -33,7 +33,7 @@
         <item>
          <widget class="QCheckBox" name="chk_lres">
           <property name="text">
-           <string>Use low-resolution image (faster processing)</string>
+           <string>Show low-resolution image (faster processing)</string>
           </property>
           <property name="checked">
            <bool>true</bool>
@@ -67,6 +67,11 @@
    </layout>
   </widget>
  </widget>
+ <tabstops>
+  <tabstop>chk_lres</tabstop>
+  <tabstop>combo_img</tabstop>
+  <tabstop>btn_capture</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

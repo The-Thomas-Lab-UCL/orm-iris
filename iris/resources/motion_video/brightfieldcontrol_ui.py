@@ -36,6 +36,7 @@ class Ui_wdg_brightfield_controller(object):
         self.dock_video = QDockWidget(wdg_brightfield_controller)
         self.dock_video.setObjectName(u"dock_video")
         self.dock_video.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetFloatable|QDockWidget.DockWidgetFeature.DockWidgetMovable)
+        self.dock_video.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea|Qt.DockWidgetArea.RightDockWidgetArea)
         self.dockWidgetContents = QWidget()
         self.dockWidgetContents.setObjectName(u"dockWidgetContents")
         self.verticalLayout_3 = QVBoxLayout(self.dockWidgetContents)
@@ -117,6 +118,8 @@ class Ui_wdg_brightfield_controller(object):
 
         self.verticalLayout.addLayout(self.main_layout)
 
+        QWidget.setTabOrder(self.chk_crosshair, self.chk_scalebar)
+        QWidget.setTabOrder(self.chk_scalebar, self.btn_camera_onoff)
         QWidget.setTabOrder(self.btn_camera_onoff, self.pushButton_2)
         QWidget.setTabOrder(self.pushButton_2, self.combo_image_correction)
         QWidget.setTabOrder(self.combo_image_correction, self.btn_setffgain)

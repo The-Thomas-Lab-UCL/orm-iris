@@ -81,6 +81,13 @@ class Ui_DataHub_mapping(object):
 
         self.gridLayout.addLayout(self.lyt_saveload, 3, 0, 1, 3)
 
+        QWidget.setTabOrder(self.ent_searchbar, self.tree_data)
+        QWidget.setTabOrder(self.tree_data, self.btn_refresh)
+        QWidget.setTabOrder(self.btn_refresh, self.btn_rename)
+        QWidget.setTabOrder(self.btn_rename, self.btn_delete)
+        QWidget.setTabOrder(self.btn_delete, self.btn_save_ext)
+        QWidget.setTabOrder(self.btn_save_ext, self.btn_save_db)
+        QWidget.setTabOrder(self.btn_save_db, self.btn_load_db)
 
         self.retranslateUi(DataHub_mapping)
 

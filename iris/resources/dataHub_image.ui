@@ -26,6 +26,9 @@
          <layout class="QVBoxLayout" name="verticalLayout">
           <item>
            <widget class="QTreeWidget" name="tree">
+            <property name="selectionMode">
+             <enum>QAbstractItemView::SelectionMode::ExtendedSelection</enum>
+            </property>
             <column>
              <property name="text">
               <string notr="true">1</string>

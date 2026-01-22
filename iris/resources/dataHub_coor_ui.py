@@ -59,6 +59,10 @@ class Ui_dataHub_coor(object):
 
         self.gridLayout.addWidget(self.btn_save, 2, 1, 1, 1)
 
+        QWidget.setTabOrder(self.tree_coor, self.btn_rename)
+        QWidget.setTabOrder(self.btn_rename, self.btn_remove)
+        QWidget.setTabOrder(self.btn_remove, self.btn_load)
+        QWidget.setTabOrder(self.btn_load, self.btn_save)
 
         self.retranslateUi(dataHub_coor)
 

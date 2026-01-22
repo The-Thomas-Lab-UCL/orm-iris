@@ -30,7 +30,7 @@
              <set>QDockWidget::DockWidgetFeature::DockWidgetFloatable|QDockWidget::DockWidgetFeature::DockWidgetMovable</set>
             </property>
             <property name="allowedAreas">
-             <set>Qt::DockWidgetArea::AllDockWidgetAreas</set>
+             <set>Qt::DockWidgetArea::LeftDockWidgetArea|Qt::DockWidgetArea::RightDockWidgetArea</set>
             </property>
             <widget class="QWidget" name="dockWidgetContents_2">
              <layout class="QVBoxLayout" name="verticalLayout_3">
@@ -337,6 +337,21 @@ plot limits</string>
    </item>
   </layout>
  </widget>
+ <tabstops>
+  <tabstop>chk_ramanshift</tabstop>
+  <tabstop>ent_plt_xmin</tabstop>
+  <tabstop>ent_plt_xmax</tabstop>
+  <tabstop>ent_plt_ymin</tabstop>
+  <tabstop>ent_plt_ymax</tabstop>
+  <tabstop>btn_reset_plot_limits</tabstop>
+  <tabstop>btn_snglmea</tabstop>
+  <tabstop>btn_contmea</tabstop>
+  <tabstop>spin_inttime_ms</tabstop>
+  <tabstop>spin_accum</tabstop>
+  <tabstop>ent_laserwavelength_nm</tabstop>
+  <tabstop>ent_laserpower_mW</tabstop>
+  <tabstop>btn_savetomanager</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

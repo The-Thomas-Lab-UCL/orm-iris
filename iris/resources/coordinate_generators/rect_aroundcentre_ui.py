@@ -240,6 +240,16 @@ class Ui_meaCoor_Rect_StartEnd(object):
 
         self.main_layout.addWidget(self.spin_resyum, 10, 4, 1, 1)
 
+        QWidget.setTabOrder(self.spin_centrex, self.spin_centrey)
+        QWidget.setTabOrder(self.spin_centrey, self.btn_storecentre)
+        QWidget.setTabOrder(self.btn_storecentre, self.spin_widx)
+        QWidget.setTabOrder(self.spin_widx, self.spin_heiy)
+        QWidget.setTabOrder(self.spin_heiy, self.spin_z)
+        QWidget.setTabOrder(self.spin_z, self.btn_storez)
+        QWidget.setTabOrder(self.btn_storez, self.spin_resxpt)
+        QWidget.setTabOrder(self.spin_resxpt, self.spin_resypt)
+        QWidget.setTabOrder(self.spin_resypt, self.spin_resxum)
+        QWidget.setTabOrder(self.spin_resxum, self.spin_resyum)
 
         self.retranslateUi(meaCoor_Rect_StartEnd)
 

@@ -47,28 +47,27 @@ class Ui_HeatmapPlotter(object):
         sizePolicy.setHeightForWidth(self.dock_plot.sizePolicy().hasHeightForWidth())
         self.dock_plot.setSizePolicy(sizePolicy)
         self.dock_plot.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetFloatable|QDockWidget.DockWidgetFeature.DockWidgetMovable)
+        self.dock_plot.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea|Qt.DockWidgetArea.RightDockWidgetArea)
         self.dockWidgetContents = QWidget()
         self.dockWidgetContents.setObjectName(u"dockWidgetContents")
         self.verticalLayout = QVBoxLayout(self.dockWidgetContents)
         self.verticalLayout.setObjectName(u"verticalLayout")
+        self.verticalLayout_3 = QVBoxLayout()
+        self.verticalLayout_3.setObjectName(u"verticalLayout_3")
         self.lyt_heatmap_holder = QVBoxLayout()
         self.lyt_heatmap_holder.setObjectName(u"lyt_heatmap_holder")
 
-        self.verticalLayout.addLayout(self.lyt_heatmap_holder)
-
-        self.dock_plot.setWidget(self.dockWidgetContents)
-
-        self.main_layout.addWidget(self.dock_plot)
+        self.verticalLayout_3.addLayout(self.lyt_heatmap_holder)
 
         self.horizontalLayout_3 = QHBoxLayout()
         self.horizontalLayout_3.setObjectName(u"horizontalLayout_3")
-        self.label_8 = QLabel(HeatmapPlotter)
+        self.label_8 = QLabel(self.dockWidgetContents)
         self.label_8.setObjectName(u"label_8")
         self.label_8.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
 
         self.horizontalLayout_3.addWidget(self.label_8)
 
-        self.lbl_clickedcoor = QLabel(HeatmapPlotter)
+        self.lbl_clickedcoor = QLabel(self.dockWidgetContents)
         self.lbl_clickedcoor.setObjectName(u"lbl_clickedcoor")
         sizePolicy1 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         sizePolicy1.setHorizontalStretch(1)
@@ -79,11 +78,11 @@ class Ui_HeatmapPlotter(object):
         self.horizontalLayout_3.addWidget(self.lbl_clickedcoor)
 
 
-        self.main_layout.addLayout(self.horizontalLayout_3)
+        self.verticalLayout_3.addLayout(self.horizontalLayout_3)
 
         self.horizontalLayout = QHBoxLayout()
         self.horizontalLayout.setObjectName(u"horizontalLayout")
-        self.combo_unitchoise = QComboBox(HeatmapPlotter)
+        self.combo_unitchoise = QComboBox(self.dockWidgetContents)
         self.combo_unitchoise.setObjectName(u"combo_unitchoise")
         sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         sizePolicy2.setHorizontalStretch(3)
@@ -93,13 +92,13 @@ class Ui_HeatmapPlotter(object):
 
         self.horizontalLayout.addWidget(self.combo_unitchoise)
 
-        self.chk_Ramanshift = QCheckBox(HeatmapPlotter)
+        self.chk_Ramanshift = QCheckBox(self.dockWidgetContents)
         self.chk_Ramanshift.setObjectName(u"chk_Ramanshift")
         self.chk_Ramanshift.setChecked(True)
 
         self.horizontalLayout.addWidget(self.chk_Ramanshift)
 
-        self.combo_spectralpos = QComboBox(HeatmapPlotter)
+        self.combo_spectralpos = QComboBox(self.dockWidgetContents)
         self.combo_spectralpos.setObjectName(u"combo_spectralpos")
         sizePolicy3 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         sizePolicy3.setHorizontalStretch(1)
@@ -110,28 +109,20 @@ class Ui_HeatmapPlotter(object):
 
         self.horizontalLayout.addWidget(self.combo_spectralpos)
 
-        self.lbl_specposunit = QLabel(HeatmapPlotter)
+        self.lbl_specposunit = QLabel(self.dockWidgetContents)
         self.lbl_specposunit.setObjectName(u"lbl_specposunit")
 
         self.horizontalLayout.addWidget(self.lbl_specposunit)
 
 
-        self.main_layout.addLayout(self.horizontalLayout)
-
-        self.horizontalLayout_2 = QHBoxLayout()
-        self.horizontalLayout_2.setObjectName(u"horizontalLayout_2")
-        self.btn_saveplot = QPushButton(HeatmapPlotter)
-        self.btn_saveplot.setObjectName(u"btn_saveplot")
-
-        self.horizontalLayout_2.addWidget(self.btn_saveplot)
-
-        self.btn_savedata = QPushButton(HeatmapPlotter)
-        self.btn_savedata.setObjectName(u"btn_savedata")
-
-        self.horizontalLayout_2.addWidget(self.btn_savedata)
+        self.verticalLayout_3.addLayout(self.horizontalLayout)
 
 
-        self.main_layout.addLayout(self.horizontalLayout_2)
+        self.verticalLayout.addLayout(self.verticalLayout_3)
+
+        self.dock_plot.setWidget(self.dockWidgetContents)
+
+        self.main_layout.addWidget(self.dock_plot)
 
         self.gridLayout_2 = QGridLayout()
         self.gridLayout_2.setObjectName(u"gridLayout_2")
@@ -209,6 +200,21 @@ class Ui_HeatmapPlotter(object):
 
         self.main_layout.addLayout(self.gridLayout_2)
 
+        self.horizontalLayout_2 = QHBoxLayout()
+        self.horizontalLayout_2.setObjectName(u"horizontalLayout_2")
+        self.btn_saveplot = QPushButton(HeatmapPlotter)
+        self.btn_saveplot.setObjectName(u"btn_saveplot")
+
+        self.horizontalLayout_2.addWidget(self.btn_saveplot)
+
+        self.btn_savedata = QPushButton(HeatmapPlotter)
+        self.btn_savedata.setObjectName(u"btn_savedata")
+
+        self.horizontalLayout_2.addWidget(self.btn_savedata)
+
+
+        self.main_layout.addLayout(self.horizontalLayout_2)
+
         self.btn_plotterreset = QPushButton(HeatmapPlotter)
         self.btn_plotterreset.setObjectName(u"btn_plotterreset")
 
@@ -217,6 +223,19 @@ class Ui_HeatmapPlotter(object):
 
         self.verticalLayout_2.addLayout(self.main_layout)
 
+        QWidget.setTabOrder(self.combo_plotoption, self.combo_unitchoise)
+        QWidget.setTabOrder(self.combo_unitchoise, self.chk_Ramanshift)
+        QWidget.setTabOrder(self.chk_Ramanshift, self.combo_spectralpos)
+        QWidget.setTabOrder(self.combo_spectralpos, self.ent_cbar_min)
+        QWidget.setTabOrder(self.ent_cbar_min, self.ent_cbar_max)
+        QWidget.setTabOrder(self.ent_cbar_max, self.ent_xmin)
+        QWidget.setTabOrder(self.ent_xmin, self.ent_xmax)
+        QWidget.setTabOrder(self.ent_xmax, self.ent_ymin)
+        QWidget.setTabOrder(self.ent_ymin, self.ent_ymax)
+        QWidget.setTabOrder(self.ent_ymax, self.chk_autocbar)
+        QWidget.setTabOrder(self.chk_autocbar, self.btn_saveplot)
+        QWidget.setTabOrder(self.btn_saveplot, self.btn_savedata)
+        QWidget.setTabOrder(self.btn_savedata, self.btn_plotterreset)
 
         self.retranslateUi(HeatmapPlotter)
 
@@ -229,8 +248,6 @@ class Ui_HeatmapPlotter(object):
         self.lbl_clickedcoor.setText(QCoreApplication.translate("HeatmapPlotter", u"(-,-)", None))
         self.chk_Ramanshift.setText(QCoreApplication.translate("HeatmapPlotter", u"Plot Raman-shift", None))
         self.lbl_specposunit.setText(QCoreApplication.translate("HeatmapPlotter", u"cm<sup>-1<sup>", None))
-        self.btn_saveplot.setText(QCoreApplication.translate("HeatmapPlotter", u"Save plot", None))
-        self.btn_savedata.setText(QCoreApplication.translate("HeatmapPlotter", u"Save plot data (.csv)", None))
         self.label_4.setText(QCoreApplication.translate("HeatmapPlotter", u"Y-min (mm):", None))
         self.label_3.setText(QCoreApplication.translate("HeatmapPlotter", u"X-min (mm):", None))
         self.chk_autocbar.setText(QCoreApplication.translate("HeatmapPlotter", u"Auto", None))
@@ -238,6 +255,8 @@ class Ui_HeatmapPlotter(object):
         self.label_5.setText(QCoreApplication.translate("HeatmapPlotter", u"Colourbar max:", None))
         self.label_2.setText(QCoreApplication.translate("HeatmapPlotter", u"Colourbar min:", None))
         self.label_6.setText(QCoreApplication.translate("HeatmapPlotter", u"X-max (mm):", None))
+        self.btn_saveplot.setText(QCoreApplication.translate("HeatmapPlotter", u"Save plot", None))
+        self.btn_savedata.setText(QCoreApplication.translate("HeatmapPlotter", u"Save plot data (.csv)", None))
         self.btn_plotterreset.setText(QCoreApplication.translate("HeatmapPlotter", u"Reset plotter (if not displaying correctly)", None))
     # retranslateUi
 

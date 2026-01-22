@@ -91,6 +91,16 @@
    </item>
   </layout>
  </widget>
+ <tabstops>
+  <tabstop>ent_searchbar</tabstop>
+  <tabstop>tree_data</tabstop>
+  <tabstop>btn_refresh</tabstop>
+  <tabstop>btn_rename</tabstop>
+  <tabstop>btn_delete</tabstop>
+  <tabstop>btn_save_ext</tabstop>
+  <tabstop>btn_save_db</tabstop>
+  <tabstop>btn_load_db</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

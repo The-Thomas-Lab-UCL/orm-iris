@@ -38,7 +38,7 @@ class Ui_Raman(object):
         self.dock_plot = QDockWidget(self.groupBox_plt)
         self.dock_plot.setObjectName(u"dock_plot")
         self.dock_plot.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetFloatable|QDockWidget.DockWidgetFeature.DockWidgetMovable)
-        self.dock_plot.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        self.dock_plot.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea|Qt.DockWidgetArea.RightDockWidgetArea)
         self.dockWidgetContents_2 = QWidget()
         self.dockWidgetContents_2.setObjectName(u"dockWidgetContents_2")
         self.verticalLayout_3 = QVBoxLayout(self.dockWidgetContents_2)
@@ -265,6 +265,18 @@ class Ui_Raman(object):
 
         self.verticalLayout_2.addLayout(self.main_layout)
 
+        QWidget.setTabOrder(self.chk_ramanshift, self.ent_plt_xmin)
+        QWidget.setTabOrder(self.ent_plt_xmin, self.ent_plt_xmax)
+        QWidget.setTabOrder(self.ent_plt_xmax, self.ent_plt_ymin)
+        QWidget.setTabOrder(self.ent_plt_ymin, self.ent_plt_ymax)
+        QWidget.setTabOrder(self.ent_plt_ymax, self.btn_reset_plot_limits)
+        QWidget.setTabOrder(self.btn_reset_plot_limits, self.btn_snglmea)
+        QWidget.setTabOrder(self.btn_snglmea, self.btn_contmea)
+        QWidget.setTabOrder(self.btn_contmea, self.spin_inttime_ms)
+        QWidget.setTabOrder(self.spin_inttime_ms, self.spin_accum)
+        QWidget.setTabOrder(self.spin_accum, self.ent_laserwavelength_nm)
+        QWidget.setTabOrder(self.ent_laserwavelength_nm, self.ent_laserpower_mW)
+        QWidget.setTabOrder(self.ent_laserpower_mW, self.btn_savetomanager)
 
         self.retranslateUi(Raman)
 

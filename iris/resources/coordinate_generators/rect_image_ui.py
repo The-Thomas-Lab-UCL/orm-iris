@@ -247,7 +247,7 @@ class Ui_Rect_Image(object):
         self.groupBox.setTitle(QCoreApplication.translate("Rect_Image", u"Image-based coordinate selection", None))
         self.btn_defineROI.setText(QCoreApplication.translate("Rect_Image", u"Define ROI", None))
         self.btn_instruction.setText(QCoreApplication.translate("Rect_Image", u"Show instructions", None))
-        self.chk_lres.setText(QCoreApplication.translate("Rect_Image", u"Use low-resolution image (faster processing)", None))
+        self.chk_lres.setText(QCoreApplication.translate("Rect_Image", u"Show low-resolution image (faster processing)", None))
         self.label_11.setText(QCoreApplication.translate("Rect_Image", u"X:", None))
         self.label_9.setText(QCoreApplication.translate("Rect_Image", u"X:", None))
         self.label_5.setText(QCoreApplication.translate("Rect_Image", u"Z:", None))

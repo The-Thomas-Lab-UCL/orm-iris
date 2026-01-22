@@ -139,7 +139,7 @@ class Ui_Point_Image(object):
     def retranslateUi(self, Point_Image):
         Point_Image.setWindowTitle(QCoreApplication.translate("Point_Image", u"Form", None))
         self.groupBox.setTitle(QCoreApplication.translate("Point_Image", u"Image-based coordinate selection", None))
-        self.chk_lres.setText(QCoreApplication.translate("Point_Image", u"Use low-resolution image (faster processing)", None))
+        self.chk_lres.setText(QCoreApplication.translate("Point_Image", u"Show low-resolution image (faster processing)", None))
         self.btn_instruction.setText(QCoreApplication.translate("Point_Image", u"Show instructions", None))
         self.label_5.setText(QCoreApplication.translate("Point_Image", u"Z:", None))
         self.label_7.setText(QCoreApplication.translate("Point_Image", u"\u00b5m", None))

@@ -33,103 +33,92 @@
        <property name="features">
         <set>QDockWidget::DockWidgetFeature::DockWidgetFloatable|QDockWidget::DockWidgetFeature::DockWidgetMovable</set>
        </property>
+       <property name="allowedAreas">
+        <set>Qt::DockWidgetArea::LeftDockWidgetArea|Qt::DockWidgetArea::RightDockWidgetArea</set>
+       </property>
        <widget class="QWidget" name="dockWidgetContents">
         <layout class="QVBoxLayout" name="verticalLayout">
          <item>
-          <layout class="QVBoxLayout" name="lyt_heatmap_holder"/>
+          <layout class="QVBoxLayout" name="verticalLayout_3">
+           <item>
+            <layout class="QVBoxLayout" name="lyt_heatmap_holder"/>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="horizontalLayout_3">
+             <item>
+              <widget class="QLabel" name="label_8">
+               <property name="text">
+                <string>Clicked (µm):</string>
+               </property>
+               <property name="alignment">
+                <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="lbl_clickedcoor">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                 <horstretch>1</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="text">
+                <string>(-,-)</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="horizontalLayout">
+             <item>
+              <widget class="QComboBox" name="combo_unitchoise">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                 <horstretch>3</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QCheckBox" name="chk_Ramanshift">
+               <property name="text">
+                <string>Plot Raman-shift</string>
+               </property>
+               <property name="checked">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QComboBox" name="combo_spectralpos">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+                 <horstretch>1</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="editable">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="lbl_specposunit">
+               <property name="text">
+                <string>cm&lt;sup&gt;-1&lt;sup&gt;</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+          </layout>
          </item>
         </layout>
        </widget>
       </widget>
-     </item>
-     <item>
-      <layout class="QHBoxLayout" name="horizontalLayout_3">
-       <item>
-        <widget class="QLabel" name="label_8">
-         <property name="text">
-          <string>Clicked (µm):</string>
-         </property>
-         <property name="alignment">
-          <set>Qt::AlignmentFlag::AlignRight|Qt::AlignmentFlag::AlignTrailing|Qt::AlignmentFlag::AlignVCenter</set>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QLabel" name="lbl_clickedcoor">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-           <horstretch>1</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="text">
-          <string>(-,-)</string>
-         </property>
-        </widget>
-       </item>
-      </layout>
-     </item>
-     <item>
-      <layout class="QHBoxLayout" name="horizontalLayout">
-       <item>
-        <widget class="QComboBox" name="combo_unitchoise">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
-           <horstretch>3</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QCheckBox" name="chk_Ramanshift">
-         <property name="text">
-          <string>Plot Raman-shift</string>
-         </property>
-         <property name="checked">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QComboBox" name="combo_spectralpos">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
-           <horstretch>1</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="editable">
-          <bool>true</bool>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QLabel" name="lbl_specposunit">
-         <property name="text">
-          <string>cm&lt;sup&gt;-1&lt;sup&gt;</string>
-         </property>
-        </widget>
-       </item>
-      </layout>
-     </item>
-     <item>
-      <layout class="QHBoxLayout" name="horizontalLayout_2">
-       <item>
-        <widget class="QPushButton" name="btn_saveplot">
-         <property name="text">
-          <string>Save plot</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QPushButton" name="btn_savedata">
-         <property name="text">
-          <string>Save plot data (.csv)</string>
-         </property>
-        </widget>
-       </item>
-      </layout>
      </item>
      <item>
       <layout class="QGridLayout" name="gridLayout_2">
@@ -221,6 +210,24 @@
       </layout>
      </item>
      <item>
+      <layout class="QHBoxLayout" name="horizontalLayout_2">
+       <item>
+        <widget class="QPushButton" name="btn_saveplot">
+         <property name="text">
+          <string>Save plot</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_savedata">
+         <property name="text">
+          <string>Save plot data (.csv)</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </item>
+     <item>
       <widget class="QPushButton" name="btn_plotterreset">
        <property name="text">
         <string>Reset plotter (if not displaying correctly)</string>
@@ -231,6 +238,22 @@
    </item>
   </layout>
  </widget>
+ <tabstops>
+  <tabstop>combo_plotoption</tabstop>
+  <tabstop>combo_unitchoise</tabstop>
+  <tabstop>chk_Ramanshift</tabstop>
+  <tabstop>combo_spectralpos</tabstop>
+  <tabstop>ent_cbar_min</tabstop>
+  <tabstop>ent_cbar_max</tabstop>
+  <tabstop>ent_xmin</tabstop>
+  <tabstop>ent_xmax</tabstop>
+  <tabstop>ent_ymin</tabstop>
+  <tabstop>ent_ymax</tabstop>
+  <tabstop>chk_autocbar</tabstop>
+  <tabstop>btn_saveplot</tabstop>
+  <tabstop>btn_savedata</tabstop>
+  <tabstop>btn_plotterreset</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

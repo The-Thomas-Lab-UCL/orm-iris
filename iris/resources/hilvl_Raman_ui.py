@@ -191,22 +191,23 @@ class Ui_Hilvl_Raman(object):
         self.verticalLayout_5.addLayout(self.lyt_heatmap_holder)
 
         self.tab_main.addTab(self.tab_heatmap, "")
-        self.tab_heatmapoverlay = QWidget()
-        self.tab_heatmapoverlay.setObjectName(u"tab_heatmapoverlay")
-        self.verticalLayout_7 = QVBoxLayout(self.tab_heatmapoverlay)
-        self.verticalLayout_7.setObjectName(u"verticalLayout_7")
-        self.lyt_heatmapoverlay_holder = QVBoxLayout()
-        self.lyt_heatmapoverlay_holder.setObjectName(u"lyt_heatmapoverlay_holder")
-
-        self.verticalLayout_7.addLayout(self.lyt_heatmapoverlay_holder)
-
-        self.tab_main.addTab(self.tab_heatmapoverlay, "")
 
         self.main_layout.addWidget(self.tab_main)
 
 
         self.verticalLayout_4.addLayout(self.main_layout)
 
+        QWidget.setTabOrder(self.tab_main, self.tab_mappingoptions)
+        QWidget.setTabOrder(self.tab_mappingoptions, self.rb_raster)
+        QWidget.setTabOrder(self.rb_raster, self.rb_snake)
+        QWidget.setTabOrder(self.rb_snake, self.rb_xdir)
+        QWidget.setTabOrder(self.rb_xdir, self.rb_ydir)
+        QWidget.setTabOrder(self.rb_ydir, self.btn_discrete)
+        QWidget.setTabOrder(self.btn_discrete, self.btn_continuous)
+        QWidget.setTabOrder(self.btn_continuous, self.btn_stop)
+        QWidget.setTabOrder(self.btn_stop, self.chk_randomise)
+        QWidget.setTabOrder(self.chk_randomise, self.chk_skipover)
+        QWidget.setTabOrder(self.chk_skipover, self.spin_skipover)
 
         self.retranslateUi(Hilvl_Raman)
 
@@ -238,6 +239,5 @@ class Ui_Hilvl_Raman(object):
         self.btn_stop.setText(QCoreApplication.translate("Hilvl_Raman", u"Stop", None))
         self.tab_main.setTabText(self.tab_main.indexOf(self.tab_mappingparams), QCoreApplication.translate("Hilvl_Raman", u"Mapping parameters", None))
         self.tab_main.setTabText(self.tab_main.indexOf(self.tab_heatmap), QCoreApplication.translate("Hilvl_Raman", u"Heatmap plotter", None))
-        self.tab_main.setTabText(self.tab_main.indexOf(self.tab_heatmapoverlay), QCoreApplication.translate("Hilvl_Raman", u"Heatmap overlay plotter", None))
     # retranslateUi
 

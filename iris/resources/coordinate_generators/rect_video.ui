@@ -27,7 +27,7 @@
           <item row="2" column="0" colspan="2">
            <widget class="QCheckBox" name="chk_lres">
             <property name="text">
-             <string>Use low-resolution image (faster processing)</string>
+             <string>Show low-resolution image (faster processing)</string>
             </property>
             <property name="checked">
              <bool>true</bool>
@@ -309,6 +309,17 @@
    </item>
   </layout>
  </widget>
+ <tabstops>
+  <tabstop>btn_defineROI</tabstop>
+  <tabstop>btn_instruction</tabstop>
+  <tabstop>chk_lres</tabstop>
+  <tabstop>spin_z</tabstop>
+  <tabstop>btn_storeZ</tabstop>
+  <tabstop>spin_resXPt</tabstop>
+  <tabstop>spin_resYPt</tabstop>
+  <tabstop>spin_resXum</tabstop>
+  <tabstop>spin_resYum</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

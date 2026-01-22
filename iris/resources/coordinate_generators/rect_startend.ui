@@ -277,9 +277,12 @@
  <tabstops>
   <tabstop>ent_startx_um</tabstop>
   <tabstop>ent_starty_um</tabstop>
+  <tabstop>btn_curr_start_xy</tabstop>
   <tabstop>ent_endx_um</tabstop>
   <tabstop>ent_endy_um</tabstop>
+  <tabstop>btn_curr_end_xy</tabstop>
   <tabstop>ent_z_um</tabstop>
+  <tabstop>btn_curr_z</tabstop>
   <tabstop>ent_res_pt_x</tabstop>
   <tabstop>ent_res_pt_y</tabstop>
   <tabstop>ent_res_um_x</tabstop>

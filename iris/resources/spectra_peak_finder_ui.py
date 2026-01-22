@@ -156,6 +156,14 @@ class Ui_spectra_peak_finder(object):
 
         self.verticalLayout_2.addLayout(self.main_layout)
 
+        QWidget.setTabOrder(self.btn_savePlotPng, self.btn_savePlotTxt)
+        QWidget.setTabOrder(self.btn_savePlotTxt, self.ent_xmin)
+        QWidget.setTabOrder(self.ent_xmin, self.ent_xmax)
+        QWidget.setTabOrder(self.ent_xmax, self.ent_ymin)
+        QWidget.setTabOrder(self.ent_ymin, self.ent_ymax)
+        QWidget.setTabOrder(self.ent_ymax, self.btn_resetLimits)
+        QWidget.setTabOrder(self.btn_resetLimits, self.chk_RamanShift)
+        QWidget.setTabOrder(self.chk_RamanShift, self.tree_peaks)
 
         self.retranslateUi(spectra_peak_finder)
 

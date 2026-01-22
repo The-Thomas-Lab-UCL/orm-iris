@@ -27,6 +27,9 @@
        <property name="features">
         <set>QDockWidget::DockWidgetFeature::DockWidgetFloatable|QDockWidget::DockWidgetFeature::DockWidgetMovable</set>
        </property>
+       <property name="allowedAreas">
+        <set>Qt::DockWidgetArea::LeftDockWidgetArea|Qt::DockWidgetArea::RightDockWidgetArea</set>
+       </property>
        <widget class="QWidget" name="dockWidgetContents">
         <layout class="QVBoxLayout" name="verticalLayout_3">
          <item>
@@ -128,6 +131,8 @@
   </layout>
  </widget>
  <tabstops>
+  <tabstop>chk_crosshair</tabstop>
+  <tabstop>chk_scalebar</tabstop>
   <tabstop>btn_camera_onoff</tabstop>
   <tabstop>pushButton_2</tabstop>
   <tabstop>combo_image_correction</tabstop>

@@ -200,6 +200,20 @@
    </item>
   </layout>
  </widget>
+ <tabstops>
+  <tabstop>combo_mappingCoor</tabstop>
+  <tabstop>btn_start</tabstop>
+  <tabstop>spin_newZUm</tabstop>
+  <tabstop>btn_storeZ</tabstop>
+  <tabstop>chk_autoNextCoor</tabstop>
+  <tabstop>rad_lastFilled</tabstop>
+  <tabstop>rad_originalZ</tabstop>
+  <tabstop>btn_goToNext</tabstop>
+  <tabstop>btn_goToPrev</tabstop>
+  <tabstop>btn_cancel</tabstop>
+  <tabstop>btn_finishAndSave</tabstop>
+  <tabstop>btn_showInstructions</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>
