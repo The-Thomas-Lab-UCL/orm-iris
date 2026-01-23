@@ -231,8 +231,8 @@ class Wdg_SpectrometerCalibrationGenerator(Ui_spectrometerCalibrator, qw.QWidget
     # >> Auto-load the calibration file from the last session <<
         cal_filepath = LibraryConfigEnum.SPECTROMETER_CALIBRATION_PATH.value
         if os.path.isfile(cal_filepath) and cal_filepath.endswith('.json'):
-            self._load_calibration(cal_filepath)
-    
+            QTimer.singleShot(0, lambda: self._load_calibration(cal_filepath))
+                
     def _load_calibration(self,loadpath:str|None=None) -> None:
         """
         Loads the calibration file

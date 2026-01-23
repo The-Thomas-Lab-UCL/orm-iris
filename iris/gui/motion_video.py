@@ -500,7 +500,7 @@ class Wdg_MotionController(qw.QGroupBox):
         self.sig_statbar_message.emit('Initialising the motion controllers','yellow')
         self._motion_controller_initialisation()
         self._init_workers()
-        self.video_initialise()
+        QTimer.singleShot(10, self.video_initialise)
 
     def _init_stageparam_widgets(self, widget:StageControl):
         """
@@ -1268,7 +1268,7 @@ class Wdg_MotionController(qw.QGroupBox):
         # Re-enables the controls
         self._update_set_vel_labels()
         self._update_set_jog_labels()
-        self.enable_widgets()
+        QTimer.singleShot(0, self.enable_widgets)
         
     def disable_widgets(self):
         """

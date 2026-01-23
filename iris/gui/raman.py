@@ -52,8 +52,8 @@ class Wdg_Raman(qw.QWidget, Ui_Raman):
         # Set the initial dock location
         self.main_win = self.window()
         
-        self._register_videofeed_dock()
-        self.dock_plot.installEventFilter(self)
+        QTimer.singleShot(0, self._register_videofeed_dock)
+        QTimer.singleShot(0, lambda: self.dock_plot.installEventFilter(self))
         self.dock_plot.topLevelChanged.connect(self._handle_videofeed_docking_changed)
         
     def _register_videofeed_dock(self):
@@ -673,7 +673,8 @@ class Wdg_SpectrometerController(qw.QWidget):
         
         self._spin_sngl_acq.editingFinished.connect(self.set_accumulation_spinbox)
         
-        if main: self.initialise_spectrometer_n_analyser()
+        if main:
+            QTimer.singleShot(0, self.initialise_spectrometer_n_analyser)
         
     # >>> Data management widgets setup <<<
         # Datasave widget
@@ -694,7 +695,6 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._lbl_laserpower = widget.lbl_laserpower_mW
         self._lbl_laserwavelength = widget.lbl_laserwavelength_nm
         self._lbl_objectiveinfo = qw.QLabel('Objective info: {}'.format(self._getter_objective_info()))
-        qw.QErrorMessage().showMessage('Objective info save not implemented yet!')
         
         # Entry widgets and button to set the metadata
         self._entry_laserpower = widget.ent_laserpower_mW
@@ -707,7 +707,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         # Bind the value change to setting the laser metadata
         self._entry_laserpower.editingFinished.connect(self._set_laserMetadata)
         self._entry_laserwavelength.editingFinished.connect(self._set_laserMetadata)
-        self._set_laserMetadata()
+        QTimer.singleShot(0, self._set_laserMetadata)
         
     # >>> Connections setup <<<
         # Connect the append queue observer signal to the acquisition worker
