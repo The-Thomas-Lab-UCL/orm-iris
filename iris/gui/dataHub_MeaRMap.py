@@ -29,11 +29,14 @@ from iris.data import SaveParamsEnum
 from iris.resources.dataHub_Raman_ui import Ui_DataHub_mapping
 from iris.resources.dataHubPlus_Raman_ui import Ui_DataHubPlus_mapping
 
-class Save_worker(QObject):
+class DataHub_Worker(QObject):
     
     sig_save_done = Signal(str)
     save_success = "Saved the data successfully."
     load_success = "Loaded the data successfully."
+    
+    sig_delete_done = Signal()
+    sig_delete_error = Signal(str)
 
     def __init__(self, mapping_hub:MeaRMap_Hub):
         super().__init__()
@@ -114,7 +117,18 @@ class Save_worker(QObject):
             mappingHub (MappingMeasurement_Hub): The MappingMeasurement_Hub to set
         """
         self._mappinghub = mappingHub
-
+        
+    @Slot(list)
+    def delete_unit(self, list_names: list[str]):
+        """
+        Delete the selected MappingMeasurement_Unit from the MappingMeasurement_Hub
+        """
+        for unit_name in list_names:
+            try: self._mappinghub.remove_mapping_unit_name(unit_name)
+            except Exception as e: self.sig_delete_error.emit(f"Error in deleting Mapping Unit '{unit_name}':\n{e}")
+            
+        self.sig_delete_done.emit()
+            
 class Wdg_DataHub_Mapping_Ui(qw.QWidget, Ui_DataHub_mapping):
     def __init__(self, parent: Any) -> None:
         super().__init__(parent)
@@ -125,6 +139,7 @@ class Wdg_DataHub_Mapping_Ui(qw.QWidget, Ui_DataHub_mapping):
 class Wdg_DataHub_Mapping(qw.QWidget):
     
     _sig_req_update_tree = Signal()     # Emitted when the treeview needs to be updated (internal)
+    _sig_req_delte_unit = Signal(list)  # Emitted to request deletion of units (internal)
     sig_tree_changed = Signal()     # Emitted when the treeview is changed
     sig_tree_selection = Signal()   # Emitted when the treeview selection is changed
     sig_tree_selection_str = Signal(str)   # Emitted when the treeview selection is changed, with the selected unit name as argument
@@ -189,11 +204,11 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._tree.itemSelectionChanged.connect(self._emit_signal_selection)
         
     # > Save/load worker and thread setup <
-        self._save_worker = Save_worker(self._MappingHub)
+        self._worker = DataHub_Worker(self._MappingHub)
         self._thread_save = QThread(self)
-        self._save_worker.moveToThread(self._thread_save)
+        self._worker.moveToThread(self._thread_save)
         self.destroyed.connect(self._thread_save.quit)
-        self.destroyed.connect(self._save_worker.deleteLater)
+        self.destroyed.connect(self._worker.deleteLater)
         self.destroyed.connect(self._thread_save.deleteLater)
         # Defer thread start until after initialization is complete
         QTimer.singleShot(0, self._thread_save.start)
@@ -203,13 +218,18 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._btn_save_db.clicked.connect(self._save_hub_database)
         self._btn_load_db.clicked.connect(self._load_hub_database)
         
-        self._save_worker.sig_save_done.connect(self._reset_reenable_saveload_buttons)
-        self.sig_save_ext.connect(self._save_worker.save_unit_ext)
-        self.sig_save_db.connect(self._save_worker.save_database)
-        self.sig_load_db.connect(self._save_worker.load_database)
-
+        self._worker.sig_save_done.connect(self._reset_reenable_saveload_buttons)
+        self.sig_save_ext.connect(self._worker.save_unit_ext)
+        self.sig_save_db.connect(self._worker.save_database)
+        self.sig_load_db.connect(self._worker.load_database)
+        
+        # Delete unit connection setup
+        self._sig_req_delte_unit.connect(self._worker.delete_unit)
+        self._worker.sig_delete_done.connect(self._sig_req_update_tree.emit)
+        self._worker.sig_delete_error.connect(lambda msg: qw.QMessageBox.warning(self, "Delete error", msg))
+        
         # Other connection setup
-        self._save_worker.sig_save_done.connect(self._handle_saveload_result)
+        self._worker.sig_save_done.connect(self._handle_saveload_result)
         self._sig_req_update_tree.connect(self.update_tree)
         
     # > Autosave info <
@@ -434,11 +454,8 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         if flg_remove != qw.QMessageBox.Yes: return  # type: ignore
         
         list_names = [item.text(0) for item in selections]
-        for unit_name in list_names:
-            self._MappingHub.remove_mapping_unit_name(unit_name)
         
-        if len(selections) > 0: self._flg_issaved = False
-        self._sig_req_update_tree.emit()
+        self._sig_req_delte_unit.emit(list_names)
         
     @Slot()
     def _save_unit_ext(self) -> None:
@@ -529,12 +546,12 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         Args:
             message (str): The message to display
         """
-        if message != Save_worker.save_success and message != Save_worker.load_success:
+        if message != DataHub_Worker.save_success and message != DataHub_Worker.load_success:
             qw.QErrorMessage().showMessage(message)
-        elif message == Save_worker.save_success:
+        elif message == DataHub_Worker.save_success:
             qw.QMessageBox.information(None, "Save/Load operation", message)
             self._flg_issaved = True
-        elif message == Save_worker.load_success:
+        elif message == DataHub_Worker.load_success:
             qw.QMessageBox.information(None, "Save/Load operation", message)
             self._flg_issaved = False
         self._reset_reenable_saveload_buttons()
@@ -847,9 +864,10 @@ def test_dataHub():
 
     window.show()
     mappinghub.test_generate_dummy()
+    datahub.update_tree()
     
     sys.exit(app.exec())
     
 if __name__ == '__main__':
-    # test_dataHub()
-    test_dataHub_Plus()
+    test_dataHub()
+    # test_dataHub_Plus()
