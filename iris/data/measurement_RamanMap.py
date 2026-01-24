@@ -157,9 +157,10 @@ class MeaRMap_Unit():
         assert len(coor) == 2, 'Coordinates should be in a tuple of 2 elements'
         assert all([isinstance(val,(float,int)) for val in coor]), 'Coordinates should be in float or integer'
         
-        list_coor = list(zip(self._dict_measurement[self._label_x],self._dict_measurement[self._label_y]))
-        list_dist = [np.linalg.norm(np.array(coor)-np.array(c)) for c in list_coor]
-        idx_min = np.argmin(list_dist)
+        with self._lock_measurement:
+            list_coor = list(zip(self._dict_measurement[self._label_x],self._dict_measurement[self._label_y]))
+            list_dist = [np.linalg.norm(np.array(coor)-np.array(c)) for c in list_coor]
+            idx_min = np.argmin(list_dist)
         
         return self._dict_measurement[self._mea_id_key][idx_min]
         
@@ -211,7 +212,7 @@ class MeaRMap_Unit():
         assert all([key in dict_measurement.keys() for key in self._dict_measurement.keys()]),\
             'set_dict_measurements: The input dictionary keys are not the same as the stored data keys.'
         
-        self._dict_measurement = dict_measurement
+        with self._lock_measurement: self._dict_measurement = dict_measurement
         self._flg_measurement_exist = True
         
         if self.check_measurement_and_metadata_exist(): self._notify_observers()
@@ -394,8 +395,9 @@ class MeaRMap_Unit():
         assert all([key in dict_measurement.keys() for key in self._dict_measurement.keys()]),\
             'append_dict_measurement_data: The input dictionary keys are not the same as the stored data keys.'
             
-        for key in dict_measurement.keys():
-            self._dict_measurement[key].append(dict_measurement[key])
+        with self._lock_measurement:
+            for key in dict_measurement.keys():
+                self._dict_measurement[key].append(dict_measurement[key])
             
         self._flg_measurement_exist = True
         
@@ -480,10 +482,11 @@ class MeaRMap_Unit():
         Returns:
             pd.DataFrame: averaged dataframe of the measurement
         """
-        assert self._flg_measurement_exist, 'get_avg_df: The measurement data does not exist.'
-        assert 0<=idx < len(self._dict_measurement[self._label_ts]), 'get_avg_df: The index is out of range.'
-        
-        df = self._dict_measurement[self._label_avemea][idx]
+        with self._lock_measurement:
+            assert self._flg_measurement_exist, 'get_avg_df: The measurement data does not exist.'
+            assert 0<=idx < len(self._dict_measurement[self._label_ts]), 'get_avg_df: The index is out of range.'
+            
+            df = self._dict_measurement[self._label_avemea][idx]
         
         return df
         
@@ -505,14 +508,15 @@ class MeaRMap_Unit():
         assert self._flg_measurement_exist, 'get_summary: The measurement data does not exist.'
         assert isinstance(exclude_id,bool), 'get_summary: The input data type is not correct. Expected a boolean.'
         
-        dict_mea = {}
-        mea_idx = self._dict_measurement[self._mea_id_key].index(measurement_id)
-        for key in self._dict_measurement.keys():
-            item = self._dict_measurement[key][mea_idx]
-            if exclude_id and key == self._mea_id_key: continue
-            if isinstance(item,(str,int,float)):
-                dict_mea[key] = str(item)
-        return dict_mea
+        with self._lock_measurement:
+            dict_mea = {}
+            mea_idx = self._dict_measurement[self._mea_id_key].index(measurement_id)
+            for key in self._dict_measurement.keys():
+                item = self._dict_measurement[key][mea_idx]
+                if exclude_id and key == self._mea_id_key: continue
+                if isinstance(item,(str,int,float)):
+                    dict_mea[key] = str(item)
+            return dict_mea
         
     def get_RamanMeasurement(self,measurement_id:int|str) -> MeaRaman:
         """
@@ -531,11 +535,12 @@ class MeaRMap_Unit():
             except: raise ValueError('get_RamanMeasurement: The measurement ID is not an integer.')
         assert measurement_id in self._dict_measurement[self._mea_id_key],\
             'get_RamanMeasurement: The requested measurement does not exist in the stored data.'
-            
-        mea_df = self.get_RamanMeasurement_df(measurement_id)
-        mea_metadata = self.get_dict_measurement_metadata()
-        mea = MeaRaman(reconstruct=True)
-        mea.reconstruct(measurement_id=measurement_id,metadata=mea_metadata,spec_analysed=mea_df)
+        
+        with self._lock_measurement:
+            mea_df = self.get_RamanMeasurement_df(measurement_id)
+            mea_metadata = self.get_dict_measurement_metadata()
+            mea = MeaRaman(reconstruct=True)
+            mea.reconstruct(measurement_id=measurement_id,metadata=mea_metadata,spec_analysed=mea_df)
         return mea
         
     def get_RamanMeasurement_df(self,measurement_id:int) -> pd.DataFrame:
@@ -551,8 +556,9 @@ class MeaRMap_Unit():
         assert self._flg_measurement_exist, 'get_avg_df: The measurement data does not exist.'
         assert measurement_id in self._dict_measurement[self._mea_id_key], 'get_avg_df: The timestamp does not exist in the stored data.'
         
-        idx = bisect.bisect_left(self._dict_measurement[self._mea_id_key], measurement_id)
-        df = self._dict_measurement[self._label_avemea][idx]
+        with self._lock_measurement:
+            idx = bisect.bisect_left(self._dict_measurement[self._mea_id_key], measurement_id)
+            df = self._dict_measurement[self._label_avemea][idx]
         
         return df
         
@@ -587,10 +593,11 @@ class MeaRMap_Unit():
         Returns:
             list: list of Raman shifts
         """
-        list_wavelengths = self.get_list_wavelengths()
-        list_raman_shift = [convert_wavelength_to_ramanshift(wavelength=wvl,\
-            excitation_wavelength=self.get_laser_params()[1]) for wvl in list_wavelengths]
-        return list_raman_shift
+        with self._lock_measurement:
+            list_wavelengths = self.get_list_wavelengths()
+            list_raman_shift = [convert_wavelength_to_ramanshift(wavelength=wvl,\
+                excitation_wavelength=self.get_laser_params()[1]) for wvl in list_wavelengths]
+            return list_raman_shift
     
     def convert(self, wavelength:float|None=None, Raman_shift:float|None=None):
         """
@@ -624,8 +631,9 @@ class MeaRMap_Unit():
         assert self._flg_measurement_exist, 'get_closest_wavelength: The measurement data does not exist.'
         assert isinstance(wavelength, (int, float)), 'get_closest_wavelength: The input data type is not correct. Expected an integer or a float.'
         
-        wavelength_idx = self.get_wavelength_idx(wavelength=wavelength)
-        wavelength = self.get_list_wavelengths()[wavelength_idx]
+        with self._lock_measurement:
+            wavelength_idx = self.get_wavelength_idx(wavelength=wavelength)
+            wavelength = self.get_list_wavelengths()[wavelength_idx]
         
         return wavelength
     
@@ -641,7 +649,11 @@ class MeaRMap_Unit():
         """
         assert self._flg_measurement_exist and self._flg_metadata_exist, 'get_closest_raman_shift: The measurement or metadata does not exist.'
         assert isinstance(raman_shift, (int, float)), 'get_closest_raman_shift: The input data type is not correct. Expected an integer or a float.'
-        return self.get_list_Raman_shift()[self.get_wavelength_idx(convert_ramanshift_to_wavelength(raman_shift,self.get_laser_params()[1]))]
+        
+        with self._lock_measurement:
+            ret = self.get_list_Raman_shift()[self.get_wavelength_idx(convert_ramanshift_to_wavelength(raman_shift,self.get_laser_params()[1]))]
+            
+        return ret
         
     def get_wavelength_idx(self,wavelength:float) -> int:
         """
@@ -661,10 +673,11 @@ class MeaRMap_Unit():
             idx = np.argmin(np.abs(array - value))
             return array[idx]
         
-        closest_wavelength = find_nearest(self.get_list_wavelengths(),wavelength)
-        
-        df:pd.DataFrame = self._dict_measurement[self._label_avemea][-1]
-        wavelength_idx = df[self._dflabel_wavelength].tolist().index(closest_wavelength)
+        with self._lock_measurement:
+            closest_wavelength = find_nearest(self.get_list_wavelengths(),wavelength)
+            
+            df:pd.DataFrame = self._dict_measurement[self._label_avemea][-1]
+            wavelength_idx = df[self._dflabel_wavelength].tolist().index(closest_wavelength)
         
         return wavelength_idx
 
@@ -680,6 +693,7 @@ class MeaRMap_Unit():
         """
         assert self._flg_measurement_exist and self._flg_metadata_exist, 'get_raman_shift_idx: The measurement or metadata does not exist.'
         assert isinstance(raman_shift, (int, float)), 'get_raman_shift_idx: The input data type is not correct. Expected an integer or a float.'
+        
         wvl = convert_ramanshift_to_wavelength(raman_shift,self.get_laser_params()[1])
         return self.get_wavelength_idx(wavelength=wvl)
 
