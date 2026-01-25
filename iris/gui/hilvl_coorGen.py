@@ -367,7 +367,7 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         self.sig_load_mappingCoor.emit(list_loadpath)
         return
     
-    def save_MappingCoordinates(self,autosave:bool=False,type:Literal['pickle','csv']='pickle'):
+    def save_MappingCoordinates(self,type:Literal['pickle','csv']='csv'):
         """
         Saves the selected mapping coordinates to a pickle file.
         
@@ -378,29 +378,23 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         def reset():
             nonlocal self
         
-        if autosave: list_selection = self._tree.findItems('*', Qt.MatchWildcard | Qt.MatchRecursive) # pyright: ignore[reportAttributeAccessIssue] ; MatchWildcard and MatchRecursive attributes exists
-        else: list_selection = self._tree.selectedItems()
+        list_selection = self._tree.selectedItems()
         
         if len(list_selection) == 0:
-            if not autosave:
-                qw.QMessageBox.warning(self, 'Error','No mapping coordinates selected')
+            qw.QMessageBox.warning(self, 'Error','No mapping coordinates selected')
             return
         
-        if autosave:
-            dirpath = os.path.abspath(AppRamanEnum.TEMPORARY_FOLDER.value)
-            if not os.path.exists(dirpath): os.makedirs(dirpath)
-        else:
-            dirpath = qw.QFileDialog.getExistingDirectory(
-                self,'Select the directory to save the mapping coordinates')
+        dirpath = qw.QFileDialog.getExistingDirectory(
+            self,'Select the directory to save the mapping coordinates')
         if not os.path.exists(dirpath):
-            if not autosave: qw.QMessageBox.warning(self, 'Error',f"Directory {dirpath} does not exist")
+            qw.QMessageBox.warning(self, 'Error',f"Directory {dirpath} does not exist")
             reset()
             return
         
         # Save all selected mapping coordinates
         list_names = [item.text(1) for item in list_selection]
         self.sig_save_mappingCoor.emit(list_names,dirpath,type)
-        if not autosave: qw.QMessageBox.information(self, 'Info','Mapping coordinates saved')
+        qw.QMessageBox.information(self, 'Info','Mapping coordinates saved')
         return
     
     def rename_MappingCoordinate(self):
@@ -609,7 +603,7 @@ class Wdg_Hilvl_CoorGenerator(qw.QWidget):
         """
         Terminates the treeview and removes the observer from the hub.
         """
-        self._wdg_tv_mapcoor.save_MappingCoordinates(autosave=True)
+        self._wdg_tv_mapcoor.save_MappingCoordinates()
         
     def generate_current_mapping_coordinates(self) -> MeaCoor_mm:
         """
