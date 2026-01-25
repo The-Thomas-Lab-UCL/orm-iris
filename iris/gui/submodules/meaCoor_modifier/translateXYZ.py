@@ -58,6 +58,16 @@ class TranslatorXYZ_Worker(QObject):
         
         self._sig_gotocoor.connect(self._motion_controller.get_goto_worker().work)
         
+    def go_to_reference_coordinate(self, mappingCoor:MeaCoor_mm, xyLoc:RadioOptionXY, zLoc:RadioOptionZ):
+        """
+        Moves the motion controller to the reference location of the selected mapping coordinates
+        """
+        ref_coor = self._get_reference_coordinate(mappingCoor, xyLoc, zLoc)
+        
+        evt_moveDone = threading.Event()
+        self._sig_gotocoor.emit(ref_coor, evt_moveDone)
+        evt_moveDone.wait()
+        
     def _get_reference_coordinate(self, mappingCoor:MeaCoor_mm, xyLoc:RadioOptionXY, zLoc:RadioOptionZ)\
         -> tuple[float, float, float]:
         """
@@ -191,7 +201,8 @@ class TranslateXYZ(Ui_translator_xyz, qw.QWidget):
     sig_updateListUnits = Signal()
     sig_update_prevCoor = Signal(MeaCoor_mm, RadioOptionXY, RadioOptionZ)
     sig_performTranslation = Signal(MeaCoor_mm, RadioOptionXY, RadioOptionZ, tuple, bool)
-    sig_goto_nextMeaCoor_ref = Signal(MeaCoor_mm, MeaCoor_mm, RadioOptionXY, RadioOptionZ)
+    sig_goto_nextMeaCoor_ref = Signal(MeaCoor_mm, MeaCoor_mm, RadioOptionXY, RadioOptionZ, bool)
+    sig_goto_refCoor = Signal(MeaCoor_mm, RadioOptionXY, RadioOptionZ)
     
     def __init__(
         self,
@@ -264,6 +275,10 @@ class TranslateXYZ(Ui_translator_xyz, qw.QWidget):
         self._coorHub.add_observer(self.sig_updateListUnits.emit)
         self.sig_updateListUnits.emit()
         
+        # Move to current coordinate button
+        self.btn_goto_refLoc.clicked.connect(self._go_to_reference_coordinate)
+        self.sig_goto_refCoor.connect(self._worker_translator.go_to_reference_coordinate)
+        
         # Commit button
         self.btn_commit.clicked.connect(self._perform_translation)
     
@@ -279,6 +294,30 @@ class TranslateXYZ(Ui_translator_xyz, qw.QWidget):
         self.spin_coorXUm.setValue(coorx_um)
         self.spin_coorYUm.setValue(coory_um)
         self.spin_coorZUm.setValue(coorz_um)
+        
+    def _go_to_reference_coordinate(self):
+        """
+        Moves the motion controller to the reference location of the selected mapping coordinates
+        """
+        selected_unit_name = self.combo_meaCoor.currentText()
+        if not selected_unit_name:
+            qw.QMessageBox.warning(self, "Warning", "Please select a mapping unit.")
+            return
+        
+        if selected_unit_name not in self._dict_mapUnit:
+            qw.QMessageBox.warning(self, "Warning", f"Mapping unit '{selected_unit_name}' not found.")
+            return
+        
+        mapping_coordinates = self._dict_mapUnit[selected_unit_name]
+        
+        if not isinstance(mapping_coordinates, MeaCoor_mm):
+            qw.QMessageBox.warning(self, "Warning", "Invalid mapping coordinates type.")
+            return
+        
+        loc_xy, loc_z = self._get_reference_location()
+        
+        self.sig_goto_refCoor.emit(mapping_coordinates, loc_xy, loc_z)
+        
         
     def _get_reference_location(self) -> tuple[RadioOptionXY, RadioOptionZ]:
         """Gets the selected reference location from the radio buttons
@@ -375,17 +414,38 @@ class TranslateXYZ(Ui_translator_xyz, qw.QWidget):
             qw.QMessageBox.warning(self, "Warning", f"Could not save modified mapping coordinates: {e}")
             return
         
-        if self.chk_autoSelect.isChecked():
-            self._update_list_units()
+        self._update_list_units()
+        
+        if self.rad_autoSel_lastModified.isChecked(): # Auto-select last modified mapping unit
             self.combo_meaCoor.setCurrentText(new_name)
             self.sig_update_prevCoor.emit(new_mappingCoor, *self._get_reference_location())
-        
-        if self.chk_autoSelect.isChecked() and self.chk_autoMove.isChecked():
+        elif self.rad_autoSel_next.isChecked(): # Auto-select the next mapping unit
+            idx = self.combo_meaCoor.currentIndex()
+            if idx + 1 < self.combo_meaCoor.count():
+                self.combo_meaCoor.setCurrentIndex(idx + 1)
+                next_meaCoor = self._dict_mapUnit[self.combo_meaCoor.currentText()]
+                self.sig_update_prevCoor.emit(next_meaCoor, *self._get_reference_location())
+            else:
+                qw.QMessageBox.information(self, "Info", "Last ROI. There no next ROI to select.")
+            
+        # Auto-move the stage
+        if self.rad_autoSel_lastModified.isChecked() and self.chk_autoMove.isChecked():
             self.sig_goto_nextMeaCoor_ref.emit(
                 prev_meaCoor,
                 new_mappingCoor,
-                *self._get_reference_location()
+                *self._get_reference_location(),
+                self.chk_automove_xyonly.isChecked(),
             )
+        elif self.rad_autoSel_next.isChecked() and self.chk_autoMove.isChecked():
+            idx = self.combo_meaCoor.currentIndex()
+            if idx + 1 < self.combo_meaCoor.count():
+                next_meaCoor = self._dict_mapUnit[self.combo_meaCoor.currentText()]
+                self.sig_goto_nextMeaCoor_ref.emit(
+                    prev_meaCoor,
+                    next_meaCoor,
+                    *self._get_reference_location(),
+                    self.chk_automove_xyonly.isChecked(),
+                )
         
         print(f'Newly saved coordinates: {new_mappingCoor.mapping_coordinates}')
     
@@ -401,8 +461,8 @@ def test():
     
     frm_motion = generate_dummy_motion_controller(mwdg)
     
-    coorUnit = MeaCoor_mm(
-        mappingUnit_name='Test Mapping Unit',
+    coorUnit1 = MeaCoor_mm(
+        mappingUnit_name='Test Mapping Unit 1',
         mapping_coordinates=[
             (-0.5, -0.5, 0),
             (0.5, -0.5, 0),
@@ -411,8 +471,19 @@ def test():
         ]
     )
     
+    coorUnit2 = MeaCoor_mm(
+        mappingUnit_name='Test Mapping Unit 2',
+        mapping_coordinates=[
+            (-0.5, -0.5, 1.0),
+            (0.5, -0.5, 1.0),
+            (0.5, 0.5, 1.0),
+            (-0.5, 0.5, 1.0),
+        ]
+    )
+    
     coorHub = List_MeaCoor_Hub()
-    coorHub.append(coorUnit)
+    coorHub.append(coorUnit1)
+    coorHub.append(coorUnit2)
     
     frm_coor_mod = TranslateXYZ(
         mwdg,

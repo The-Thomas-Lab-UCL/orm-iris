@@ -293,13 +293,39 @@
         <item>
          <layout class="QVBoxLayout" name="verticalLayout">
           <item>
-           <widget class="QCheckBox" name="chk_autoSelect">
-            <property name="text">
-             <string>Auto-select the last modified (translated) ROI</string>
+           <widget class="QGroupBox" name="groupBox_5">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
             </property>
-            <property name="checked">
-             <bool>true</bool>
+            <property name="title">
+             <string>Auto-select</string>
             </property>
+            <layout class="QVBoxLayout" name="verticalLayout_9">
+             <item>
+              <layout class="QVBoxLayout" name="verticalLayout_8">
+               <item>
+                <widget class="QRadioButton" name="rad_autoSel_lastModified">
+                 <property name="text">
+                  <string>The last modified (translated) ROI</string>
+                 </property>
+                 <property name="checked">
+                  <bool>true</bool>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QRadioButton" name="rad_autoSel_next">
+                 <property name="text">
+                  <string>The next ROI</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+            </layout>
            </widget>
           </item>
           <item>
@@ -358,7 +384,6 @@
   <tabstop>spin_coorZUm</tabstop>
   <tabstop>btn_storeCoor</tabstop>
   <tabstop>btn_commit</tabstop>
-  <tabstop>chk_autoSelect</tabstop>
   <tabstop>chk_autoMove</tabstop>
   <tabstop>btn_instructions</tabstop>
  </tabstops>
