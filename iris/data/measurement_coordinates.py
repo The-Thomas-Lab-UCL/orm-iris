@@ -7,6 +7,9 @@ from typing import Callable, Self
 import pandas as pd
 from random import random
 
+from iris.data import SaveParamsEnum
+from iris.utils.general import thread_assign
+
 if __name__ == '__main__':
     SCRIPT_DIR = os.path.abspath(r'.\iris')
     sys.path.append(os.path.dirname(SCRIPT_DIR))
@@ -193,7 +196,39 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
             if mapcoor.mappingUnit_name == mappingUnit_name:
                 return mapcoor
         return None
+    
+    def _autosave_mappingCoor(self, mappingUnit_name:str):
+        """
+        Saves the mappingUnit_name to the temporary folder
 
+        Args:
+            mappingUnit_name (str): The name of the mapping unit to save.
+        """
+        try:
+            temp_dir = SaveParamsEnum.AUTOSAVE_DIRPATH_COOR.value
+            if not os.path.exists(temp_dir): os.makedirs(temp_dir)
+            mapcoor = self.get_mappingCoor(mappingUnit_name)
+            if mapcoor is not None:
+                savepath = os.path.join(temp_dir, mappingUnit_name + '.csv')
+                mapcoor.save_csv(savepath)
+        except Exception as e:
+            print(f"Error auto-saving mapping coordinate {mappingUnit_name}: {e}")
+    
+    def _autodelete_mappingCoor(self, mappingUnit_name:str):
+        """
+        Deletes the mappingUnit_name from the temporary folder
+
+        Args:
+            mappingUnit_name (str): The name of the mapping unit to delete.
+        """
+        try:
+            temp_dir = SaveParamsEnum.AUTOSAVE_DIRPATH_COOR.value
+            savepath = os.path.join(temp_dir, mappingUnit_name + '.csv')
+            if os.path.exists(savepath):
+                os.remove(savepath)
+        except Exception as e:
+            print(f"Error auto-deleting mapping coordinate {mappingUnit_name}: {e}")
+    
     def remove_mappingCoor(self, mappingUnit_name:str):
         """
         Removes a mapping unit from the list of mapping coordinates.
@@ -210,6 +245,7 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         if idx is not None:
             self.pop(idx)
             self._notify_observers()
+            self._autodelete_mappingCoor(mappingUnit_name)
         else: raise KeyError(f"Mapping unit {mappingUnit_name} not found in the list")
     
     def rename_mappingCoor(self, old_name:str, new_name:str):
@@ -232,6 +268,10 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         if self.search_mappingCoor(new_name) is not None: raise ValueError(f"Mapping unit {new_name} already exists in the list")
         
         self[idx].mappingUnit_name = new_name
+        
+        self._autodelete_mappingCoor(old_name)
+        self._autosave_mappingCoor(new_name)
+        
         self._notify_observers()
     
     def append(self, mapCoor:MeaCoor_mm):
@@ -239,16 +279,18 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         Appends a mapping coordinates object to the list.
         
         Args:
-            mapCoor (MappingCoordinates): The mapping coordinates object to append.
+            mapCoor (MeaCoor_mm): The mapping coordinates object to append.
             
         Raises:
-            TypeError: If the object is not an instance of MappingCoordinates.
+            TypeError: If the object is not an instance of MeaCoor_mm.
             KeyError: If the mapping unit name already exists in the list.
         """
-        if not isinstance(mapCoor, MeaCoor_mm): raise TypeError(f"Expected MappingCoordinates, got {type(mapCoor)}")
+        if not isinstance(mapCoor, MeaCoor_mm): raise TypeError(f"Expected MeaCoor_mm, got {type(mapCoor)}")
         if self.search_mappingCoor(mapCoor.mappingUnit_name) is not None: raise KeyError(f"Mapping unit {mapCoor.mappingUnit_name} already exists in the list")
         
         super().append(mapCoor)
+        
+        self._autosave_mappingCoor(mapCoor.mappingUnit_name)
         self._notify_observers()
         
     def extend(self, mapCoor:list[MeaCoor_mm], *args, **kwargs):
@@ -256,11 +298,14 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         Extends the list with a list of mapping coordinates objects.
         
         Args:
-            mapCoor (list[MappingCoordinates]): The list of mapping coordinates objects to extend the list with.
+            mapCoor (list[MeaCoor_mm]): The list of mapping coordinates objects to extend the list with.
         """
         if not isinstance(mapCoor, list) or not all(isinstance(coor, MeaCoor_mm) for coor in mapCoor):
-            raise TypeError(f"Expected list of MappingCoordinates, got {type(mapCoor)}")
+            raise TypeError(f"Expected list of MeaCoor_mm, got {type(mapCoor)}")
+        
         super().extend(mapCoor)
+        
+        [self._autosave_mappingCoor(coor.mappingUnit_name) for coor in mapCoor]
         self._notify_observers()
         
     def pop(self, idx:int, *args, **kwargs) -> MeaCoor_mm:

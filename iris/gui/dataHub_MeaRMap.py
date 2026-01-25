@@ -234,7 +234,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
     # > Autosave info <
         # Autosave parameters
-        self._autosave_path = os.path.abspath(SaveParamsEnum.AUTOSAVE_PATH.value)
+        self._autosave_path = os.path.abspath(SaveParamsEnum.AUTOSAVE_DIRPATH_MEA.value)
         if not os.path.exists(self._autosave_path): os.makedirs(self._autosave_path)
         
         # Autosave widgets

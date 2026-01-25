@@ -56,7 +56,11 @@ class SaveParamsEnum(Enum):
     SAVE_OPTIONS_DEFAULT = dict_save_params_read['default_save_ext']
     AUTOSAVE_INTERVAL_HOURS = dict_save_params_read['autosave_interval_hours']
     AUTOSAVE_ENABLED = AUTOSAVE_INTERVAL_HOURS > 0
-    AUTOSAVE_PATH = r'./autosave/'  # Default path for autosaving the mapping measurements
+    AUTOSAVE_DIRPATH_MEA = r'./autosave/measurements/'  # Default directory path for autosaving the mapping measurements
+    AUTOSAVE_DIRPATH_COOR = r'./autosave/coordinates/'  # Default directory path for autosaving the mapping coordinates
+    
+    if not os.path.exists(AUTOSAVE_DIRPATH_MEA): os.makedirs(AUTOSAVE_DIRPATH_MEA)
+    if not os.path.exists(AUTOSAVE_DIRPATH_COOR): os.makedirs(AUTOSAVE_DIRPATH_COOR)
     
 dict_image_processing_params = {
     'low_resolution_scale': 0.1,  # Scale for low resolution images to be used for the displays (the full resolution images will always be saved)
