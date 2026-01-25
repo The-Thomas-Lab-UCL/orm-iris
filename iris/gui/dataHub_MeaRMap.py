@@ -8,6 +8,7 @@ import PySide6.QtWidgets as qw
 from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication
 
 import os
+import shutil
 from typing import Any
 
 
@@ -20,7 +21,7 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.utils.general import messagebox_request_input, get_timestamp_us_str, get_all_widgets_from_layout
+from iris.utils.general import messagebox_request_input, get_timestamp_us_str, get_all_widgets_from_layout, get_timestamp_sec
 from iris.data.measurement_Raman import MeaRaman
 from iris.data.measurement_RamanMap import MeaRMap_Hub, MeaRMap_Unit, MeaRMap_Handler
 
@@ -31,9 +32,13 @@ from iris.resources.dataHubPlus_Raman_ui import Ui_DataHubPlus_mapping
 
 class DataHub_Worker(QObject):
     
-    sig_save_done = Signal(str)
+    sig_saveload_done = Signal(str)
     save_success = "Saved the data successfully."
     load_success = "Loaded the data successfully."
+    save_error = "Error in saving the data: "
+    load_error = "Error in loading the data: "
+    autosave_success = "Autosaved the data successfully."
+    autosave_error = "Error in autosaving the data: "
     
     sig_delete_done = Signal()
     sig_delete_error = Signal(str)
@@ -55,6 +60,7 @@ class DataHub_Worker(QObject):
             savename (str): The name of the database file
         """
         try:
+            if not self._mappinghub.check_measurement_exist(): raise ValueError("No measurements to save in the MappingMeasurement_Hub.")
             thread = MeaRMap_Handler().save_MappingHub_database(
                 mappingHub=self._mappinghub,
                 savedirpath=savedirpath,
@@ -62,10 +68,48 @@ class DataHub_Worker(QObject):
             )
             thread.join()
             self._flg_issaved = True
-            self.sig_save_done.emit(self.save_success)
+            self.sig_saveload_done.emit(self.save_success)
         except Exception as e:
-            self.sig_save_done.emit("Error in saving Mapping Hub database:\n" + str(e))
-
+            self.sig_saveload_done.emit(self.save_error + str(e))
+            
+    @Slot(str,str)
+    def autosave_database(self,savedirpath:str,savename:str) -> None:
+        """
+        Save the MappingMeasurement_Hub stored internally to the local disk.
+        
+        Args:
+            savedirpath (str): The directory path to save the database to
+            savename (str): The name of the database file
+        """
+        try:
+            if not self._mappinghub.check_measurement_exist(): return
+            thread = MeaRMap_Handler().save_MappingHub_database(
+                mappingHub=self._mappinghub,
+                savedirpath=savedirpath,
+                savename=savename,
+            )
+            thread.join()
+            self._flg_issaved = True
+            self.sig_saveload_done.emit(self.autosave_success)
+        except Exception as e:
+            self.sig_saveload_done.emit(self.autosave_error + str(e))
+            
+    @Slot(str)
+    def autosave_database_delete(self, dirpath:str) -> None:
+        """
+        Deletes the autosaved database file.
+        
+        Args:
+            dirpath (str): The path to the database directory to delete
+        """
+        try:
+            if os.path.exists(dirpath): 
+                if os.path.isdir(dirpath):
+                    shutil.rmtree(dirpath)
+                else:
+                    os.remove(dirpath)
+        except Exception as e: self.sig_saveload_done.emit(self.autosave_error + str(e))
+            
     @Slot(str, str, str)
     def save_unit_ext(self, unit_id:str, savepath:str, extension:str) -> None:
         """
@@ -90,11 +134,11 @@ class DataHub_Worker(QObject):
                 extension=extension,
             )
             thread.join()
-            self.sig_save_done.emit(self.save_success)
+            self.sig_saveload_done.emit(self.save_success)
         except AssertionError as e:
-            self.sig_save_done.emit("Error in saving Mapping Unit to .txt:\n" + str(e))
+            self.sig_saveload_done.emit(self.save_error + str(e))
         except Exception as e:
-            self.sig_save_done.emit("Error in saving Mapping Unit to .txt:\n" + str(e))
+            self.sig_saveload_done.emit(self.save_error + str(e))
     
     @Slot(str)
     def load_database(self, loadpath: str) -> None:
@@ -104,9 +148,9 @@ class DataHub_Worker(QObject):
         try:
             self._handler.load_MappingMeasurementHub_database(
                 self._mappinghub, loadpath=loadpath, flg_readraw=True)
-            self.sig_save_done.emit(self.load_success)
+            self.sig_saveload_done.emit(self.load_success)
         except Exception as e:
-            self.sig_save_done.emit("Error in loading Mapping Hub database:\n" + str(e))
+            self.sig_saveload_done.emit(self.load_error + str(e))
     
     def set_MappingHub(self, mappingHub:MeaRMap_Hub):
         """
@@ -140,13 +184,16 @@ class Wdg_DataHub_Mapping(qw.QWidget):
     
     _sig_req_update_tree = Signal()     # Emitted when the treeview needs to be updated (internal)
     _sig_req_delte_unit = Signal(list)  # Emitted to request deletion of units (internal)
-    sig_tree_changed = Signal()     # Emitted when the treeview is changed
-    sig_tree_selection = Signal()   # Emitted when the treeview selection is changed
-    sig_tree_selection_str = Signal(str)   # Emitted when the treeview selection is changed, with the selected unit name as argument
+    sig_tree_changed = Signal()         # Emitted when the treeview is changed
+    sig_tree_selection = Signal()       # Emitted when the treeview selection is changed
+    sig_tree_selection_str = Signal(str)    # Emitted when the treeview selection is changed, with the selected unit name as argument
 
     sig_save_ext = Signal(str,str,str)  # Emitted to save the selected MappingMeasurement_Unit externally
     sig_save_db = Signal(str,str)       # Emitted to save the MappingMeasurement_Hub to the database
+    sig_autosave_db = Signal(str,str)   # Emitted to autosave the MappingMeasurement_Hub to the database
     sig_load_db = Signal(str)           # Emitted to load the MappingMeasurement_Hub from the database
+    
+    sig_autosave_db_delete = Signal(str)  # Emitted to delete the autosaved database file
 
     def __init__(self, parent:Any, mappingHub:MeaRMap_Hub|None=None,autosave:bool=False):
         """
@@ -175,7 +222,8 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
         # Save parameters
         self._sessionid = get_timestamp_us_str()
-        self._flg_issaved = True   # Indicate if the stored data has been saved
+        self._flg_issaving_db = False
+        self._flg_issaved_db = True   # Indicate if the stored data has been saved
         self._list_pickled = []    # List of pickled files
         self._temp_savedir = SaveParamsEnum.DEFAULT_SAVE_PATH.value + r'\temp'
         if not os.path.exists(self._temp_savedir): os.makedirs(self._temp_savedir)
@@ -218,9 +266,11 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._btn_save_db.clicked.connect(self._save_hub_database)
         self._btn_load_db.clicked.connect(self._load_hub_database)
         
-        self._worker.sig_save_done.connect(self._reset_reenable_saveload_buttons)
+        self._worker.sig_saveload_done.connect(self._reset_reenable_saveload_buttons)
         self.sig_save_ext.connect(self._worker.save_unit_ext)
         self.sig_save_db.connect(self._worker.save_database)
+        self.sig_autosave_db.connect(self._worker.autosave_database)
+        self.sig_autosave_db_delete.connect(self._worker.autosave_database_delete)
         self.sig_load_db.connect(self._worker.load_database)
         
         # Delete unit connection setup
@@ -229,20 +279,22 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._worker.sig_delete_error.connect(lambda msg: qw.QMessageBox.warning(self, "Delete error", msg))
         
         # Other connection setup
-        self._worker.sig_save_done.connect(self._handle_saveload_result)
+        self._worker.sig_saveload_done.connect(self._handle_saveload_result)
         self._sig_req_update_tree.connect(self.update_tree)
         
     # > Autosave info <
         # Autosave parameters
-        self._autosave_path = os.path.abspath(SaveParamsEnum.AUTOSAVE_PATH.value)
-        if not os.path.exists(self._autosave_path): os.makedirs(self._autosave_path)
+        self._autosave_dirpath = os.path.abspath(SaveParamsEnum.AUTOSAVE_DIRPATH_MEA.value)
+        self._autosave_dirpath = os.path.join(self._autosave_dirpath, f"{get_timestamp_sec()}")
+        if not os.path.exists(self._autosave_dirpath): os.makedirs(self._autosave_dirpath)
         
         # Autosave widgets
         self._flg_autosave = SaveParamsEnum.AUTOSAVE_ENABLED.value and autosave
         self._autosave_interval = SaveParamsEnum.AUTOSAVE_INTERVAL_HOURS.value
         if self._autosave_interval <= 0.0: self._flg_autosave = False
         if self._flg_autosave:
-            wdg.lbl_autosave.setText(f'Autosave: every {self._autosave_interval} hours to\n{self._autosave_path}')
+            QTimer.singleShot(0, self._start_autosave)
+            wdg.lbl_autosave.setText(f'Autosave: every {self._autosave_interval} hours to\n{self._autosave_dirpath}. Last autosave: N/A')
         
     @Slot()
     def _emit_signal_selection(self):
@@ -385,7 +437,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         while True:
             try:
                 self._MappingHub.append_mapping_unit(unit)
-                self._flg_issaved = False
+                self._flg_issaved_db = False
                 self.update_tree()
                 break
             except FileExistsError as e:
@@ -429,7 +481,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
             new_name, ok = qw.QInputDialog.getText(None, "Rename Mapping Unit", "Enter the new name for the selected Mapping Unit:",
                                                     text=unit.get_unit_name())
             if ok: self._MappingHub.rename_mapping_unit(unit_id, new_name)
-            self._flg_issaved = False
+            self._flg_issaved_db = False
         except Exception as e: qw.QMessageBox.warning(None, "Rename error", f"Error in renaming the Mapping Unit:\n{e}")
         finally: self._sig_req_update_tree.emit()
     
@@ -484,6 +536,20 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
         self.sig_save_ext.emit(list_ids[0], save_path, save_ext)
         
+    def _start_autosave(self):
+        """
+        Start the autosave timer
+        """
+        if not self._flg_autosave: return
+        
+        if self._flg_issaved_db or self._flg_issaving_db:
+            QTimer.singleShot(int(self._autosave_interval * 3600 * 1000), self._start_autosave)
+            return
+        
+        self._btn_save_db.setEnabled(False)
+        self.sig_autosave_db.emit(self._autosave_dirpath, f"{self._sessionid}.db")
+        self._flg_issaving_db = True
+        
     @Slot()
     def _save_hub_database(self) -> None:
         """
@@ -501,6 +567,8 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
         savedirpath, savename = os.path.split(savepath)
         self.sig_save_db.emit(savedirpath, savename)
+        
+        self._flg_issaving_db = True
 
     @Slot()
     def _load_hub_database(self) -> None:
@@ -546,14 +614,23 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         Args:
             message (str): The message to display
         """
-        if message != DataHub_Worker.save_success and message != DataHub_Worker.load_success:
-            qw.QErrorMessage().showMessage(message)
+        if message.startswith(DataHub_Worker.save_error) or message.startswith(DataHub_Worker.load_error):
+            qw.QMessageBox.critical(None, "Save/Load operation", message)
         elif message == DataHub_Worker.save_success:
             qw.QMessageBox.information(None, "Save/Load operation", message)
-            self._flg_issaved = True
+            self._flg_issaved_db = True
         elif message == DataHub_Worker.load_success:
             qw.QMessageBox.information(None, "Save/Load operation", message)
-            self._flg_issaved = False
+            self._flg_issaved_db = False
+        elif message == DataHub_Worker.autosave_success:
+            wdg = self._widget.lbl_autosave
+            wdg.setText(f'Autosave: every {self._autosave_interval} hours to\n{self._autosave_dirpath}. Last autosave: {get_timestamp_sec()}')
+            QTimer.singleShot(int(self._autosave_interval * 3600 * 1000), self._start_autosave)
+        elif message.startswith(DataHub_Worker.autosave_error):
+            qw.QMessageBox.warning(None, "Autosave operation", message)
+            QTimer.singleShot(int(self._autosave_interval * 3600 * 1000), self._start_autosave)
+                
+        self._flg_issaving_db = False
         self._reset_reenable_saveload_buttons()
         self._sig_req_update_tree.emit()
         
@@ -561,7 +638,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         """
         Handle changes in the MappingMeasurement_Hub
         """
-        self._flg_issaved = False
+        self._flg_issaved_db = False
         self._sig_req_update_tree.emit()
         
     def append_RamanMeasurement_multi(self, measurement:MeaRaman, coor:tuple=(0,0,0)):
@@ -597,7 +674,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         Returns:
             bool: True if the app can be terminated, False otherwise
         """
-        if self._flg_issaved: return True
+        if self._flg_issaved_db: return True
         elif len(self._MappingHub.get_list_MappingUnit()) == 0: return True
         
         flg_close = qw.QMessageBox.question(
@@ -617,7 +694,31 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         App termination sequence:
         Force the user to save the data before closing the app
         """
-        return
+        if self._flg_autosave and os.path.exists(self._autosave_dirpath):
+            delete_autosave_db = qw.QMessageBox.question(
+                self,
+                "Delete autosaved database",
+                f"Do you want to delete the autosaved database file?\n{self._autosave_dirpath}",
+                qw.QMessageBox.Yes | qw.QMessageBox.No, qw.QMessageBox.Yes) # type: ignore
+            
+            if delete_autosave_db == qw.QMessageBox.Yes:   # type: ignore
+                self.sig_autosave_db_delete.emit(self._autosave_dirpath)
+                
+        self._flg_autosave = False
+        # Remind the user of the numbers of previous undeleted autosaved files
+        autosave_base_path = SaveParamsEnum.AUTOSAVE_DIRPATH_MEA.value
+        list_dirs = [d for d in os.listdir(autosave_base_path) 
+                     if os.path.isdir(os.path.join(autosave_base_path, d))]
+        # Remove the current autosave dir from the list
+        if os.path.basename(self._autosave_dirpath) in list_dirs:
+            list_dirs.remove(os.path.basename(self._autosave_dirpath))
+        if len(list_dirs) > 0:
+            qw.QMessageBox.information(
+                self,
+                "Undeleted autosaved databases",
+                f"There are {len(list_dirs)} undeleted autosaved database directories in the autosave folder:\n{autosave_base_path}\n"
+                "You may want to delete them manually to free up disk space."
+            )
         
 class Wdg_DataHubPlus_Mapping_Ui(qw.QWidget, Ui_DataHubPlus_mapping):
     def __init__(self, parent: Any) -> None:
@@ -840,6 +941,10 @@ def test_dataHub_Plus():
     datahubplus = Wdg_DataHub_Mapping_Plus(central_widget,datahub)
     layout.addWidget(datahubplus)
     
+    btn_add_dummymea = qw.QPushButton("Add dummy RamanMeasurement to Mapping Hub")
+    btn_add_dummymea.clicked.connect(mappinghub.test_generate_dummy)
+    layout.addWidget(btn_add_dummymea)
+    
     datahubplus.sig_selection_changed.connect(lambda: print(datahubplus.get_selected_RamanMeasurement_summary()))
     
     window.show()
@@ -859,11 +964,19 @@ def test_dataHub():
     central_widget.setLayout(layout)
     
     mappinghub = MeaRMap_Hub()
-    datahub = Wdg_DataHub_Mapping(central_widget,mappingHub=mappinghub,autosave=False)
+    datahub = Wdg_DataHub_Mapping(central_widget,mappingHub=mappinghub,autosave=True)
     layout.addWidget(datahub)
-
+    
+    def mappinghub_test_generate_dummy():
+        mappinghub.test_generate_dummy(1)
+        datahub._flg_issaved_db = False
+        datahub.update_tree()
+    btn_add_dummymea = qw.QPushButton("Add dummy RamanMeasurement to Mapping Hub")
+    btn_add_dummymea.clicked.connect(mappinghub_test_generate_dummy)
+    layout.addWidget(btn_add_dummymea)
+    
     window.show()
-    mappinghub.test_generate_dummy()
+    mappinghub.test_generate_dummy(3)
     datahub.update_tree()
     
     sys.exit(app.exec())

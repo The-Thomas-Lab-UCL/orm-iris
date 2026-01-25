@@ -43,13 +43,11 @@ class Hilvl_CoorGen_UiDesign(qw.QWidget, Ui_hilvl_coorGen):
     def __init__(self, parent):
         super().__init__(parent)
         self.setupUi(self)
-        # qw.QVBoxLayout(self)
 
 class Coor_saveload_worker(QObject):
     
     sig_save_done = Signal() # Emitted when the mapping coordinates are saved.
     sig_load_done = Signal() # Emitted when the mapping coordinates are loaded.
-    sig_loaded_lastsession = Signal(str) # Emitted when the last session's mapping coordinates are loaded.
     
     sig_save_error = Signal(str) # Emitted when there is an error in saving the mapping coordinates.
     sig_load_error = Signal(str) # Emitted when there is an error in loading the mapping coordinates.
@@ -65,57 +63,6 @@ class Coor_saveload_worker(QObject):
         """
         super().__init__()
         self._mappingCoorHub = mappingCoorHub
-    
-    @Slot(str, list, int)
-    def offload_mappingCoor(self,mapping_unitName:str,list_coor:list,idx:int):
-        """
-        Saves the unfinished mapping coordinates to the local disk in the temporary folder. It will
-        save it with the mapping_unitName as the filename and overwrite it if it already exists.
-
-        Args:
-            mapping_unitName (str): The name of the mapping unit
-            list_coor (list): The list of coordinates to be saved, in the format [(x1, y1, z1), (x2, y2, z2), ...].
-            idx (int): The index of the mapping coordinates in the list indicating the measurements done.
-                (Convention: Up to idx-1 are done).
-        """
-        # > Save the mapping coordinates to the local disk
-        if not isinstance(list_coor, list) or len(list_coor) == 0:
-            print('No coordinates to save')
-            return
-        
-        idx = idx-1 if idx!=0 else 0
-        list_coor_temp = list_coor.copy()[idx:]  # Create a copy to avoid modifying the original list
-        
-        mappingCoor = MeaCoor_mm(mapping_unitName,list_coor_temp)
-        
-        # Check if the file already exists and renames it if it does
-        file_path = os.path.join(AppRamanEnum.TEMPORARY_FOLDER.value, mapping_unitName + '.pkl')
-        flg_exist = False
-        if os.path.exists(file_path):
-            flg_exist = True
-            old_file_path = os.path.join(AppRamanEnum.TEMPORARY_FOLDER.value, uuid1().hex + '.pkl')
-            os.rename(file_path, old_file_path)
-        
-        try:
-            mappingCoor.save_pickle(file_path)
-            # Delete the old file if it exists
-            if flg_exist: os.remove(old_file_path)
-        except Exception as e:
-            print('Error in saving the mapping coordinates:',e)
-            os.rename(old_file_path, file_path)  # Rename back to the original name
-            
-    @Slot(str)
-    def delete_offload_mappingCoor(self,mapping_unitName:str):
-        """
-        Deletes the offloaded mapping coordinates from the local disk in the temporary folder.
-        It will delete the file with the mapping_unitName as the filename.
-
-        Args:
-            mapping_unitName (str): The name of the mapping unit
-        """
-        # > Delete the mapping coordinates from the local disk
-        file_path = os.path.join(AppRamanEnum.TEMPORARY_FOLDER.value, mapping_unitName + '.pkl')
-        if os.path.exists(file_path): os.remove(file_path)
     
     @Slot(list)
     def load_MappingCoordinates(self,list_loadpath:list[str]):
@@ -133,26 +80,6 @@ class Coor_saveload_worker(QObject):
                 mappingCoor = MeaCoor_mm(loadpath=path)
                 self._mappingCoorHub.append(mappingCoor)
             except Exception as e: self.sig_load_error.emit(f"Failed to load mapping coordinates: {e}")
-        return
-    
-    @Slot()
-    def load_lastsession_MappingCoordinates(self):
-        """
-        Loads the mapping coordinates from the previous sessions saved in the temporary folder.
-        """
-        search_path = os.path.abspath(AppRamanEnum.TEMPORARY_FOLDER.value)+r'\*.pkl'
-        # print(f'_load_last_MappingCoordinates: search path: {search_path}')
-        list_paths = glob(search_path)
-        if len(list_paths) == 0: return
-        
-        for path in list_paths:
-            try:
-                mappingCoor = MeaCoor_mm(loadpath=path)
-                self._mappingCoorHub.append(mappingCoor)
-            except Exception as e: self.sig_load_error.emit(f"Failed to load mapping coordinates: {e}")
-
-        for path in list_paths: os.remove(path)
-        self.sig_loaded_lastsession.emit(self.message_loaded_lastsession)
         return
     
     @Slot(list, str, str)
@@ -174,6 +101,8 @@ class Coor_saveload_worker(QObject):
             if mappingCoor is None: continue
             filename = os.path.join(dirpath,mappingCoor.mappingUnit_name+extension)
             
+            if not os.path.exists(dirpath): os.makedirs(dirpath) # Create directory if it does not exist
+            
             while True:
                 if os.path.exists(filename):
                     # Remove the extension and add a UUID to the filename
@@ -187,6 +116,7 @@ class Coor_saveload_worker(QObject):
                 mappingCoor.save_pickle(filename)
         return
 
+
 class DataHub_Coor_UiDesign(qw.QWidget, Ui_dataHub_coor):
     def __init__(self, parent):
         super().__init__(parent)
@@ -198,10 +128,7 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
     """
     A class to create a treeview for the mapping coordinates.
     """
-    sig_offload_mappingCoor = Signal(str, list, int) # Emitted to offload the mapping coordinates to the local disk.
-    sig_delete_offload_mappingCoor = Signal(str) # Emitted to delete the offloaded mapping coordinates from the local disk.
     sig_load_mappingCoor = Signal(list) # Emitted to load the mapping coordinates from the local disk.
-    sig_load_lastsession_MappingCoordinates = Signal() # Emitted to load the mapping coordinates from the previous session.
     sig_save_mappingCoor = Signal(list, str, str) # Emitted to save the mapping coordinates to the local disk.
     
     _sig_update_tree = Signal() # Emitted when the treeview needs to be updated.
@@ -252,20 +179,14 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         
         self._thread.start()
         
-        self.sig_offload_mappingCoor.connect(self._worker.offload_mappingCoor)
-        self.sig_delete_offload_mappingCoor.connect(self._worker.delete_offload_mappingCoor)
         self.sig_load_mappingCoor.connect(self._worker.load_MappingCoordinates)
-        self.sig_load_lastsession_MappingCoordinates.connect(self._worker.load_lastsession_MappingCoordinates)
         self.sig_save_mappingCoor.connect(self._worker.save_MappingCoordinates)
         
         self._worker.sig_save_error.connect(lambda msg: qw.QMessageBox.warning(self, 'Error', msg))
         self._worker.sig_load_error.connect(lambda msg: qw.QMessageBox.warning(self, 'Error', msg))
-        self._worker.sig_loaded_lastsession.connect(
-            lambda msg: qw.QMessageBox.information(self, 'Info', msg))
         
         self._worker.sig_save_done.connect(lambda: self._btn_save.setEnabled(True))
         self._worker.sig_load_done.connect(lambda: self._btn_load.setEnabled(True))
-        self._worker.sig_loaded_lastsession.connect(lambda: self._btn_load.setEnabled(True))
         
     def _init_multiCoor_tree(self):
         """
@@ -301,37 +222,6 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
                                 f'The following mapping coordinates have been selected:\n\n{list_show_names}')
         return list_sel_mapCoor
     
-    def offload_mappingCoor(self,mapping_unitName:str,list_coor:list,idx:int):
-        """
-        Saves the unfinished mapping coordinates to the local disk in the temporary folder. It will
-        save it with the mapping_unitName as the filename and overwrite it if it already exists.
-
-        Args:
-            mapping_unitName (str): The name of the mapping unit
-            list_coor (list): The list of coordinates to be saved, in the format [(x1, y1, z1), (x2, y2, z2), ...].
-            idx (int): The index of the mapping coordinates in the list indicating the measurements done.
-                (Convention: Up to idx-1 are done).
-        """
-        # > Save the mapping coordinates to the local disk
-        if not isinstance(list_coor, list) or len(list_coor) == 0:
-            print('No coordinates to save')
-            return
-        
-        idx = idx-1 if idx!=0 else 0
-        list_coor_temp = list_coor.copy()[idx:]  # Create a copy to avoid modifying the original list
-        self.sig_offload_mappingCoor.emit(mapping_unitName,list_coor_temp,idx)
-        
-    def delete_offload_mappingCoor(self,mapping_unitName:str):
-        """
-        Deletes the offloaded mapping coordinates from the local disk in the temporary folder.
-        It will delete the file with the mapping_unitName as the filename.
-
-        Args:
-            mapping_unitName (str): The name of the mapping unit
-        """
-        # > Delete the mapping coordinates from the local disk
-        self.sig_delete_offload_mappingCoor.emit(mapping_unitName)
-    
     def _load_MappingCoordinates(self):
         """
         Loads the mapping coordinates from a pickle file and adds them to the list of mapping coordinates.
@@ -341,10 +231,7 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         
         Returns:
             MappingCoordinates: The loaded mapping coordinates.
-        """
-        def reset():
-            self._btn_load.setEnabled(True)
-            
+        """ 
         self._btn_load.setEnabled(False)
         
         list_loadpath, _ = qw.QFileDialog.getOpenFileNames(
@@ -367,7 +254,7 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         self.sig_load_mappingCoor.emit(list_loadpath)
         return
     
-    def save_MappingCoordinates(self,autosave:bool=False,type:Literal['pickle','csv']='pickle'):
+    def save_MappingCoordinates(self,type:Literal['pickle','csv']='csv'):
         """
         Saves the selected mapping coordinates to a pickle file.
         
@@ -378,29 +265,23 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         def reset():
             nonlocal self
         
-        if autosave: list_selection = self._tree.findItems('*', Qt.MatchWildcard | Qt.MatchRecursive) # pyright: ignore[reportAttributeAccessIssue] ; MatchWildcard and MatchRecursive attributes exists
-        else: list_selection = self._tree.selectedItems()
+        list_selection = self._tree.selectedItems()
         
         if len(list_selection) == 0:
-            if not autosave:
-                qw.QMessageBox.warning(self, 'Error','No mapping coordinates selected')
+            qw.QMessageBox.warning(self, 'Error','No mapping coordinates selected')
             return
         
-        if autosave:
-            dirpath = os.path.abspath(AppRamanEnum.TEMPORARY_FOLDER.value)
-            if not os.path.exists(dirpath): os.makedirs(dirpath)
-        else:
-            dirpath = qw.QFileDialog.getExistingDirectory(
-                self,'Select the directory to save the mapping coordinates')
+        dirpath = qw.QFileDialog.getExistingDirectory(
+            self,'Select the directory to save the mapping coordinates')
         if not os.path.exists(dirpath):
-            if not autosave: qw.QMessageBox.warning(self, 'Error',f"Directory {dirpath} does not exist")
+            qw.QMessageBox.warning(self, 'Error',f"Directory {dirpath} does not exist")
             reset()
             return
         
         # Save all selected mapping coordinates
         list_names = [item.text(1) for item in list_selection]
         self.sig_save_mappingCoor.emit(list_names,dirpath,type)
-        if not autosave: qw.QMessageBox.information(self, 'Info','Mapping coordinates saved')
+        qw.QMessageBox.information(self, 'Info','Mapping coordinates saved')
         return
     
     def rename_MappingCoordinate(self):
@@ -603,38 +484,14 @@ class Wdg_Hilvl_CoorGenerator(qw.QWidget):
         """
         Initialises the treeview and loads the mapping coordinates from the hub.
         """
-        self._wdg_tv_mapcoor.sig_load_lastsession_MappingCoordinates.emit()
+        pass
         
     def terminate(self):
         """
         Terminates the treeview and removes the observer from the hub.
         """
-        self._wdg_tv_mapcoor.save_MappingCoordinates(autosave=True)
+        pass
         
-    def generate_current_mapping_coordinates(self) -> MeaCoor_mm:
-        """
-        Generates the current mapping coordinates based on the selected mapping method.
-        
-        Returns:
-            MappingCoordinates_mm: The generated mapping coordinates.
-        """
-        mapping_coordinates = self._current_map_method.get_mapping_coordinates_mm()
-        
-        if mapping_coordinates is None: raise ValueError("No mapping coordinates generated")
-        
-        validator = self._dataHub_map.get_MappingHub().validate_new_unit_name
-        unit_name = None
-        while unit_name is None:
-            unit_name = messagebox_request_input(
-                parent=self,
-                title='Unit name',
-                message='Enter the "unit name" for the measurement:',
-                validator=validator,
-                invalid_msg='Invalid unit name. Please try again.',
-            )
-        
-        return MeaCoor_mm(mappingUnit_name=unit_name, mapping_coordinates=mapping_coordinates) # pyright: ignore[reportArgumentType] ; At this point, mapping_coordinates is guaranteed to be a list of tuples of floats.
-
     @Slot(str)
     def show_chosen_coorGen(self, method_name:str):
         """

@@ -1225,7 +1225,7 @@ class MeaRMap_Hub():
         Generates dummy measurements for testing purposes
         """
         for i in range(number):
-            unit = MeaRMap_Unit(unit_name='dummy {}'.format(i))
+            unit = MeaRMap_Unit(unit_name=f'dummy unit {uuid.uuid4().hex}')
             unit.test_generate_dummy()
             self.append_mapping_unit(unit)
         
@@ -1406,18 +1406,24 @@ class MeaRMap_Handler():
                     entry_values.append(avgdf_savepath_rel)
                 elif unit_key_types[key] == list[pd.DataFrame]:
                     rawlistdf = unit_dict[key][i]
-                    list_rawlistdf.extend([(mea_id+separator+str(j),df) for j,df in enumerate(rawlistdf)])
-                    entry_values.append(rawlistdf_savepath_rel)
+                    if len(rawlistdf) > 1:
+                        list_rawlistdf.extend([(mea_id+separator+str(j),df) for j,df in enumerate(rawlistdf)])
+                        entry_values.append(rawlistdf_savepath_rel)
+                    else:
+                        entry_values.append(avgdf_savepath_rel)
                 else:
                     entry_values.append(unit_dict[key][i])
             values.append(tuple(entry_values))
 
         # Form the df and save them
-        df_avg = pd.concat([df for _,df in list_avgdf],keys=[mea_id for mea_id,_ in list_avgdf],axis=0)
-        if len(list_rawlistdf) > 0: df_rawlist = pd.concat([df for _,df in list_rawlistdf],keys=[mea_id for mea_id,_ in list_rawlistdf],axis=0)
+        print(f'len_entries: {len_entries}, len values to save: {len(values)}')
+        if len(values) > 0:
+            df_avg = pd.concat([df for _,df in list_avgdf],keys=[mea_id for mea_id,_ in list_avgdf],axis=0)
+            df_avg.to_parquet(avgdf_savepath)
+        if len(list_rawlistdf) > 1:
+            df_rawlist = pd.concat([df for _,df in list_rawlistdf],keys=[mea_id for mea_id,_ in list_rawlistdf],axis=0)
+            df_rawlist.to_parquet(rawlistdf_savepath)
         else: df_rawlist = pd.DataFrame()
-        df_avg.to_parquet(avgdf_savepath)
-        df_rawlist.to_parquet(rawlistdf_savepath)
         
         cursor.executemany('INSERT INTO {} ({}) VALUES ({})'.format(table_name, query_keys, query_values), values)
         
