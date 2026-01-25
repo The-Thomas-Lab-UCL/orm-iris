@@ -1416,7 +1416,7 @@ class MeaRMap_Handler():
             values.append(tuple(entry_values))
 
         # Form the df and save them
-        print(f'len_entries: {len_entries}, len values to save: {len(values)}')
+        # print(f'len_entries: {len_entries}, len values to save: {len(values)}')
         if len(values) > 0:
             df_avg = pd.concat([df for _,df in list_avgdf],keys=[mea_id for mea_id,_ in list_avgdf],axis=0)
             df_avg.to_parquet(avgdf_savepath)
