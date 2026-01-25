@@ -226,11 +226,33 @@ class Ui_translator_xyz(object):
         self.verticalLayout_3.setObjectName(u"verticalLayout_3")
         self.verticalLayout = QVBoxLayout()
         self.verticalLayout.setObjectName(u"verticalLayout")
-        self.chk_autoSelect = QCheckBox(self.groupBox_2)
-        self.chk_autoSelect.setObjectName(u"chk_autoSelect")
-        self.chk_autoSelect.setChecked(True)
+        self.groupBox_5 = QGroupBox(self.groupBox_2)
+        self.groupBox_5.setObjectName(u"groupBox_5")
+        sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        sizePolicy2.setHorizontalStretch(0)
+        sizePolicy2.setVerticalStretch(0)
+        sizePolicy2.setHeightForWidth(self.groupBox_5.sizePolicy().hasHeightForWidth())
+        self.groupBox_5.setSizePolicy(sizePolicy2)
+        self.verticalLayout_9 = QVBoxLayout(self.groupBox_5)
+        self.verticalLayout_9.setObjectName(u"verticalLayout_9")
+        self.verticalLayout_8 = QVBoxLayout()
+        self.verticalLayout_8.setObjectName(u"verticalLayout_8")
+        self.rad_autoSel_lastModified = QRadioButton(self.groupBox_5)
+        self.rad_autoSel_lastModified.setObjectName(u"rad_autoSel_lastModified")
+        self.rad_autoSel_lastModified.setChecked(True)
 
-        self.verticalLayout.addWidget(self.chk_autoSelect)
+        self.verticalLayout_8.addWidget(self.rad_autoSel_lastModified)
+
+        self.rad_autoSel_next = QRadioButton(self.groupBox_5)
+        self.rad_autoSel_next.setObjectName(u"rad_autoSel_next")
+
+        self.verticalLayout_8.addWidget(self.rad_autoSel_next)
+
+
+        self.verticalLayout_9.addLayout(self.verticalLayout_8)
+
+
+        self.verticalLayout.addWidget(self.groupBox_5)
 
         self.chk_autoMove = QCheckBox(self.groupBox_2)
         self.chk_autoMove.setObjectName(u"chk_autoMove")
@@ -276,8 +298,7 @@ class Ui_translator_xyz(object):
         QWidget.setTabOrder(self.spin_coorYUm, self.spin_coorZUm)
         QWidget.setTabOrder(self.spin_coorZUm, self.btn_storeCoor)
         QWidget.setTabOrder(self.btn_storeCoor, self.btn_commit)
-        QWidget.setTabOrder(self.btn_commit, self.chk_autoSelect)
-        QWidget.setTabOrder(self.chk_autoSelect, self.chk_autoMove)
+        QWidget.setTabOrder(self.btn_commit, self.chk_autoMove)
         QWidget.setTabOrder(self.chk_autoMove, self.btn_instructions)
 
         self.retranslateUi(translator_xyz)
@@ -310,7 +331,9 @@ class Ui_translator_xyz(object):
         self.lbl_prevCoor.setText(QCoreApplication.translate("translator_xyz", u"None", None))
         self.label_3.setText(QCoreApplication.translate("translator_xyz", u"New coordinate (\u00b5m):", None))
         self.groupBox_2.setTitle(QCoreApplication.translate("translator_xyz", u"Options", None))
-        self.chk_autoSelect.setText(QCoreApplication.translate("translator_xyz", u"Auto-select the last modified (translated) ROI", None))
+        self.groupBox_5.setTitle(QCoreApplication.translate("translator_xyz", u"Auto-select", None))
+        self.rad_autoSel_lastModified.setText(QCoreApplication.translate("translator_xyz", u"The last modified (translated) ROI", None))
+        self.rad_autoSel_next.setText(QCoreApplication.translate("translator_xyz", u"The next ROI", None))
         self.chk_autoMove.setText(QCoreApplication.translate("translator_xyz", u"Auto-move the stage using the last modified translation", None))
         self.chk_automove_xyonly.setText(QCoreApplication.translate("translator_xyz", u"Auto-move only in the XY-direction (exclude Z)", None))
         self.btn_instructions.setText(QCoreApplication.translate("translator_xyz", u"Show instructions", None))
