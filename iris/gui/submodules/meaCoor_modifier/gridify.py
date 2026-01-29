@@ -645,6 +645,7 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
         self.combo_z.setCurrentText(Enums_RefZ.bottom.value)
         
         self.btn_set_currcoor.clicked.connect(self._update_coordinate_withCurrentCoor)
+        self.btn_set_nextROI.clicked.connect(self._update_coordinate_withCurrentCoor_and_go_next)
         self.btn_nextROI.clicked.connect(self._go_to_nextMappingCoor)
         self.btn_finish.clicked.connect(self._finalise_editing)
         self.btn_cancel.clicked.connect(self.close)
@@ -724,6 +725,12 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
         else: raise ValueError(f"Invalid loc_z value: {loc_z}")
             
         return np.array([x, y, z])
+    
+    def _update_coordinate_withCurrentCoor_and_go_next(self) -> None:
+        """Updates the selected coordinate with the current position of the motion controller
+        and moves the motion controller to the next coordinate"""
+        self._update_coordinate_withCurrentCoor()
+        self._go_to_nextMappingCoor()
     
     def _update_coordinate_withCurrentCoor(self) -> None:
         """Updates the selected coordinate with the current position of the motion controller"""
