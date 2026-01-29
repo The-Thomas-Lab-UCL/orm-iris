@@ -80,6 +80,14 @@ Double-click on an ROI to automatically go to its coordinate.</string>
                  </widget>
                 </item>
                 <item>
+                 <widget class="QPushButton" name="btn_set_nextROI">
+                  <property name="text">
+                   <string>Set current coordinate as reference
+and go to the next ROI</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
                  <widget class="QPushButton" name="btn_nextROI">
                   <property name="text">
                    <string>Go to the next ROI</string>

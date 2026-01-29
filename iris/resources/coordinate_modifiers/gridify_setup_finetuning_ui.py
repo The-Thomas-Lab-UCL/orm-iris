@@ -88,6 +88,11 @@ class Ui_gridify_setup_finetuning(object):
 
         self.verticalLayout_5.addWidget(self.btn_set_currcoor)
 
+        self.btn_set_nextROI = QPushButton(self.groupBox_3)
+        self.btn_set_nextROI.setObjectName(u"btn_set_nextROI")
+
+        self.verticalLayout_5.addWidget(self.btn_set_nextROI)
+
         self.btn_nextROI = QPushButton(self.groupBox_3)
         self.btn_nextROI.setObjectName(u"btn_nextROI")
 
@@ -143,6 +148,8 @@ class Ui_gridify_setup_finetuning(object):
 "Double-click on an ROI to automatically go to its coordinate.", None))
         self.groupBox_3.setTitle(QCoreApplication.translate("gridify_setup_finetuning", u"Parameters", None))
         self.btn_set_currcoor.setText(QCoreApplication.translate("gridify_setup_finetuning", u"Set current coordinate as reference", None))
+        self.btn_set_nextROI.setText(QCoreApplication.translate("gridify_setup_finetuning", u"Set current coordinate as reference\n"
+"and go to the next ROI", None))
         self.btn_nextROI.setText(QCoreApplication.translate("gridify_setup_finetuning", u"Go to the next ROI", None))
         self.btn_cancel.setText(QCoreApplication.translate("gridify_setup_finetuning", u"Cancel all modifications", None))
         self.btn_finish.setText(QCoreApplication.translate("gridify_setup_finetuning", u"Finish editing", None))
