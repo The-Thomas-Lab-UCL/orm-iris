@@ -15,7 +15,7 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
 
 from iris.gui.motion_video import Wdg_MotionController
-from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates
+from iris.gui.submodules.mappingCoordinatesTreeview import Wdg_Treeview_MappingCoordinates
 
 from iris.data.calibration_objective import ImgMea_Cal, generate_dummy_calibrationHub
 from iris.data.measurement_coordinates import List_MeaCoor_Hub, MeaCoor_mm

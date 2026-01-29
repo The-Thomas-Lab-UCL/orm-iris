@@ -26,7 +26,8 @@ from iris.gui.motion_video import Wdg_MotionController, Motion_GoToCoor_Worker
 from iris.gui.raman import Wdg_SpectrometerController, RamanMeasurement_Worker, AcquisitionParams, Enum_ContinuousMeasurementTrigger as EnumTrig, Syncer_Raman
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
-from iris.gui.hilvl_coorGen import Wdg_Treeview_MappingCoordinates, Wdg_Hilvl_CoorGenerator
+from iris.gui.hilvl_coorGen import Wdg_Hilvl_CoorGenerator
+from iris.gui.submodules.mappingCoordinatesTreeview import Wdg_Treeview_MappingCoordinates
 
 from iris.gui.submodules.heatmap_plotter_MeaRMap import Wdg_MappingMeasurement_Plotter
 
