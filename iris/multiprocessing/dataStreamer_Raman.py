@@ -375,14 +375,14 @@ class DataStreamer_Raman(mp.Process):
         """
         return not self._flg_pause_measurement.is_set()
         
-    def get_single_measurement(self) -> tuple[int,pd.DataFrame,int]|None:
+    def get_single_measurement(self) -> tuple[int,pd.DataFrame,float]|None:
         """
         Performs a single measurement and returns the results. Designed to be used
         manually, separate from the auto measurement. For this, the auto measurement
         has to be off (or use the get_measurement() instead).
 
         Returns:
-            tuple: (timestamp (int), raw_spectrum (pd.DataFrame), integration_time_ms (int))
+            tuple: (timestamp (int), raw_spectrum (pd.DataFrame), integration_time_ms (float))
         """
         assert self._flg_pause_measurement.is_set(), "The continuous measurement is running. Use get_measurement() instead."
         
