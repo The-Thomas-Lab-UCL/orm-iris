@@ -206,7 +206,7 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         
         list_loadpath, _ = qw.QFileDialog.getOpenFileNames(
             self,'Select the mapping coordinates files to load',
-            filter='Pickle files (*.pkl);;CSV files (*.csv)'
+            filter='CSV files (*.csv);;Pickle files (*.pkl)'
         )
         
         if len(list_loadpath) == 0: return None
