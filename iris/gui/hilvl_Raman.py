@@ -425,12 +425,16 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             return False
             
         # Go to the requested coordinates
+        # time1 = time.time()
+        # print(f'\nMoving to coordinates: {coor} (Index {coor_idx}), distance from last: {math.dist(self._last_coor, coor) if hasattr(self, "_last_coor") else "N/A"}')
+        self._last_coor = coor
         event_finish_goto.clear()
         self._sig_gotocor.emit(
                     (float(coor[0]),float(coor[1]),float(coor[2])),
                     event_finish_goto
                 )
         event_finish_goto.wait()
+        # time2 = time.time()
             
         event_finish_setvel.clear()
         if coor_idx == 0:
@@ -447,11 +451,13 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             # print('Reached line end position.')
         else:
             # print('Moving to next line end position (even line)...')
+            self._syncer.set_notready()
             q_trig.put(EnumTrig.STORE)
             self._sig_setvelrel.emit(100.0, -1.0, event_finish_setvel) # Set max speed to move between each scan line
             # print('Reached line end position.')
         self._syncer.wait_ready()
         event_finish_setvel.wait()
+        # time3 = time.time()
                 
                 # Check the autosave queue size and wait if necessary to prevent overflow
         q_size = q_mea_out.qsize()
@@ -461,6 +467,10 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 time.sleep(0.1)
                 print(f'Waiting for the measurement buffer to clear... Current size: {q_mea_out.qsize()}')
             q_trig.put(EnumTrig.IGNORE)
+            
+        # time4 = time.time()
+        
+        # print(f'Point {coor_idx+1} done. Move time: {(time2-time1)*1e3:.0f} ms, SetVel time: {(time3-time2)*1e3:.0f} ms, Sync time: {(time4-time3)*1e3:.0f} ms. Total time: {(time4-time1)*1e3:.0f} ms.')
         return True
         
     @Slot(str)

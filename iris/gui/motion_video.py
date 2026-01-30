@@ -316,12 +316,13 @@ class Motion_GoToCoor_Worker(QObject):
             if time.time() - start_time > timeout:
                 event_finished.set()
                 self.sig_mvmt_finished.emit(self.msg_target_timeout)
+                break
             
             coor_new = self._get_coor()
             # Resets the timer if the coordinates are not the same (i.e., the stage is still moving)
             if coor_new is None: continue
             if coor is None: coor = coor_new
-            if np.allclose(coor,coor_new,atol=0.001): start_time = time.time()
+            if not np.allclose(coor,coor_new,atol=0.001): start_time = time.time()
             coor = coor_new
         
     @Slot(tuple, threading.Event)
