@@ -55,6 +55,7 @@ class Coor_saveload_worker(QObject):
             try:
                 mappingCoor = MeaCoor_mm(loadpath=path)
                 self._mappingCoorHub.append(mappingCoor)
+                self.sig_load_done.emit()
             except Exception as e: self.sig_load_error.emit(f"Failed to load mapping coordinates: {e}")
         return
     
@@ -152,8 +153,8 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         self.sig_load_mappingCoor.connect(self._worker.load_MappingCoordinates)
         self.sig_save_mappingCoor.connect(self._worker.save_MappingCoordinates)
         
-        self._worker.sig_save_error.connect(lambda msg: qw.QMessageBox.warning(self, 'Error', msg))
-        self._worker.sig_load_error.connect(lambda msg: qw.QMessageBox.warning(self, 'Error', msg))
+        self._worker.sig_save_error.connect(self.handle_save_error)
+        self._worker.sig_load_error.connect(self.handle_load_error)
         
         self._worker.sig_save_done.connect(lambda: self._btn_save.setEnabled(True))
         self._worker.sig_load_done.connect(lambda: self._btn_load.setEnabled(True))
@@ -191,6 +192,28 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
             qw.QMessageBox.information(self, 'Selected mapping coordinates',
                                 f'The following mapping coordinates have been selected:\n\n{list_show_names}')
         return list_sel_mapCoor
+    
+    @Slot(str)
+    def handle_load_error(self, msg:str):
+        """
+        Handles the load error by showing a message box.
+        
+        Args:
+            msg (str): The error message to show.
+        """
+        qw.QMessageBox.warning(self, 'Error', msg)
+        self._btn_load.setEnabled(True)
+        
+    @Slot(str)
+    def handle_save_error(self, msg:str):
+        """
+        Handles the save error by showing a message box.
+        
+        Args:
+            msg (str): The error message to show.
+        """
+        qw.QMessageBox.warning(self, 'Error', msg)
+        self._btn_save.setEnabled(True)
     
     def _load_MappingCoordinates(self):
         """

@@ -547,6 +547,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
             return
         
         self._btn_save_db.setEnabled(False)
+        self._btn_save_db.setText("Autosaving...")
         self.sig_autosave_db.emit(self._autosave_dirpath, f"{self._sessionid}.db")
         self._flg_issaving_db = True
         
