@@ -9,7 +9,7 @@ import multiprocessing.pool as mpp
 
 import threading
 import queue
-from typing import Any, TypedDict, Callable
+from typing import Any, TypedDict, Callable, Literal
 from enum import Enum
 
 import time
@@ -231,12 +231,11 @@ class RamanMeasurement_Worker(QObject):
     @Slot(AcquisitionParams, queue.Queue)
     def acquire_single_measurement(self, params:AcquisitionParams, q_return:queue.Queue):
         self._acquisition_params = params
-        self._ramanHub.resume_auto_measurement()
+        self._ramanHub.pause_auto_measurement()
         
-        self._acquire_one_measurement(params, q_return)
+        self._acquire_one_measurement(params, q_return, mode='discrete')
         
         self.sig_acq_done.emit()
-        self._ramanHub.pause_auto_measurement()
         
     
     @Slot(AcquisitionParams, queue.Queue, queue.Queue)
@@ -356,7 +355,7 @@ class RamanMeasurement_Worker(QObject):
             return
             
         try:
-            self._acquire_one_measurement(params, q_return)
+            self._acquire_one_measurement(params, q_return, mode='continuous')
             QTimer.singleShot(0, lambda: self._schedule_next_acquisition_cycle(params, q_return))
         except Exception as e:
             self._isacquiring = False
@@ -364,13 +363,14 @@ class RamanMeasurement_Worker(QObject):
             self.sig_acq_done.emit()
             self._ramanHub.pause_auto_measurement()
 
-    def _acquire_one_measurement(self, params:AcquisitionParams, q_return:queue.Queue):
+    def _acquire_one_measurement(self, params:AcquisitionParams, q_return:queue.Queue, mode:Literal['discrete', 'continuous']) -> None:
         """
         Acquire a single measurement
 
         Args:
             params (AcquisitionParams): The acquisition parameters.
             q_return (queue.Queue): The return queue to put the measurement in.
+            mode (Literal['discrete', 'continuous'], optional): The acquisition mode.
         """
         # try: print(f'Gap between measurements: {(time.time()-self._t1)*1e3:.0f} ms')
         # except: pass
@@ -383,12 +383,17 @@ class RamanMeasurement_Worker(QObject):
             laserWavelength_nm=params['laserwavelength_nm'],
             extra_metadata=params['extra_metadata'],
             )
-
+        
         for _ in range(params['accumulation']):    
             # Performs a measurement and add it to the storage
             timestamp_request = get_timestamp_us_int()
-            result = self._ramanHub.get_measurement(timestamp_request,WaitForMeasurement=False,getNewOnly=True)
-            spectrum_raw = result[1][-1]
+            if mode == 'discrete':
+                result = self._ramanHub.get_single_measurement()
+                if result is None: continue
+                spectrum_raw = result[1]
+            else:
+                result = self._ramanHub.get_measurement(timestamp_request,WaitForMeasurement=False,getNewOnly=True)
+                spectrum_raw = result[1][-1]
             
             measurement.append_raw_list(
                 df_mea=spectrum_raw,
@@ -396,7 +401,10 @@ class RamanMeasurement_Worker(QObject):
                 max_accumulation=params['accumulation']
                 )
             self._queue_plot.put(measurement)
-            
+        
+        if not measurement.check_measurement_exist():
+            q_return.put(None)
+            return
         self._notify_queue_observers(measurement)
         q_return.put(measurement)
         self.sig_sngl_mea.emit(measurement)

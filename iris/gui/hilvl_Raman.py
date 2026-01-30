@@ -286,6 +286,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         self._event_isacquiring.set()
         for i, coor in enumerate(mapping_coordinates):
             try:
+                # time1 = time.time()
                 if not self._event_isacquiring.is_set():
                     self.emit_finish_signals(self.msg_mea_cancelled)
                     break
@@ -300,6 +301,8 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 )
                 # print('Waiting for movement to complete...')
                 event_finish.wait(10)
+                # time2 = time.time()
+                
                 if not event_finish.is_set(): raise TimeoutError('Failed to reach the target coordinate. Movement to coordinates timed out.')
                 # print('Movement wait finished. Event set:', event_finish.is_set())
                 
@@ -314,7 +317,9 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 
                 # Send the measurement data to the autosaver
                 q_mea_out.put((mea,coor))
+                # time3 = time.time()
                 # print('Measurement acquired and sent to autosaver.')
+                # print(f'Point {i+1}/{total_points} done. Move time: {(time2-time1)*1e3:.0f} ms, Measurement time: {(time3-time2)*1e3:.0f} ms. Total time: {(time3-time1)*1e3:.0f} ms.')
                 
             except queue.Empty:
                 self.sig_error_during_mea.emit(self.msg_mea_error + 'Measurement acquisition timed out.')
