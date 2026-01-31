@@ -9,8 +9,9 @@ from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplicat
 
 import os
 import shutil
-from typing import Any
-
+from typing import Any, TypedDict
+import time
+import threading
 
 from fuzzywuzzy import fuzz, process
 import bisect
@@ -29,6 +30,8 @@ from iris.data import SaveParamsEnum
 
 from iris.resources.dataHub_Raman_ui import Ui_DataHub_mapping
 from iris.resources.dataHubPlus_Raman_ui import Ui_DataHubPlus_mapping
+
+DATAHUBPLUS_MAX_FREQ_HZ = 1.0 # Maximum update frequency for the DataHubPlus treeview in Hertz
 
 class DataHub_Worker(QObject):
     
@@ -94,8 +97,8 @@ class DataHub_Worker(QObject):
         except Exception as e:
             self.sig_saveload_done.emit(self.autosave_error + str(e))
             
-    @Slot(str)
-    def autosave_database_delete(self, dirpath:str) -> None:
+    @Slot(str, threading.Event)
+    def autosave_database_delete(self, dirpath:str, done_event: threading.Event) -> None:
         """
         Deletes the autosaved database file.
         
@@ -109,6 +112,7 @@ class DataHub_Worker(QObject):
                 else:
                     os.remove(dirpath)
         except Exception as e: self.sig_saveload_done.emit(self.autosave_error + str(e))
+        finally: done_event.set()
             
     @Slot(str, str, str)
     def save_unit_ext(self, unit_id:str, savepath:str, extension:str) -> None:
@@ -193,7 +197,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
     sig_autosave_db = Signal(str,str)   # Emitted to autosave the MappingMeasurement_Hub to the database
     sig_load_db = Signal(str)           # Emitted to load the MappingMeasurement_Hub from the database
     
-    sig_autosave_db_delete = Signal(str)  # Emitted to delete the autosaved database file
+    sig_autosave_db_delete = Signal(str, threading.Event)  # Emitted to delete the autosaved database file
 
     def __init__(self, parent:Any, mappingHub:MeaRMap_Hub|None=None,autosave:bool=False):
         """
@@ -702,8 +706,16 @@ class Wdg_DataHub_Mapping(qw.QWidget):
                 f"Do you want to delete the autosaved database file?\n{self._autosave_dirpath}",
                 qw.QMessageBox.Yes | qw.QMessageBox.No, qw.QMessageBox.Yes) # type: ignore
             
+            done_event = threading.Event()
             if delete_autosave_db == qw.QMessageBox.Yes:   # type: ignore
-                self.sig_autosave_db_delete.emit(self._autosave_dirpath)
+                self.sig_autosave_db_delete.emit(self._autosave_dirpath, done_event)
+                done_event.wait(timeout=10.0)
+                if not done_event.is_set():
+                    qw.QMessageBox.warning(
+                        self,
+                        "Autosave deletion timeout",
+                        "Timeout in deleting the autosaved database file."
+                    )
                 
         self._flg_autosave = False
         # Remind the user of the numbers of previous undeleted autosaved files
@@ -728,6 +740,68 @@ class Wdg_DataHubPlus_Mapping_Ui(qw.QWidget, Ui_DataHubPlus_mapping):
         lyt = qw.QVBoxLayout()
         self.setLayout(lyt)
         
+class Dict_TreeviewUpdate(TypedDict):
+    list_measurement_id: list[str]
+    list_coorx: list[float]
+    list_coory: list[float]
+    list_coorz: list[float]
+    list_metadata: list[str]
+        
+class DataHubPlus_Worker(QObject):
+    """
+    Worker class to handle data hub plus operations in a separate thread.
+    """
+    sig_selected_RamanMeasurement = Signal(MeaRaman)
+    sig_dict_tree_update = Signal(Dict_TreeviewUpdate)
+    
+    sig_error_treeSelection = Signal(str)
+    sig_error_treeUpdate = Signal(str)
+    
+    def __init__(self):
+        super().__init__()
+        
+    @Slot(MeaRMap_Unit, str)
+    def emit_selected_RamanMeasurement(self, unit:MeaRMap_Unit, mea_id:str) -> None:
+        """
+        Emits the selected RamanMeasurement from the MappingMeasurement_Unit.
+        
+        Args:
+            unit (MappingMeasurement_Unit): The MappingMeasurement_Unit containing the RamanMeasurement
+            mea_id (str): The ID of the RamanMeasurement
+        """
+        try:
+            mea = unit.get_RamanMeasurement(mea_id)
+            self.sig_selected_RamanMeasurement.emit(mea)
+        except Exception as e:
+            self.sig_error_treeSelection.emit(f"Error in retrieving RamanMeasurement with ID {mea_id}:\n{e}")
+           
+    @Slot(MeaRMap_Unit)
+    def emit_tree_unit_update(self, unit:MeaRMap_Unit) -> None:
+        """
+        Emits a signal to update the unit treeview.
+        """
+        try:
+            dict_metadata = unit.get_dict_measurement_metadata()
+            dict_measurement = unit.get_dict_measurements(copy=False)
+            mea_id_key, coorx_key, coory_key, coorz_key, _, _ = unit.get_keys_dict_measurement()
+            
+            list_timestamp = dict_measurement[mea_id_key]
+            list_coorx = dict_measurement[coorx_key]
+            list_coory = dict_measurement[coory_key]
+            list_coorz = dict_measurement[coorz_key]
+            list_metadata = [str(dict_metadata)] * len(list_timestamp)
+            
+            dict_update:Dict_TreeviewUpdate = {
+                "list_measurement_id": [str(t) for t in list_timestamp],
+                "list_coorx": list_coorx,
+                "list_coory": list_coory,
+                "list_coorz": list_coorz,
+                "list_metadata": list_metadata,
+            }
+            self.sig_dict_tree_update.emit(dict_update)
+        except Exception as e:
+            self.sig_error_treeUpdate.emit(f"Error in updating unit treeview:\n{e}")
+        
 class Wdg_DataHub_Mapping_Plus(qw.QWidget):
     """
     Like the Frm_DataHub, but also shows the data of a single MappingMeasurement_Unit.
@@ -738,6 +812,9 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
     _sig_modify_tree = Signal()         # Emitted when the treeview needs to be modified (internal)
     _sig_tree_rebuild_done = Signal()   # Emitted when the treeview has been rebuilt (internal)
     _sig_emit_selection_changed = Signal()  # Emitted to indicate that the selection has changed (internal)
+    
+    _sig_req_select_mea = Signal(MeaRMap_Unit, str)  # Emitted to request selection of a RamanMeasurement (internal)
+    _sig_req_update_tree = Signal(MeaRMap_Unit)  # Emitted to request treeview update (internal)
     
     def __init__(self, master,dataHub:Wdg_DataHub_Mapping):
         """
@@ -783,6 +860,96 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         
         self._sig_emit_selection_changed.connect(self._emit_signal_selection)
         
+        self._init_worker()
+        
+    def _init_worker(self):
+        """
+        Initialise the worker thread for data hub plus operations.
+        """
+        self._worker = DataHubPlus_Worker()
+        self._thread_worker = QThread(self)
+        self._worker.moveToThread(self._thread_worker)
+        self.destroyed.connect(self._thread_worker.quit)
+        self.destroyed.connect(self._worker.deleteLater)
+        self.destroyed.connect(self._thread_worker.deleteLater)
+        self._thread_worker.start()
+        
+        # Worker signal connections: Treeview selection
+        self._isemitting_selection = False
+        self._sig_req_select_mea.connect(self._worker.emit_selected_RamanMeasurement)
+        self._worker.sig_selected_RamanMeasurement.connect(self._relay_signal)
+        self._worker.sig_error_treeSelection.connect(self._handle_error_treeSelection)
+        
+        # Worker signal connections: Treeview update
+        self._isupdating_tree = False
+        self._last_update = 0.0
+        self._sig_req_update_tree.connect(self._worker.emit_tree_unit_update)
+        self._worker.sig_dict_tree_update.connect(self._handle_treeUpdate)
+        self._worker.sig_error_treeUpdate.connect(self._handle_error_treeUpdate)
+        
+    @Slot(Dict_TreeviewUpdate)
+    def _handle_treeUpdate(self, dict_update:Dict_TreeviewUpdate):
+        """
+        Handle the treeview update process.
+        
+        Args:
+            dict_update (Dict_TreeviewUpdate): The data to update the treeview with
+        """
+        self._tree_unit.clear()
+        list_measurement_id = dict_update["list_measurement_id"]
+        list_coorx = dict_update["list_coorx"]
+        list_coory = dict_update["list_coory"]
+        list_coorz = dict_update["list_coorz"]
+        list_metadata = dict_update["list_metadata"]
+        
+        for mea_id, x, y, z, meta in zip(
+            list_measurement_id,
+            list_coorx,
+            list_coory,
+            list_coorz,
+            list_metadata):
+            qw.QTreeWidgetItem(self._tree_unit,
+                [str(mea_id), str(x), str(y), str(z), meta])
+        
+        self._isupdating_tree = False
+        self._lbl_statusbar.setText("Data Hub Plus updated. Interactive features ready.")
+        self._lbl_statusbar.setStyleSheet("background-color: lightgreen")
+        
+    @Slot(str)
+    def _handle_error_treeUpdate(self, msg:str):
+        """
+        Handle errors in the treeview update process.
+        
+        Args:
+            msg (str): The error message
+        """
+        qw.QMessageBox.warning(None, "Data Hub Plus error", msg)
+        self._isupdating_tree = False
+        self._lbl_statusbar.setText("Data Hub Plus update failed. Interactive features not ready.")
+        self._lbl_statusbar.setStyleSheet("background-color: red")
+        
+    @Slot(str)
+    def _handle_error_treeSelection(self, msg:str):
+        """
+        Handle errors in the treeview selection process.
+        
+        Args:
+            msg (str): The error message
+        """
+        qw.QMessageBox.warning(None, "Data Hub Plus error", msg)
+        self._isemitting_selection = False
+        
+    @Slot(MeaRaman)
+    def _relay_signal(self, mea:MeaRaman) -> None:
+        """
+        Relay the selected RamanMeasurement signal from the worker to the main widget.
+        
+        Args:
+            mea (RamanMeasurement): The selected RamanMeasurement
+        """
+        self.sig_selection_changed_mea.emit(mea)
+        self._isemitting_selection = False
+        
     @Slot()
     def _emit_signal_selection(self):
         """
@@ -790,13 +957,20 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         """
         # Only process events if the widget is fully initialized and visible
         # This prevents crashes during initialization
-        if self.isVisible():
-            QCoreApplication.processEvents()
+        if not self.isVisible(): return
+        
+        # Control the rate of signal emission
+        if self._isemitting_selection: return
+        self._isemitting_selection = True
         
         self.sig_selection_changed.emit()
-        mea = self.get_selected_RamanMeasurement()
-        if mea is not None:
-            self.sig_selection_changed_mea.emit(mea)
+        
+        selections = self._tree_unit.selectedItems()
+        if not isinstance(self._mappingUnit, MeaRMap_Unit): return
+        if len(selections) == 0: return
+        mea_id = selections[0].text(0)
+        
+        self._sig_req_select_mea.emit(self._mappingUnit, mea_id)
         
     @Slot(str)
     def set_selected_RamanMeasurement(self, measurement_id:str):
@@ -843,23 +1017,6 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         mea_id = selections[0].text(0)
         return self._mappingUnit.get_dict_RamanMeasurement_summary(mea_id,exclude_id=True)
         
-    def get_selected_RamanMeasurement(self) -> MeaRaman|None:
-        """
-        Returns the selected RamanMeasurement in the unit treeview
-        
-        Returns:
-            RamanMeasurement: The selected RamanMeasurement
-        """
-        try:
-            selections = self._tree_unit.selectedItems()
-            if not isinstance(self._mappingUnit, MeaRMap_Unit): return None
-            if len(selections) == 0: return None
-            mea_id = selections[0].text(0)
-            return self._mappingUnit.get_RamanMeasurement(mea_id)
-        except Exception as e:
-            print(f"Error getting selected RamanMeasurement: {e}")
-            return None
-        
     @Slot()
     def _set_mappingUnit(self):
         """
@@ -880,6 +1037,10 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         """
         # If the widget is not visible, do not update
         if not self.isVisible(): return
+        if self._isupdating_tree: return
+        if time.time() - self._last_update < 1.0 / DATAHUBPLUS_MAX_FREQ_HZ:
+            QTimer.singleShot(1000, self.update_tree_unit)
+            return
         
         self._lbl_statusbar.setText("Updating the Data Hub Plus. Interactive features not ready.")
         self._lbl_statusbar.setStyleSheet("background-color: yellow")
@@ -892,25 +1053,10 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
             self._tree_unit.blockSignals(False)
             return
         
-        dict_metadata = self._mappingUnit.get_dict_measurement_metadata()
-        dict_measurement = self._mappingUnit.get_dict_measurements(copy=False)
-        mea_id_key, coorx_key, coory_key, coorz_key, _, _ = self._mappingUnit.get_keys_dict_measurement()
+        self._isupdating_tree = True
+        self._last_update = time.time()
         
-        list_timestamp = dict_measurement[mea_id_key]
-        list_coorx = dict_measurement[coorx_key]
-        list_coory = dict_measurement[coory_key]
-        list_coorz = dict_measurement[coorz_key]
-        list_metadata = [str(dict_metadata)] * len(list_timestamp)
-        
-        for ts, x, y, z, meta in zip(list_timestamp, list_coorx, list_coory, list_coorz, list_metadata):
-            qw.QTreeWidgetItem(self._tree_unit,
-                [str(ts), str(x), str(y), str(z), meta])
-        
-        # Unblock signals after tree update is complete
-        self._tree_unit.blockSignals(False)
-        
-        self._lbl_statusbar.setText("Data Hub Plus updated. Ready.")
-        self._lbl_statusbar.setStyleSheet("")
+        self._sig_req_update_tree.emit(self._mappingUnit)
     
 def generate_dummy_frmMappingHub(parent) -> Wdg_DataHub_Mapping:
     """

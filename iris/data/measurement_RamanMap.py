@@ -526,17 +526,21 @@ class MeaRMap_Unit():
         Args:
             measurement_id (int|str): timestamp of the measurement in microsec in int or str format
         
+        Raises:
+            TypeError: If the input measurement_id is not an integer or a string of integer.
+            ValueError: If the requested measurement does not exist in the stored data.
+        
         Returns:
             RamanMeasurement: reconstructed RamanMeasurement object
         """
         assert isinstance(measurement_id,(int,str)), 'get_RamanMeasurement: The input data type is not correct. Expected an integer or a string of integer.'
         if isinstance(measurement_id,str):
             try: measurement_id = int(float(measurement_id))
-            except: raise ValueError('get_RamanMeasurement: The measurement ID is not an integer.')
-        assert measurement_id in self._dict_measurement[self._mea_id_key],\
-            'get_RamanMeasurement: The requested measurement does not exist in the stored data.'
-        
+            except: raise TypeError('get_RamanMeasurement: The measurement ID is not an integer.')
+            
         with self._lock_measurement:
+            if not measurement_id in self._dict_measurement[self._mea_id_key]:
+                raise ValueError('get_RamanMeasurement: The requested measurement does not exist in the stored data.')
             mea_df = self.get_RamanMeasurement_df(measurement_id)
             mea_metadata = self.get_dict_measurement_metadata()
             mea = MeaRaman(reconstruct=True)
