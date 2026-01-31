@@ -49,33 +49,14 @@
                  <layout class="QVBoxLayout" name="verticalLayout_9">
                   <item>
                    <layout class="QGridLayout" name="gridLayout">
-                    <item row="1" column="0">
-                     <widget class="QGroupBox" name="groupbox_scandir">
-                      <property name="title">
-                       <string>Continuous scan options</string>
+                    <item row="3" column="0" colspan="2">
+                     <widget class="QCheckBox" name="chk_contMap_autoAdjustSpeed">
+                      <property name="text">
+                       <string>Automatically adjust the continuous mapping speed (only applicable for 'Continuous imaging')</string>
                       </property>
-                      <layout class="QHBoxLayout" name="horizontalLayout_2">
-                       <item>
-                        <widget class="QRadioButton" name="rb_xdir">
-                         <property name="text">
-                          <string>Horizontal line scan</string>
-                         </property>
-                         <property name="checked">
-                          <bool>true</bool>
-                         </property>
-                        </widget>
-                       </item>
-                       <item>
-                        <widget class="QRadioButton" name="rb_ydir">
-                         <property name="text">
-                          <string>Vertical line scan</string>
-                         </property>
-                         <property name="autoExclusive">
-                          <bool>true</bool>
-                         </property>
-                        </widget>
-                       </item>
-                      </layout>
+                      <property name="checked">
+                       <bool>true</bool>
+                      </property>
                      </widget>
                     </item>
                     <item row="0" column="1">
@@ -117,18 +98,71 @@
                       </layout>
                      </widget>
                     </item>
-                    <item row="1" column="1">
-                     <spacer name="horizontalSpacer_2">
-                      <property name="orientation">
-                       <enum>Qt::Orientation::Horizontal</enum>
+                    <item row="1" column="0">
+                     <widget class="QGroupBox" name="groupbox_scandir">
+                      <property name="title">
+                       <string>Continuous scan options</string>
                       </property>
-                      <property name="sizeHint" stdset="0">
-                       <size>
-                        <width>40</width>
-                        <height>20</height>
-                       </size>
-                      </property>
-                     </spacer>
+                      <layout class="QHBoxLayout" name="horizontalLayout_2">
+                       <item>
+                        <widget class="QRadioButton" name="rb_xdir">
+                         <property name="text">
+                          <string>Horizontal line scan</string>
+                         </property>
+                         <property name="checked">
+                          <bool>true</bool>
+                         </property>
+                        </widget>
+                       </item>
+                       <item>
+                        <widget class="QRadioButton" name="rb_ydir">
+                         <property name="text">
+                          <string>Vertical line scan</string>
+                         </property>
+                         <property name="autoExclusive">
+                          <bool>true</bool>
+                         </property>
+                        </widget>
+                       </item>
+                      </layout>
+                     </widget>
+                    </item>
+                    <item row="2" column="0" colspan="2">
+                     <layout class="QHBoxLayout" name="horizontalLayout">
+                      <item>
+                       <widget class="QLabel" name="label_2">
+                        <property name="sizePolicy">
+                         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                          <horstretch>0</horstretch>
+                          <verstretch>0</verstretch>
+                         </sizepolicy>
+                        </property>
+                        <property name="text">
+                         <string>Continuous scan speed modifier:</string>
+                        </property>
+                       </widget>
+                      </item>
+                      <item>
+                       <widget class="QDoubleSpinBox" name="spin_continuousSpeedMod">
+                        <property name="value">
+                         <double>1.000000000000000</double>
+                        </property>
+                       </widget>
+                      </item>
+                      <item>
+                       <widget class="QLabel" name="label_3">
+                        <property name="sizePolicy">
+                         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
+                          <horstretch>0</horstretch>
+                          <verstretch>0</verstretch>
+                         </sizepolicy>
+                        </property>
+                        <property name="text">
+                         <string>%</string>
+                        </property>
+                       </widget>
+                      </item>
+                     </layout>
                     </item>
                    </layout>
                   </item>

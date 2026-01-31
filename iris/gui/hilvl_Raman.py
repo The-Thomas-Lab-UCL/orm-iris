@@ -10,7 +10,10 @@ import queue
 from enum import Enum
 
 import math
+import numpy as np
 import random
+
+from dataclasses import dataclass
 
 if __name__ == '__main__':
     import sys
@@ -41,6 +44,8 @@ from iris.multiprocessing.dataStreamer_Raman import DataStreamer_Raman
 from iris.gui import AppRamanEnum
 
 from iris.resources.hilvl_Raman_ui import Ui_Hilvl_Raman
+
+MINIMUM_RELATIVE_SPEED_PERCENT = 1e-5  # Minimum relative speed percentage for mapping
 
 class Hilvl_Raman_Design(Ui_Hilvl_Raman,qw.QWidget):
     def __init__(self,parent):
@@ -185,6 +190,16 @@ class Hilvl_MeasurementStorer_Worker(QObject):
         else:
             QTimer.singleShot(100, lambda: self.relay_finished_message(msg))
 
+@dataclass
+class MappingSpeedParam:
+    init_mapping_speed_mmPerSec:float
+    auto_adjust:bool
+    auto_adjust_coor_start:tuple[float,float,float] = (0.0,0.0,0.0)
+    auto_adjust_coor_end: tuple[float,float,float] = (0.0,0.0,0.0)
+    auto_adjust_expected_number_of_points:int = 1
+    mapping_speed_rel_percent:float = 100.0
+    mapping_speed_multiplier:float = 1.0
+
 class Hilvl_MeasurementAcq_Worker(QObject):
     """
     Worker class for performing measurements in a separate thread.
@@ -196,6 +211,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         sig_mea_done: Signal emitted when measurement is done
     """
     sig_progress_update_str = Signal(str)  # Signal to update progress (string message)
+    sig_autoAdjSpeed_newMultiplier = Signal(float)  # Signal to update the auto-adjusted speed value
     
     sig_error_during_mea = Signal(str)  # Signal emitted when an error occurs during measurement
     sig_mea_done = Signal() # Signal emitted when measurement is done (no differentiation between success, cancelled, or error)
@@ -211,7 +227,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     _sig_gotocor = Signal(tuple, threading.Event)
     _sig_setvelrel = Signal(float, float, threading.Event)
     _sig_acquire_discrete_mea = Signal(AcquisitionParams, queue.Queue)
-    _sig_acquire_continuous_mea = Signal(AcquisitionParams, queue.Queue, queue.Queue)
+    _sig_acquire_continuous_mea = Signal(AcquisitionParams, queue.Queue, queue.Queue, queue.Queue)
     _sig_acquire_list_coors = Signal(list, threading.Event)
 
     def __init__(self, mapping_hub:MeaRMap_Hub, syncer_raman:Syncer_Raman, event_isacquiring:threading.Event):
@@ -341,20 +357,20 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         self.emit_finish_signals(self.msg_mea_finished)
         return
 
-    @Slot(AcquisitionParams, list, float, queue.Queue)
+    @Slot(AcquisitionParams, list, MappingSpeedParam, queue.Queue)
     def run_scan_continuous(
         self,
         params:AcquisitionParams,
-        mapping_coordinates_ends:list,
-        mapping_speed_rel:float,
+        mapping_coordinates_ends:list[tuple[float,float,float]],
+        mapping_speed_param:MappingSpeedParam,
         q_mea_out:queue.Queue):
         """
         Scans the mapping coordinates continuously based on the given scan coordinates.
 
         Args:
             params (AcquisitionParams): The acquisition parameters for the measurement
-            mapping_coordinates_ends (list): List of scan coordinates (end coordinates of each scan lines)
-            mapping_speed_rel (int): The relative speed to move between the coordinates
+            mapping_coordinates_ends (list[tuple[float,float,float]]): List of scan coordinates (end coordinates of each scan lines)
+            mapping_speed_param (MappingSpeedParam): The mapping speed parameters for the measurement
             q_mea_out (queue.Queue): The queue to store the measurement data
         """
         print("Starting continuous mapping measurement...")
@@ -365,16 +381,32 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         # Prepare the measurement queue to save the measurement data into
         # the mapping unit (set up in the main thread)
         q_trig = queue.Queue()  # Queue to send the measurement trigger commands
-        self._sig_acquire_continuous_mea.emit(params, q_trig, q_mea_out)
+        q_test = queue.Queue()  # Queue to send the measurement trigger commands for testing purposes
+        self._sig_acquire_continuous_mea.emit(params, q_trig, q_mea_out, q_test)
         
         print('Acquisition started, moving to start position...')
         # >>> Perform the mapping measurement <<<
         time_start = time.time()
         total_points = len(mapping_coordinates_ends)
         self._event_isacquiring.set()
+        
+        # Prepare the start of the measurement
+        self._syncer.set_notready()
+        q_trig.put(EnumTrig.START)
+        self._syncer.wait_ready()
+        
+        self._auto_adjust_mapping_speed(
+            mapping_speed_param=mapping_speed_param,
+            q_test=q_test,
+            event_finish_setvel=event_finish_setvel,
+            event_finish_goto=event_finish_goto,
+            q_trig=q_trig,
+            coor_mea=mapping_coordinates_ends[0],
+        )
+        
         for i, coor in enumerate(mapping_coordinates_ends):
             try:
-                flg_continue = self._execute_scan_continuous_step(mapping_speed_rel, q_mea_out, event_finish_setvel, event_finish_goto, q_trig, i, coor)
+                flg_continue = self._execute_scan_continuous_step(mapping_speed_param, q_mea_out, event_finish_setvel, event_finish_goto, q_trig, i, coor)
                 if not flg_continue: break
             except Exception as e:
                 self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
@@ -396,7 +428,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
 
     def _execute_scan_continuous_step(
         self,
-        mapping_speed_rel:float,
+        mapping_speed_param:MappingSpeedParam,
         q_mea_out:queue.Queue,
         event_finish_setvel:threading.Event,
         event_finish_goto:threading.Event,
@@ -408,7 +440,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         Executes a single step in the continuous mapping measurement.
 
         Args:
-            mapping_speed_rel (float): The relative speed to move between the coordinates
+            mapping_speed_param (MappingSpeedParam): The mapping speed parameters for the measurement
             q_mea_out (queue.Queue): The queue to store the measurement data
             event_finish_setvel (threading.Event): Event to signal the completion of setting velocity
             event_finish_goto (threading.Event): Event to signal the completion of going to coordinates
@@ -437,17 +469,11 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         # time2 = time.time()
             
         event_finish_setvel.clear()
-        if coor_idx == 0:
-            # print('Moving to start position...')
-            self._syncer.set_notready()
-            q_trig.put(EnumTrig.START)
-            event_finish_setvel.set()
-            # print('Reached start position.')
-        elif coor_idx%2 == 0:
+        if coor_idx%2 == 0:
             # print('Moving to next line end position (odd line)...')
             self._syncer.set_notready()
             q_trig.put(EnumTrig.IGNORE)
-            self._sig_setvelrel.emit(mapping_speed_rel, -1.0, event_finish_setvel)   # Set actual speed to move between x-coordinates
+            self._sig_setvelrel.emit(mapping_speed_param.mapping_speed_rel_percent, -1.0, event_finish_setvel)   # Set actual speed to move between x-coordinates
             # print('Reached line end position.')
         else:
             # print('Moving to next line end position (even line)...')
@@ -472,6 +498,95 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         
         # print(f'Point {coor_idx+1} done. Move time: {(time2-time1)*1e3:.0f} ms, SetVel time: {(time3-time2)*1e3:.0f} ms, Sync time: {(time4-time3)*1e3:.0f} ms. Total time: {(time4-time1)*1e3:.0f} ms.')
         return True
+        
+    def _auto_adjust_mapping_speed(
+        self,
+        mapping_speed_param:MappingSpeedParam,
+        q_test:queue.Queue,
+        event_finish_setvel:threading.Event,
+        event_finish_goto:threading.Event,
+        q_trig:queue.Queue,
+        coor_mea:tuple,
+        ):
+        """
+        Auto adjusts the mapping speed based on the given parameters by performing a test measurement between the start and end coordinates and calculating the number of measurements collected.
+        
+        Args:
+            mapping_speed_param (MappingSpeedParam): The mapping speed parameters for the measurement
+            q_test (queue.Queue): The queue to store the measurement data
+            event_finish_setvel (threading.Event): Event to signal the completion of setting velocity
+            event_finish_goto (threading.Event): Event to signal the completion of going to coordinates
+            q_trig (queue.Queue): Queue to send the measurement trigger commands
+            coor_mea (tuple): The start coordinate of the measurement to return to after the adjustment
+        """
+        
+        # Go to the requested coordinates
+        # time1 = time.time()
+        # print(f'\nMoving to coordinates: {coor} (Index {coor_idx}), distance from last: {math.dist(self._last_coor, coor) if hasattr(self, "_last_coor") else "N/A"}')
+        coor_start = mapping_speed_param.auto_adjust_coor_start
+        coor_end = mapping_speed_param.auto_adjust_coor_end
+        
+        # print(f'Auto adjusting mapping speed: Coor start: {coor_start}, Coor end: {coor_end}, Distance: {math.dist(coor_start, coor_end):.3f} mm')
+        
+        event_finish_goto.clear()
+        self._sig_gotocor.emit(
+                    (float(coor_start[0]),float(coor_start[1]),float(coor_start[2])),
+                    event_finish_goto
+                )
+        event_finish_goto.wait()
+        
+        # Adjust the mapping speed to the initial speed
+        event_finish_setvel.clear()
+        self._sig_setvelrel.emit(mapping_speed_param.mapping_speed_rel_percent, -1.0, event_finish_setvel)
+        event_finish_setvel.wait()
+        
+        # Start the measurement trigger
+        self._syncer.set_notready()
+        q_trig.put(EnumTrig.IGNORE) # Ignore all the measurements so far
+        self._syncer.wait_ready()
+        
+        # print('Auto adjust mapping speed: Moving to end coordinate for test measurement...')
+        # Move to the end coordinate
+        event_finish_goto.clear()
+        self._sig_gotocor.emit(
+                    (float(coor_end[0]),float(coor_end[1]),float(coor_end[2])),
+                    event_finish_goto
+                )
+        event_finish_goto.wait()
+        
+        # print('Auto adjust mapping speed: Collecting measurements for speed adjustment...')
+        # Collect the measurements in the queue
+        self._syncer.set_notready()
+        q_trig.put(EnumTrig.STORE_TEST)
+        self._syncer.wait_ready()        
+        
+        # print('Auto adjust mapping speed: Finishing test measurement...')
+        # print(f'Number of measurements collected in test queue: {q_test.qsize()}')
+        # Measure the number of measurements collected
+        num_mea = 0
+        while not q_test.empty():
+            _ = q_test.get()
+            num_mea += 1
+        
+        # Calculate the new mapping speed
+        expected_num_mea = mapping_speed_param.auto_adjust_expected_number_of_points
+        if num_mea == 0:
+            print('Auto adjust mapping speed: No measurements collected, cannot adjust speed.')
+        else:
+            speed_adjust_factor = num_mea / expected_num_mea
+            new_modifier = mapping_speed_param.mapping_speed_multiplier * speed_adjust_factor
+            new_speed_percent = mapping_speed_param.mapping_speed_rel_percent * speed_adjust_factor
+            new_speed_percent = max(MINIMUM_RELATIVE_SPEED_PERCENT, min(new_speed_percent, 100.0))   # Clamp between a minimum and 100%
+            print(f'Auto adjust mapping speed: Collected {num_mea} measurements, expected {expected_num_mea}. Adjusting stage-speed from {mapping_speed_param.mapping_speed_rel_percent:.2f}% to {new_speed_percent:.2f}%.')
+            mapping_speed_param.mapping_speed_rel_percent = new_speed_percent
+            mapping_speed_param.mapping_speed_multiplier = new_modifier
+        self.sig_autoAdjSpeed_newMultiplier.emit(mapping_speed_param.mapping_speed_multiplier)
+        
+        # Return to the measurement start coordinate
+        event_finish_goto.clear()
+        self._sig_gotocor.emit((float(coor_mea[0]),float(coor_mea[1]),float(coor_mea[2])),event_finish_goto)
+        event_finish_goto.wait()
+        
         
     @Slot(str)
     def emit_finish_signals(self,msg:str):
@@ -538,7 +653,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
     
     sig_stop_measurement = Signal() # Signal to trigger measurement collection
     sig_run_scan_discrete = Signal(AcquisitionParams, list, queue.Queue)
-    sig_run_scan_continuous = Signal(AcquisitionParams, list, float, queue.Queue)
+    sig_run_scan_continuous = Signal(AcquisitionParams, list, MappingSpeedParam, queue.Queue)
 
     def __init__(self,
                  parent,
@@ -633,6 +748,9 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self._chk_randomise = wdg.chk_randomise
         self._chk_skipover = wdg.chk_skipover
         self._spin_skipover = wdg.spin_skipover
+        
+    # >>> Auto speed adjustment setup <<<
+        QTimer.singleShot(0, lambda: self._widget.spin_continuousSpeedMod.setValue(AppRamanEnum.CONTINUOUS_SPEED_MODIFIER.value*100.0))
         
     # >>> Overlay heatmap plotter setup <<<
         # Heatmap plotter widgets setup
@@ -759,6 +877,9 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self._scan_update_prefix:str = ''
         self._worker_hilvlacq.sig_progress_update_str.connect(self.handle_message_update)
         
+        # Auto speed adjustment handling
+        self._worker_hilvlacq.sig_autoAdjSpeed_newMultiplier.connect(self.handle_auto_speedmod_update)
+        
     # >>> Autosaver worker setup <<<
         # Signal to stop the autosaver
         self._worker_hilvlacq.sig_mea_done.connect(self._worker_autoMeaStorer.stop_autosaver)
@@ -785,6 +906,16 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.sig_set_autosaver.emit(mapping_unit, q_storage)
         self.sig_start_autosaver.emit()
         return q_storage
+    
+    @Slot(float)
+    def handle_auto_speedmod_update(self, new_modifier:float):
+        """
+        Handles updates to the auto speed modifier from the worker
+
+        Args:
+            new_modifier (float): The new speed modifier
+        """
+        self._widget.spin_continuousSpeedMod.setValue(new_modifier*100.0)
     
     @Slot(str)
     def handle_message_update(self, msg:str):
@@ -859,9 +990,15 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         pass #TODO: Implement coordinate checking (that every coordinate is within the stage limits)
         return True
 
-    def _convertCoor_byScanOptions(self,mapping_coor:list|None=None,precision:int=4,ends_only:bool=False) -> list|None:
+    def _convertCoor_byScanOptions(
+        self,
+        mapping_speeed_param:MappingSpeedParam,
+        mapping_coor:list|None=None,
+        precision:int=4,
+        ends_only:bool=False
+        ) -> list|None:
         """
-        Converts coordinates to raster scan format.
+        Converts coordinates to raster scan format and modifies the mapping_speed_param for auto speed adjustment.
 
         Args:
             mapping_coor (list): The list of coordinates to be checked, in the format [(x1, y1, z1), (x2, y2, z2), ...].
@@ -892,6 +1029,15 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
                     group_coor[x] = []
                 group_coor[x].append(coor)
             sorted_x = sorted(group_coor.keys())
+            
+            # Prepare auto speed adjustment parameters
+            list_scan_distance = [math.dist(group_coor[x][0], group_coor[x][-1]) for x in sorted_x] # List of distances for each scan line
+            idx_max_scan = list_scan_distance.index(max(list_scan_distance))    # Index of the line with the maximum scan distance
+            num_max_scan = len(group_coor[sorted_x[idx_max_scan]])  # Number of points in the line with the maximum scan distance
+            mapping_speeed_param.auto_adjust_coor_start = group_coor[sorted_x[idx_max_scan]][0]
+            mapping_speeed_param.auto_adjust_coor_end = group_coor[sorted_x[idx_max_scan]][-1]
+            mapping_speeed_param.auto_adjust_expected_number_of_points = num_max_scan
+            
             if flg_snake:
                 for x in sorted_x[1::2]: group_coor[x].reverse()
             if ends_only: 
@@ -906,6 +1052,15 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
                     group_coor[y] = []
                 group_coor[y].append(coor)
             sorted_y = sorted(group_coor.keys())
+            
+            # Prepare auto speed adjustment parameters
+            list_scan_distance = [math.dist(group_coor[y][0], group_coor[y][-1]) for y in sorted_y] # List of distances for each scan line
+            idx_max_scan = list_scan_distance.index(max(list_scan_distance))    # Index of the line with the maximum scan distance
+            num_max_scan = len(group_coor[sorted_y[idx_max_scan]])  # Number of points in the line with the maximum scan distance
+            mapping_speeed_param.auto_adjust_coor_start = group_coor[sorted_y[idx_max_scan]][0]
+            mapping_speeed_param.auto_adjust_coor_end = group_coor[sorted_y[idx_max_scan]][-1]
+            mapping_speeed_param.auto_adjust_expected_number_of_points = num_max_scan
+            
             if flg_snake:
                 for y in sorted_y[1::2]: group_coor[y].reverse()
             if ends_only:
@@ -1036,7 +1191,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.enable_widgets()
         self._btn_stop.setEnabled(False)
         self.statbar.showMessage('Ready')
-
+        
     def _scramble_mapping_coordinates(self, list_mappingCoor:list, mode:MappingMethods) -> list:
         """
         Scrambles the mapping coordinates based on the selected mode.
@@ -1165,6 +1320,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             return
         
         if msg == self._worker_hilvlacq.msg_mea_finished and len(self._list_sel_mapCoor) == 0:
+            self._widget.chk_contMap_autoAdjustSpeed.setChecked(True)
             qw.QMessageBox.information(self,'Mapping measurement complete','The mapping measurement is complete and added to the data hub')
         elif msg == self._worker_hilvlacq.msg_mea_finished:
             self.initiate_mapping(method=self._last_mappingmethod)
@@ -1197,12 +1353,19 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         list_coor, mapping_speed_mmPerSec, unit_name = result
         if method == MappingMethods.CONTINUOUS: ends_only = True
         else: ends_only = False
-        list_coor = self._convertCoor_byScanOptions(list_coor, ends_only=ends_only)
         
+        mappingSpeedParam = MappingSpeedParam(auto_adjust=self._widget.chk_contMap_autoAdjustSpeed.isChecked(), init_mapping_speed_mmPerSec=mapping_speed_mmPerSec)
+        list_coor = self._convertCoor_byScanOptions(mappingSpeedParam, list_coor, ends_only=ends_only)
+        if list_coor is None:
+            qw.QMessageBox.critical(self,'Error',f"Failed to convert mapping coordinates for '{mappingUnit_name}'")
+            reset()
+            return
+                
         try:
+            self._widget.chk_contMap_autoAdjustSpeed.setEnabled(False)
             self._btn_stop.setEnabled(True)
             assert list_coor is not None and len(list_coor)>0, "No coordinates to perform mapping"
-            self._request_Mapping(mapping_coordinates=list_coor, unit_name=unit_name, method=method, mapping_speed_mmPerSec=mapping_speed_mmPerSec)
+            self._request_Mapping(mapping_coordinates=list_coor, unit_name=unit_name, method=method, mapping_speed_param=mappingSpeedParam)
         except Exception as e:
             qw.QMessageBox.critical(self,'Error',f"Failed to perform mapping for '{mappingUnit_name}': {e}")
             reset()
@@ -1213,7 +1376,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         mapping_coordinates:list,
         unit_name:str,
         method:MappingMethods,
-        mapping_speed_mmPerSec:float,
+        mapping_speed_param:MappingSpeedParam,
         ) -> None:
         assert method in MappingMethods, "Invalid mapping method. Check the MappingMethods enum."
     # >>> Initialisations <<<
@@ -1237,12 +1400,15 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
                 q_autosave
                 )
         else:
-            mapping_speed_rel = self.motion_controller.calculate_vel_relative(vel_xy_mmPerSec=mapping_speed_mmPerSec)
-            mapping_speed_rel *= AppRamanEnum.CONTINUOUS_SPEED_MODIFIER.value
+            mapping_speed_rel = self.motion_controller.calculate_vel_relative(vel_xy_mmPerSec=mapping_speed_param.init_mapping_speed_mmPerSec)
+            mapping_speed_rel *= self._widget.spin_continuousSpeedMod.value()/100.0
+            mapping_speed_rel = max(MINIMUM_RELATIVE_SPEED_PERCENT, min(100.0, mapping_speed_rel))  # Clamp between a minimum and 100%
+            mapping_speed_param.mapping_speed_multiplier = self._widget.spin_continuousSpeedMod.value()/100.0
+            mapping_speed_param.mapping_speed_rel_percent = mapping_speed_rel
             self.sig_run_scan_continuous.emit(
                 self.raman_controller.generate_acquisition_params(),
                 mapping_coordinates,
-                mapping_speed_rel,
+                mapping_speed_param,
                 q_autosave,
                 )
 
