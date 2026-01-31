@@ -334,7 +334,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 points_done = i + 1
                 time_elapsed = time.time() - time_start
                 time_remaining_str = self._calculate_time_remaining(points_done, total_points, time_elapsed)
-                progress_msg = f'Measured {points_done}/{total_points} points. Estimated time remaining: {time_remaining_str}. Elapsed time: {self._convert_time_to_hms(time_elapsed)}.'
+                progress_msg = f'Measured {points_done}/{total_points} points. Remaining: {time_remaining_str}. Elapsed: {self._convert_time_to_hms(time_elapsed)}.'
                 self.sig_progress_update_str.emit(progress_msg)
         
         self._event_isacquiring.clear()
@@ -756,6 +756,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self._thread_hilvlacq.start(QThread.Priority.HighestPriority)
         
         # Message update handling
+        self._scan_update_prefix:str = ''
         self._worker_hilvlacq.sig_progress_update_str.connect(self.handle_message_update)
         
     # >>> Autosaver worker setup <<<
@@ -793,7 +794,9 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         Args:
             msg (str): The message to display
         """
+        msg = self._scan_update_prefix + msg
         self.statbar.showMessage(msg)
+        self.statbar.setStyleSheet('')
     
     def _get_scan_options(self) -> tuple[str,str]:
         """
@@ -1123,6 +1126,9 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.raman_controller.disable_widgets()
         self.motion_controller.disable_widgets()
         self.disable_widgets()
+        
+        # Update the status bar prefix
+        self._scan_update_prefix = f'ROI: {len(self._list_sel_mapCoor)} remains | '
         
         # Store the last mapping method used
         assert method in MappingMethods, "Invalid mapping method. Check the MappingMethods enum."
