@@ -128,6 +128,7 @@ class Enum_ContinuousMeasurementTrigger(Enum):
     PAUSE = 'pause'
     FINISH = 'finish'
     STORE = 'store'
+    STORE_TEST = 'store_test'
     IGNORE = 'ignore'
 
 class Syncer_Raman(QObject):
@@ -238,12 +239,13 @@ class RamanMeasurement_Worker(QObject):
         self.sig_acq_done.emit()
         
     
-    @Slot(AcquisitionParams, queue.Queue, queue.Queue)
+    @Slot(AcquisitionParams, queue.Queue, queue.Queue, queue.Queue)
     def acquire_continuous_burst_measurement_trigger(
         self,
         params:AcquisitionParams,
         q_trigger:queue.Queue[Enum_ContinuousMeasurementTrigger],
         q_return:queue.Queue[MeaRaman],
+        q_test:queue.Queue[MeaRaman]
         ):
         """
         Acquires the spectrum in a continuous manner (one after another consecutively)
@@ -259,6 +261,8 @@ class RamanMeasurement_Worker(QObject):
             params (AcquisitionParams): The acquisition parameters that will be fixed to the acquired measurements.
             q_trigger (queue.Queue): The trigger queue to command the measurement actions.
             q_return (queue.Queue): The return queue where the acquired measurements are put.
+            q_test (queue.Queue): A test queue to put the acquired measurements for testing purposes. Only used when the STORE_TEST command is received.
+                Bypasses the notification, emission, and processing steps.
         
         NOTE:
             The event to signal when the process is ready for the next command is synced with the syncer_acquisition.
@@ -306,6 +310,7 @@ class RamanMeasurement_Worker(QObject):
                     timestamp_end=list_timestamp_trigger[-1],
                     WaitForMeasurement=False,
                     getNewOnly=False)
+            # print(f'\nTrigger: {trigger}')
             # print(f'Acquired {len(list_spectrum)} spectra between {convert_timestamp_us_int_to_str(list_timestamp_trigger[-2])} and {convert_timestamp_us_int_to_str(list_timestamp_trigger[-1])}')
             list_timestamp_trigger.pop(0) # Remove the first element (not needed anymore)
             
@@ -324,6 +329,11 @@ class RamanMeasurement_Worker(QObject):
                     extra_metadata=params['extra_metadata'])
                 measurement.append_raw_list(df_mea=spectrum_raw, timestamp_int=ts_int)
                 list_measurement.append(measurement)
+            
+            if trigger == EnumTrig.STORE_TEST:
+                for mea in list_measurement: q_test.put(mea)
+                self._syncer_acquisition.notify_ready()
+                continue
             
             # print(f'Processing and returning {len(list_measurement)} measurements...')
             # Return the measurement result
