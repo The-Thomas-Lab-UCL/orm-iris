@@ -15,9 +15,10 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QGridLayout, QHBoxLayout,
-    QHeaderView, QLabel, QLineEdit, QPushButton,
-    QSizePolicy, QTreeWidget, QTreeWidgetItem, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QGridLayout,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+    QPushButton, QSizePolicy, QTreeWidget, QTreeWidgetItem,
+    QVBoxLayout, QWidget)
 
 class Ui_DataHub_mapping(object):
     def setupUi(self, DataHub_mapping):
@@ -26,20 +27,12 @@ class Ui_DataHub_mapping(object):
         DataHub_mapping.resize(558, 356)
         self.gridLayout = QGridLayout(DataHub_mapping)
         self.gridLayout.setObjectName(u"gridLayout")
-        self.btn_rename = QPushButton(DataHub_mapping)
-        self.btn_rename.setObjectName(u"btn_rename")
+        self.main_layout = QVBoxLayout()
+        self.main_layout.setObjectName(u"main_layout")
+        self.ent_searchbar = QLineEdit(DataHub_mapping)
+        self.ent_searchbar.setObjectName(u"ent_searchbar")
 
-        self.gridLayout.addWidget(self.btn_rename, 2, 1, 1, 1)
-
-        self.btn_delete = QPushButton(DataHub_mapping)
-        self.btn_delete.setObjectName(u"btn_delete")
-
-        self.gridLayout.addWidget(self.btn_delete, 2, 2, 1, 1)
-
-        self.btn_refresh = QPushButton(DataHub_mapping)
-        self.btn_refresh.setObjectName(u"btn_refresh")
-
-        self.gridLayout.addWidget(self.btn_refresh, 2, 0, 1, 1)
+        self.main_layout.addWidget(self.ent_searchbar)
 
         self.tree_data = QTreeWidget(DataHub_mapping)
         __qtreewidgetitem = QTreeWidgetItem()
@@ -49,17 +42,27 @@ class Ui_DataHub_mapping(object):
         self.tree_data.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree_data.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
 
-        self.gridLayout.addWidget(self.tree_data, 1, 0, 1, 3)
+        self.main_layout.addWidget(self.tree_data)
 
-        self.lbl_autosave = QLabel(DataHub_mapping)
-        self.lbl_autosave.setObjectName(u"lbl_autosave")
+        self.horizontalLayout = QHBoxLayout()
+        self.horizontalLayout.setObjectName(u"horizontalLayout")
+        self.btn_refresh = QPushButton(DataHub_mapping)
+        self.btn_refresh.setObjectName(u"btn_refresh")
 
-        self.gridLayout.addWidget(self.lbl_autosave, 6, 0, 1, 3)
+        self.horizontalLayout.addWidget(self.btn_refresh)
 
-        self.ent_searchbar = QLineEdit(DataHub_mapping)
-        self.ent_searchbar.setObjectName(u"ent_searchbar")
+        self.btn_rename = QPushButton(DataHub_mapping)
+        self.btn_rename.setObjectName(u"btn_rename")
 
-        self.gridLayout.addWidget(self.ent_searchbar, 0, 0, 1, 3)
+        self.horizontalLayout.addWidget(self.btn_rename)
+
+        self.btn_delete = QPushButton(DataHub_mapping)
+        self.btn_delete.setObjectName(u"btn_delete")
+
+        self.horizontalLayout.addWidget(self.btn_delete)
+
+
+        self.main_layout.addLayout(self.horizontalLayout)
 
         self.lyt_saveload = QHBoxLayout()
         self.lyt_saveload.setObjectName(u"lyt_saveload")
@@ -79,13 +82,21 @@ class Ui_DataHub_mapping(object):
         self.lyt_saveload.addWidget(self.btn_load_db)
 
 
-        self.gridLayout.addLayout(self.lyt_saveload, 3, 0, 1, 3)
+        self.main_layout.addLayout(self.lyt_saveload)
 
-        QWidget.setTabOrder(self.ent_searchbar, self.tree_data)
-        QWidget.setTabOrder(self.tree_data, self.btn_refresh)
-        QWidget.setTabOrder(self.btn_refresh, self.btn_rename)
-        QWidget.setTabOrder(self.btn_rename, self.btn_delete)
-        QWidget.setTabOrder(self.btn_delete, self.btn_save_ext)
+        self.lbl_autosave = QLabel(DataHub_mapping)
+        self.lbl_autosave.setObjectName(u"lbl_autosave")
+
+        self.main_layout.addWidget(self.lbl_autosave)
+
+        self.chk_autoOffload = QCheckBox(DataHub_mapping)
+        self.chk_autoOffload.setObjectName(u"chk_autoOffload")
+
+        self.main_layout.addWidget(self.chk_autoOffload)
+
+
+        self.gridLayout.addLayout(self.main_layout, 0, 0, 1, 1)
+
         QWidget.setTabOrder(self.btn_save_ext, self.btn_save_db)
         QWidget.setTabOrder(self.btn_save_db, self.btn_load_db)
 
@@ -96,13 +107,14 @@ class Ui_DataHub_mapping(object):
 
     def retranslateUi(self, DataHub_mapping):
         DataHub_mapping.setWindowTitle(QCoreApplication.translate("DataHub_mapping", u"Form", None))
+        self.ent_searchbar.setPlaceholderText(QCoreApplication.translate("DataHub_mapping", u"Search by typing here...", None))
+        self.btn_refresh.setText(QCoreApplication.translate("DataHub_mapping", u"Refresh", None))
         self.btn_rename.setText(QCoreApplication.translate("DataHub_mapping", u"Rename selected ROI", None))
         self.btn_delete.setText(QCoreApplication.translate("DataHub_mapping", u"Delete selected ROI", None))
-        self.btn_refresh.setText(QCoreApplication.translate("DataHub_mapping", u"Refresh", None))
-        self.lbl_autosave.setText(QCoreApplication.translate("DataHub_mapping", u"Autosave: Disabled", None))
-        self.ent_searchbar.setPlaceholderText(QCoreApplication.translate("DataHub_mapping", u"Search by typing here...", None))
         self.btn_save_ext.setText(QCoreApplication.translate("DataHub_mapping", u"Save selected ROI [.csv, etc]", None))
         self.btn_save_db.setText(QCoreApplication.translate("DataHub_mapping", u"Save all ROIs [.db]", None))
         self.btn_load_db.setText(QCoreApplication.translate("DataHub_mapping", u"Load ROIs [.db]", None))
+        self.lbl_autosave.setText(QCoreApplication.translate("DataHub_mapping", u"Autosave: Disabled", None))
+        self.chk_autoOffload.setText(QCoreApplication.translate("DataHub_mapping", u"Auto-offload measurements when memory is full (to the autosave file)", None))
     # retranslateUi
 

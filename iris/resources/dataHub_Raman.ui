@@ -14,76 +14,91 @@
    <string>Form</string>
   </property>
   <layout class="QGridLayout" name="gridLayout">
-   <item row="2" column="1">
-    <widget class="QPushButton" name="btn_rename">
-     <property name="text">
-      <string>Rename selected ROI</string>
-     </property>
-    </widget>
-   </item>
-   <item row="2" column="2">
-    <widget class="QPushButton" name="btn_delete">
-     <property name="text">
-      <string>Delete selected ROI</string>
-     </property>
-    </widget>
-   </item>
-   <item row="2" column="0">
-    <widget class="QPushButton" name="btn_refresh">
-     <property name="text">
-      <string>Refresh</string>
-     </property>
-    </widget>
-   </item>
-   <item row="1" column="0" colspan="3">
-    <widget class="QTreeWidget" name="tree_data">
-     <property name="selectionMode">
-      <enum>QAbstractItemView::SelectionMode::ExtendedSelection</enum>
-     </property>
-     <property name="selectionBehavior">
-      <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
-     </property>
-     <column>
-      <property name="text">
-       <string notr="true">1</string>
-      </property>
-     </column>
-    </widget>
-   </item>
-   <item row="6" column="0" colspan="3">
-    <widget class="QLabel" name="lbl_autosave">
-     <property name="text">
-      <string>Autosave: Disabled</string>
-     </property>
-    </widget>
-   </item>
-   <item row="0" column="0" colspan="3">
-    <widget class="QLineEdit" name="ent_searchbar">
-     <property name="placeholderText">
-      <string>Search by typing here...</string>
-     </property>
-    </widget>
-   </item>
-   <item row="3" column="0" colspan="3">
-    <layout class="QHBoxLayout" name="lyt_saveload">
+   <item row="0" column="0">
+    <layout class="QVBoxLayout" name="main_layout">
      <item>
-      <widget class="QPushButton" name="btn_save_ext">
-       <property name="text">
-        <string>Save selected ROI [.csv, etc]</string>
+      <widget class="QLineEdit" name="ent_searchbar">
+       <property name="placeholderText">
+        <string>Search by typing here...</string>
        </property>
       </widget>
      </item>
      <item>
-      <widget class="QPushButton" name="btn_save_db">
+      <widget class="QTreeWidget" name="tree_data">
+       <property name="selectionMode">
+        <enum>QAbstractItemView::SelectionMode::ExtendedSelection</enum>
+       </property>
+       <property name="selectionBehavior">
+        <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
+       </property>
+       <column>
+        <property name="text">
+         <string notr="true">1</string>
+        </property>
+       </column>
+      </widget>
+     </item>
+     <item>
+      <layout class="QHBoxLayout" name="horizontalLayout">
+       <item>
+        <widget class="QPushButton" name="btn_refresh">
+         <property name="text">
+          <string>Refresh</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_rename">
+         <property name="text">
+          <string>Rename selected ROI</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_delete">
+         <property name="text">
+          <string>Delete selected ROI</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </item>
+     <item>
+      <layout class="QHBoxLayout" name="lyt_saveload">
+       <item>
+        <widget class="QPushButton" name="btn_save_ext">
+         <property name="text">
+          <string>Save selected ROI [.csv, etc]</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_save_db">
+         <property name="text">
+          <string>Save all ROIs [.db]</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btn_load_db">
+         <property name="text">
+          <string>Load ROIs [.db]</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </item>
+     <item>
+      <widget class="QLabel" name="lbl_autosave">
        <property name="text">
-        <string>Save all ROIs [.db]</string>
+        <string>Autosave: Disabled</string>
        </property>
       </widget>
      </item>
      <item>
-      <widget class="QPushButton" name="btn_load_db">
+      <widget class="QCheckBox" name="chk_autoOffload">
        <property name="text">
-        <string>Load ROIs [.db]</string>
+        <string>Auto-offload measurements when memory is full (to the autosave file)</string>
        </property>
       </widget>
      </item>
@@ -92,11 +107,6 @@
   </layout>
  </widget>
  <tabstops>
-  <tabstop>ent_searchbar</tabstop>
-  <tabstop>tree_data</tabstop>
-  <tabstop>btn_refresh</tabstop>
-  <tabstop>btn_rename</tabstop>
-  <tabstop>btn_delete</tabstop>
   <tabstop>btn_save_ext</tabstop>
   <tabstop>btn_save_db</tabstop>
   <tabstop>btn_load_db</tabstop>

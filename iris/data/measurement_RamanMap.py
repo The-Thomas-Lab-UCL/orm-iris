@@ -490,6 +490,47 @@ class MeaRMap_Unit():
         
         return df
         
+    def clear_measurements(self, list_timestamp:list[int]|list[str]|None=None):
+        """
+        Clears the measurement data stored in the object. 
+
+        Args:
+            list_timestamp (list[int]|list[str]|None, optional): List of timestamps to clear. 
+                If None, clears all measurements. Defaults to None.
+        """
+        with self._lock_measurement:
+            if list_timestamp is None:
+                for key in self._dict_measurement.keys():
+                    self._dict_measurement[key] = []
+                self._flg_measurement_exist = False
+            else:
+                assert isinstance(list_timestamp, list), 'clear_measurements: The input data type is not correct. Expected a list of integers or strings.'
+                assert all([isinstance(ts, (int,str)) for ts in list_timestamp]),\
+                    'clear_measurements: The input data type is not correct. Expected a list of integers or strings.'
+                if type(list_timestamp[0]) == str: assert all([isinstance(ts, str) and ts.isdigit() for ts in list_timestamp]),\
+                    'clear_measurements: The input data type is not correct. Expected a list of strings representing integers.'
+                if type(list_timestamp[0]) == str: list_timestamp = [int(float(ts)) for ts in list_timestamp]
+                
+                indices_to_remove = []
+                # Convert timestamps to integers and create a set for O(1) lookup
+                ts_set = set(list_timestamp)
+                
+                # Find indices of timestamps to remove in a single pass
+                indices_to_remove = [
+                    i for i, ts in enumerate(self._dict_measurement[self._label_ts])
+                    if ts in ts_set
+                ]
+                
+                # Remove the measurements in reverse order to avoid index shifting
+                for idx in sorted(indices_to_remove, reverse=True):
+                    for key in self._dict_measurement.keys():
+                        del self._dict_measurement[key][idx]
+                
+                if len(self._dict_measurement[self._label_ts]) == 0:
+                    self._flg_measurement_exist = False
+        
+        self._notify_observers()
+        
     def get_dict_RamanMeasurement_summary(self,measurement_id:int|str,exclude_id:bool=False) -> dict:
         """
         Returns the summary of the measurement data stored in the object.
@@ -566,14 +607,17 @@ class MeaRMap_Unit():
         
         return df
         
-    def get_list_RamanMeasurement_ids(self) -> list[int]:
+    def get_list_RamanMeasurement_ids(self, copy:bool=True) -> list[int]:
         """
         Returns the list of timestamps stored in the measurement data
         
         Returns:
             list[int]: list of timestamps
         """
-        return self._dict_measurement[self._label_ts]
+        if copy:
+            with self._lock_measurement: ret = self._dict_measurement[self._label_ts].copy()
+        else: ret = self._dict_measurement[self._label_ts]
+        return ret
     
     def get_list_wavelengths(self) -> list[float]:
         """
@@ -864,10 +908,10 @@ class MeaRMap_Hub():
             }
         
         self._dict_mappingUnit_NameID = {}  # Dictionary to store the mapping of the unit name and unit ID with the name as the key
-        
         self._list_callbacks = []  # List of callbacks to be called when the mapping measurement is updated
-        
         self._last_update_timestamp:int = get_timestamp_us_int()
+        
+        self._lock = threading.RLock()  # Lock for thread safety
         
     def add_observer(self,callback:Callable) -> None:
         """
@@ -901,9 +945,9 @@ class MeaRMap_Hub():
         """
         assert source_unit_id in self._dict_mappingMeasurementUnits[self._unit_id_key], 'copy_mapping_unit: The source unit ID does not exist.'
         
-        idx = self._dict_mappingMeasurementUnits[self._unit_id_key].index(source_unit_id)
-        source_unit = self._dict_mappingMeasurementUnits['measurement_unit'][idx]
-        source_unit:MeaRMap_Unit
+        with self._lock:
+            idx = self._dict_mappingMeasurementUnits[self._unit_id_key].index(source_unit_id)
+            source_unit:MeaRMap_Unit = self._dict_mappingMeasurementUnits['measurement_unit'][idx]
         
         # Construct the destination unit
         dest_unit:MeaRMap_Unit = MeaRMap_Unit()
@@ -927,13 +971,13 @@ class MeaRMap_Hub():
             bool: True if the unit name is valid, False otherwise
         """
         assert isinstance(unit_name, str), 'validate_new_unit_name: The input data type is not correct. Expected a string.'
-        return unit_name not in self._dict_mappingUnit_NameID
+        with self._lock: return unit_name not in self._dict_mappingUnit_NameID
     
     def check_measurement_exist(self):
         """
         Check if the measurement data exists
         """
-        return len(self._dict_mappingMeasurementUnits[self._unit_id_key]) > 0
+        with self._lock: return len(self._dict_mappingMeasurementUnits[self._unit_id_key]) > 0
     
     def get_dict_nameToID(self) -> dict:
         """
@@ -942,7 +986,7 @@ class MeaRMap_Hub():
         Returns:
             dict: dictionary of the mapping unit name and ID. {unit_name: unit_id}
         """
-        return self._dict_mappingUnit_NameID
+        with self._lock: return self._dict_mappingUnit_NameID
 
     def get_list_MappingUnit_names(self) -> list[str]:
         """
@@ -951,7 +995,7 @@ class MeaRMap_Hub():
         Returns:
             list: list of measurement names
         """
-        return list(self._dict_mappingUnit_NameID.keys())
+        with self._lock: return list(self._dict_mappingUnit_NameID.keys())
     
     def get_list_MappingUnit_ids(self) -> list[str]:
         """
@@ -960,7 +1004,7 @@ class MeaRMap_Hub():
         Returns:
             list: list of measurement IDs
         """
-        return self._dict_mappingMeasurementUnits[self._unit_id_key]
+        with self._lock: return self._dict_mappingMeasurementUnits[self._unit_id_key]
     
     def get_list_MappingUnit(self) -> list[MeaRMap_Unit]:
         """
@@ -969,7 +1013,7 @@ class MeaRMap_Hub():
         Returns:
             list[MappingMeasurement_Unit]: list of mapping measurement units
         """
-        return self._dict_mappingMeasurementUnits['measurement_unit']
+        with self._lock: return self._dict_mappingMeasurementUnits['measurement_unit']
 
     def get_summary_units(self) -> tuple[list[str],list[str],list[dict],list[int]]:
         """
@@ -980,15 +1024,16 @@ class MeaRMap_Hub():
                 list of metadata dictionaries,
                 list of number of measurements in the unit
         """
-        list_ids = self._dict_mappingMeasurementUnits[self._unit_id_key]
+        with self._lock: list_ids = self._dict_mappingMeasurementUnits[self._unit_id_key]
         list_names = []
         list_metadata = []
         list_num_measurements = []
-        for unit in self._dict_mappingMeasurementUnits['measurement_unit']:
-            unit:MeaRMap_Unit
-            list_metadata.append(unit.get_dict_measurement_metadata())
-            list_num_measurements.append(unit.get_numMeasurements())
-            list_names.append(unit.get_unit_name())
+        with self._lock:
+            for unit in self._dict_mappingMeasurementUnits['measurement_unit']:
+                unit:MeaRMap_Unit
+                list_metadata.append(unit.get_dict_measurement_metadata())
+                list_num_measurements.append(unit.get_numMeasurements())
+                list_names.append(unit.get_unit_name())
         
         return (list_ids,list_names,list_metadata,list_num_measurements)
     
@@ -1018,8 +1063,9 @@ class MeaRMap_Hub():
         if unit_name is not None:
             unit_id = self._dict_mappingUnit_NameID[unit_name]
         
-        idx = self._dict_mappingMeasurementUnits[self._unit_id_key].index(unit_id)
-        return self._dict_mappingMeasurementUnits['measurement_unit'][idx]
+        with self._lock:
+            idx = self._dict_mappingMeasurementUnits[self._unit_id_key].index(unit_id)
+            return self._dict_mappingMeasurementUnits['measurement_unit'][idx]
     
     def append_mapping_unit(self,mapping_unit:MeaRMap_Unit,notify:bool=True) -> None:
         """
@@ -1034,13 +1080,14 @@ class MeaRMap_Hub():
         
         unitID = mapping_unit.get_unit_id()
         unitName = mapping_unit.get_unit_name()
-        if unitID in self._dict_mappingMeasurementUnits[self._unit_id_key]: raise FileExistsError('append_mapping_measurement_unit: The measurement ID already exists.')
-        if unitName in self._dict_mappingUnit_NameID: raise FileExistsError('append_mapping_measurement_unit: The measurement name already exists.')
-        
-        self._dict_mappingMeasurementUnits[self._unit_id_key].append(unitID)
-        self._dict_mappingMeasurementUnits['measurement_unit'].append(mapping_unit)
-        
-        self._dict_mappingUnit_NameID[mapping_unit.get_unit_name()] = mapping_unit.get_unit_id()
+        with self._lock:
+            if unitID in self._dict_mappingMeasurementUnits[self._unit_id_key]: raise FileExistsError('append_mapping_measurement_unit: The measurement ID already exists.')
+            if unitName in self._dict_mappingUnit_NameID: raise FileExistsError('append_mapping_measurement_unit: The measurement name already exists.')
+            
+            self._dict_mappingMeasurementUnits[self._unit_id_key].append(unitID)
+            self._dict_mappingMeasurementUnits['measurement_unit'].append(mapping_unit)
+            
+            self._dict_mappingUnit_NameID[mapping_unit.get_unit_name()] = mapping_unit.get_unit_id()
         
         mapping_unit.add_observer(self._notify_observers)
         
@@ -1064,16 +1111,17 @@ class MeaRMap_Hub():
             unit_id (str): MappingMeasurement_Unit ID to be renamed
             new_name (str): New name for the mapping_measurement_unit
         """
-        assert unit_id in self._dict_mappingMeasurementUnits[self._unit_id_key], 'rename_mapping_measurement_unit: The measurement ID does not exist.'
-        assert new_name not in self._dict_mappingUnit_NameID, 'rename_mapping_measurement_unit: The new name already exists.'
-        
-        unit_idx = self._dict_mappingMeasurementUnits[self._unit_id_key].index(unit_id)
-        unit:MeaRMap_Unit = self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx]
-        
-        old_name = unit.get_unit_name()
-        unit.set_unitName(new_name)
-        self._dict_mappingUnit_NameID[new_name] = unit_id
-        del self._dict_mappingUnit_NameID[old_name]
+        with self._lock:
+            assert unit_id in self._dict_mappingMeasurementUnits[self._unit_id_key], 'rename_mapping_measurement_unit: The measurement ID does not exist.'
+            assert new_name not in self._dict_mappingUnit_NameID, 'rename_mapping_measurement_unit: The new name already exists.'
+            
+            unit_idx = self._dict_mappingMeasurementUnits[self._unit_id_key].index(unit_id)
+            unit:MeaRMap_Unit = self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx]
+            
+            old_name = unit.get_unit_name()
+            unit.set_unitName(new_name)
+            self._dict_mappingUnit_NameID[new_name] = unit_id
+            del self._dict_mappingUnit_NameID[old_name]
         
         self._notify_observers()
     
@@ -1084,9 +1132,10 @@ class MeaRMap_Hub():
         Args:
             unit_name (str): MappingMeasurement_Unit name to be removed
         """
-        assert unit_name in self._dict_mappingUnit_NameID, 'remove_mapping_measurement_unit: The measurement name does not exist.'
-        unit_id = self._dict_mappingUnit_NameID[unit_name]
-        self.remove_mapping_unit_id(unit_id)
+        with self._lock:
+            assert unit_name in self._dict_mappingUnit_NameID, 'remove_mapping_measurement_unit: The measurement name does not exist.'
+            unit_id = self._dict_mappingUnit_NameID[unit_name]
+            self.remove_mapping_unit_id(unit_id)
         
         self._notify_observers()
     
@@ -1097,19 +1146,20 @@ class MeaRMap_Hub():
         Args:
             unit_id (str): MappingMeasurement_Unit ID to be removed
         """
-        assert unit_id in self._dict_mappingMeasurementUnits[self._unit_id_key], 'remove_mapping_measurement_unit: The measurement ID does not exist.'
-        
-        unit_idx = self._dict_mappingMeasurementUnits[self._unit_id_key].index(unit_id)
-        unit_name = self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx].get_unit_name()
-        del self._dict_mappingMeasurementUnits[self._unit_id_key][unit_idx]
-        del self._dict_mappingUnit_NameID[unit_name]
-        
-        # Delete the object itself and all of its references
-        unit:MeaRMap_Unit = self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx]
-        try: unit.remove_observer(self._notify_observers)
-        except Exception as e: print(f"Error in remove_mapping_unit_id: {e}")
-        unit.delete_self()
-        del self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx]
+        with self._lock:
+            assert unit_id in self._dict_mappingMeasurementUnits[self._unit_id_key], 'remove_mapping_measurement_unit: The measurement ID does not exist.'
+            
+            unit_idx = self._dict_mappingMeasurementUnits[self._unit_id_key].index(unit_id)
+            unit_name = self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx].get_unit_name()
+            del self._dict_mappingMeasurementUnits[self._unit_id_key][unit_idx]
+            del self._dict_mappingUnit_NameID[unit_name]
+            
+            # Delete the object itself and all of its references
+            unit:MeaRMap_Unit = self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx]
+            try: unit.remove_observer(self._notify_observers)
+            except Exception as e: print(f"Error in remove_mapping_unit_id: {e}")
+            unit.delete_self()
+            del self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx]
         
         # # Force the garbage collector to collect the deleted object
         # gc.collect()
@@ -1120,14 +1170,15 @@ class MeaRMap_Hub():
         """
         Deletes all mapping_measurement_unit objects from the mapping_measurements dictionary.
         """
-        list_units = self._dict_mappingMeasurementUnits['measurement_unit']
-        for unit in list_units:
-            try: unit.remove_observer(self._notify_observers)
-            except Exception as e: print(f"Error in delete_all_mapping_units: {e}")
-            unit.delete_self()
-        self._dict_mappingMeasurementUnits[self._unit_id_key].clear()
-        self._dict_mappingMeasurementUnits['measurement_unit'].clear()
-        self._dict_mappingUnit_NameID.clear()
+        with self._lock:
+            list_units = self._dict_mappingMeasurementUnits['measurement_unit']
+            for unit in list_units:
+                try: unit.remove_observer(self._notify_observers)
+                except Exception as e: print(f"Error in delete_all_mapping_units: {e}")
+                unit.delete_self()
+            self._dict_mappingMeasurementUnits[self._unit_id_key].clear()
+            self._dict_mappingMeasurementUnits['measurement_unit'].clear()
+            self._dict_mappingUnit_NameID.clear()
         self._notify_observers()
 
     def shift_xycoordinate_timestamp(self, unit_id:str, timeshift_us:int) -> str:
@@ -1144,20 +1195,21 @@ class MeaRMap_Hub():
         Returns:
             str: new unit name of the shifted MappingMeasurement
         """
-        assert unit_id in self._dict_mappingMeasurementUnits[self._unit_id_key], 'shift_coordinate_timestamp: The measurement ID does not exist.'
-        assert isinstance(timeshift_us, int), 'shift_coordinate_timestamp: The input data type is not correct. Expected an integer.'
-        unit = self.get_MappingUnit(unit_id)
-        unit_name_init = unit.get_unit_name()
-        unit_name_shift = unit_name_init + f'_shift {timeshift_us/1000}ms'
+        with self._lock:
+            assert unit_id in self._dict_mappingMeasurementUnits[self._unit_id_key], 'shift_coordinate_timestamp: The measurement ID does not exist.'
+            assert isinstance(timeshift_us, int), 'shift_coordinate_timestamp: The input data type is not correct. Expected an integer.'
+            unit = self.get_MappingUnit(unit_id)
+            unit_name_init = unit.get_unit_name()
+            unit_name_shift = unit_name_init + f'_shift {timeshift_us/1000}ms'
         
-        dict_mea = unit.get_dict_measurements()
-        lbl_ts,lbl_x,lbl_y,_,_,_ = unit.get_keys_dict_measurement()
-        
-        arr_init_ts_coor = np.array([dict_mea[lbl_ts],dict_mea[lbl_x],dict_mea[lbl_y]])
-        arr_init_ts_coor = arr_init_ts_coor.T
-        
-        arr_shifted_ts_coor = deepcopy(arr_init_ts_coor)
-        arr_shifted_ts_coor[:,0] += timeshift_us
+            dict_mea = unit.get_dict_measurements()
+            lbl_ts,lbl_x,lbl_y,_,_,_ = unit.get_keys_dict_measurement()
+            
+            arr_init_ts_coor = np.array([dict_mea[lbl_ts],dict_mea[lbl_x],dict_mea[lbl_y]])
+            arr_init_ts_coor = arr_init_ts_coor.T
+            
+            arr_shifted_ts_coor = deepcopy(arr_init_ts_coor)
+            arr_shifted_ts_coor[:,0] += timeshift_us
         
         def interpolate_coor(init_ts:float, fin_ts:float, init_coor:np.ndarray, fin_coor:np.ndarray, ts:float):
             coor = init_coor + (fin_coor-init_coor)/(fin_ts-init_ts)*(ts-init_ts)
@@ -1205,12 +1257,13 @@ class MeaRMap_Hub():
         # Convert the timestamps to integer
         dict_shifted_mea[lbl_ts] = [int(ts) for ts in dict_shifted_mea[lbl_ts]]
         
-        unit_shift = self.copy_mapping_unit(
-            source_unit_id=unit_id,
-            dest_unit_name=unit_name_shift,
-            appendToHub=True
-        )
-        unit_shift.set_dict_measurements(dict_shifted_mea)
+        with self._lock:
+            unit_shift = self.copy_mapping_unit(
+                source_unit_id=unit_id,
+                dest_unit_name=unit_name_shift,
+                appendToHub=True
+            )
+            unit_shift.set_dict_measurements(dict_shifted_mea)
         
         return unit_name_shift
         

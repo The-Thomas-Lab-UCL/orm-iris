@@ -8,6 +8,7 @@ import PySide6.QtWidgets as qw
 from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication
 
 import os
+import psutil
 import shutil
 from typing import Any, TypedDict
 import time
@@ -32,14 +33,19 @@ from iris.resources.dataHub_Raman_ui import Ui_DataHub_mapping
 from iris.resources.dataHubPlus_Raman_ui import Ui_DataHubPlus_mapping
 
 DATAHUBPLUS_MAX_FREQ_HZ = 1.0 # Maximum update frequency for the DataHubPlus treeview in Hertz
+DATAHUB_OFFLOADCHECK_INTERVAL_SEC = 10.0  # Minimum interval between offload checks in seconds
+DATAHUB_OFFLOAD_MINMEMORY_GB = 1.0  # Minimum available memory in GB, under which offloading is triggered
 
 class DataHub_Worker(QObject):
     
     sig_saveload_done = Signal(str)
+    sig_autoOffload_done = Signal(str)
     save_success = "Saved the data successfully."
     load_success = "Loaded the data successfully."
     save_error = "Error in saving the data: "
     load_error = "Error in loading the data: "
+    offload_success = "Autosaved and offloaded the data successfully."
+    offload_error = "Error in autosaving and offloading the data: "
     autosave_success = "Autosaved the data successfully."
     autosave_error = "Error in autosaving the data: "
     
@@ -75,8 +81,8 @@ class DataHub_Worker(QObject):
         except Exception as e:
             self.sig_saveload_done.emit(self.save_error + str(e))
             
-    @Slot(str,str)
-    def autosave_database(self,savedirpath:str,savename:str) -> None:
+    @Slot(str, str)
+    def autosave_database(self, savedirpath:str, savename:str) -> None:
         """
         Save the MappingMeasurement_Hub stored internally to the local disk.
         
@@ -97,6 +103,47 @@ class DataHub_Worker(QObject):
         except Exception as e:
             self.sig_saveload_done.emit(self.autosave_error + str(e))
             
+    @Slot(str, str)
+    def autoOffload_database(self, savedirpath:str, savename:str) -> None:
+        """
+        Save the MappingMeasurement_Hub stored internally to the local disk and delete previous units to free up memory.
+        
+        Args:
+            savedirpath (str): The directory path to save the database to
+            savename (str): The name of the database file
+            autodelete (bool): If True, will delete the saved mappingUnit after saving
+        """
+        try:
+            if not self._mappinghub.check_measurement_exist(): return
+            
+            list_unit_ids = self._mappinghub.get_list_MappingUnit_ids().copy()
+            last_unit_id = list_unit_ids.pop(-1)
+            
+            # NOTE: Currently disabled functionality: option to also offload the measurement in the last unit
+            # Expected use-case: if the measurement is still on going (i.e., last unit is being added to),
+            # we do not offload it just yet. But presently, the GUI is already overcrowded with too many widgets
+            # to add this functionality. We will put this back in when it is absolutely necessary.
+            
+            # last_unit = self._mappinghub.get_MappingUnit(last_unit_id)
+            # list_mea_ids = last_unit.get_list_RamanMeasurement_ids(copy=True)
+            
+            if savename.endswith('.db'): savename = savename[:-3]
+            savename = f'{savename}_offload_{get_timestamp_sec()}.db'
+            
+            thread = MeaRMap_Handler().save_MappingHub_database(
+                mappingHub=self._mappinghub,
+                savedirpath=savedirpath,
+                savename=savename,
+            )
+            thread.join()
+            self._flg_issaved = True
+            
+            [self._mappinghub.remove_mapping_unit_id(unit_id) for unit_id in list_unit_ids]
+            # last_unit.clear_measurements(list_mea_ids) # NOTE: Use in conjunction with the above disabled functionality
+            self.sig_autoOffload_done.emit(self.offload_success)
+        except Exception as e:
+            self.sig_autoOffload_done.emit(self.offload_error + str(e))
+            
     @Slot(str, threading.Event)
     def autosave_database_delete(self, dirpath:str, done_event: threading.Event) -> None:
         """
@@ -111,7 +158,7 @@ class DataHub_Worker(QObject):
                     shutil.rmtree(dirpath)
                 else:
                     os.remove(dirpath)
-        except Exception as e: self.sig_saveload_done.emit(self.autosave_error + str(e))
+        except Exception as e: self.sig_autoOffload_done.emit(self.offload_error + str(e))
         finally: done_event.set()
             
     @Slot(str, str, str)
@@ -181,13 +228,13 @@ class Wdg_DataHub_Mapping_Ui(qw.QWidget, Ui_DataHub_mapping):
     def __init__(self, parent: Any) -> None:
         super().__init__(parent)
         self.setupUi(self)
-        lyt = qw.QVBoxLayout()
-        self.setLayout(lyt)
+        self.setLayout(self.main_layout)
 
 class Wdg_DataHub_Mapping(qw.QWidget):
     
     _sig_req_update_tree = Signal()     # Emitted when the treeview needs to be updated (internal)
     _sig_req_delte_unit = Signal(list)  # Emitted to request deletion of units (internal)
+    _sig_check_system_memory = Signal()  # Emitted to check system memory (internal)
     sig_tree_changed = Signal()         # Emitted when the treeview is changed
     sig_tree_selection = Signal()       # Emitted when the treeview selection is changed
     sig_tree_selection_str = Signal(str)    # Emitted when the treeview selection is changed, with the selected unit name as argument
@@ -195,6 +242,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
     sig_save_ext = Signal(str,str,str)  # Emitted to save the selected MappingMeasurement_Unit externally
     sig_save_db = Signal(str,str)       # Emitted to save the MappingMeasurement_Hub to the database
     sig_autosave_db = Signal(str,str)   # Emitted to autosave the MappingMeasurement_Hub to the database
+    sig_autoOffload_db = Signal(str,str) # Emitted to autosave and offload the MappingMeasurement_Hub to the database
     sig_load_db = Signal(str)           # Emitted to load the MappingMeasurement_Hub from the database
     
     sig_autosave_db_delete = Signal(str, threading.Event)  # Emitted to delete the autosaved database file
@@ -297,8 +345,50 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._autosave_interval = SaveParamsEnum.AUTOSAVE_INTERVAL_HOURS.value
         if self._autosave_interval <= 0.0: self._flg_autosave = False
         if self._flg_autosave:
+            self._widget.chk_autoOffload.setChecked(True)
+            QTimer.singleShot(0, self._init_autoOffload_signals)
             QTimer.singleShot(0, self._start_autosave)
             wdg.lbl_autosave.setText(f'Autosave: every {self._autosave_interval} hours to\n{self._autosave_dirpath}. Last autosave: N/A')
+        
+    def _init_autoOffload_signals(self):
+        # Trigger a check of system memory whenever the MappingHub is updated
+        self._MappingHub.add_observer(self._sig_check_system_memory.emit)
+        self._sig_check_system_memory.connect(self._check_system_memory)
+        
+        # Connect the autoOffload signal
+        self.sig_autoOffload_db.connect(self._worker.autoOffload_database)
+        self._worker.sig_autoOffload_done.connect(self._handle_autoOffload_result)
+        
+        # Parameters
+        self._last_autoOffloadCheck_time = 0.0
+        
+        # Test
+        # btn_offload = qw.QPushButton("Test AutoOffload", self)
+        # btn_offload.clicked.connect(lambda: self.sig_autoOffload_db.emit(self._autosave_dirpath, f"{self._sessionid}.db"))
+        # self._widget.main_layout.addWidget(btn_offload)
+        
+    @Slot()
+    def _check_system_memory(self):
+        """
+        Check the system memory and offload data if necessary
+        """
+        if time.time() - self._last_autoOffloadCheck_time < DATAHUB_OFFLOADCHECK_INTERVAL_SEC: return
+        if not self._widget.chk_autoOffload.isChecked(): return
+        if self._flg_issaving_db: return
+        if self._flg_issaved_db: return
+        
+        memory = psutil.virtual_memory()
+        self._last_autoOffloadCheck_time = time.time()
+        # print(f'{get_timestamp_sec()}: Available memory: {memory.available / (1024**3):.2f} GB of {memory.total / (1024**3):.2f} GB')
+        # Check if the memory available is below 1GB
+        if memory.available / (1024**3) < DATAHUB_OFFLOAD_MINMEMORY_GB:
+            qw.QMessageBox.warning(
+                self,
+                "Low system memory",
+                "System memory is low (<1GB available). Autosaving and offloading data to free up memory."
+            )
+            self.sig_autoOffload_db.emit(self._autosave_dirpath, f"{self._sessionid}.db")
+            self._flg_issaving_db = True
         
     @Slot()
     def _emit_signal_selection(self):
@@ -610,6 +700,24 @@ class Wdg_DataHub_Mapping(qw.QWidget):
             elif wdg == self._btn_save_db: wdg.setText(self._btn_save_db_ori)
             elif wdg == self._btn_load_db: wdg.setText(self._btn_load_MappingHub_ori)
             wdg.setStyleSheet("")
+        
+    @Slot(str)
+    def _handle_autoOffload_result(self, message:str):
+        """
+        Handle the result of the autosave and offload operation
+        
+        Args:
+            message (str): The message to display
+        """
+        if message.startswith(DataHub_Worker.offload_error):
+            qw.QMessageBox.critical(None, "Autosave and offload operation", message)
+        elif message == DataHub_Worker.offload_success:
+            qw.QMessageBox.warning(None, "Autosave and offload operation", message)
+            self._flg_issaved_db = True
+                
+        self._flg_issaving_db = False
+        self._reset_reenable_saveload_buttons()
+        self._sig_req_update_tree.emit()
         
     @Slot(str)
     def _handle_saveload_result(self, message:str):
@@ -986,7 +1094,7 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
             print("No MappingMeasurement_Unit is currently selected.")
             return
         
-        list_measurementIds = self._mappingUnit.get_list_RamanMeasurement_ids()
+        list_measurementIds = self._mappingUnit.get_list_RamanMeasurement_ids(copy=False)
         list_measurementIds_str = [str(mid) for mid in list_measurementIds]
         if measurement_id not in list_measurementIds_str:
             print(f"RamanMeasurement with ID {measurement_id} not found in the current MappingMeasurement_Unit.")
@@ -1121,6 +1229,12 @@ def test_dataHub():
     btn_add_dummymea = qw.QPushButton("Add dummy RamanMeasurement to Mapping Hub")
     btn_add_dummymea.clicked.connect(mappinghub_test_generate_dummy)
     layout.addWidget(btn_add_dummymea)
+    
+    btn_offload = qw.QPushButton("Offload Mapping Hub database")
+    btn_offload.clicked.connect(lambda: datahub.sig_autoOffload_db.emit(
+        datahub._autosave_dirpath,
+        f"{datahub._sessionid}.db"))
+    layout.addWidget(btn_offload)
     
     window.show()
     mappinghub.test_generate_dummy(3)
