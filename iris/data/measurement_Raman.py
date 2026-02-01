@@ -720,20 +720,12 @@ class MeaRaman_Plotter():
             - If the given 'spectra' variable is not a pandas DataFrame, a white image will be returned.
             - The plot will be resized based on the specified plt_size or the default plt_size if not provided.
         """
-        fig = self._fig
-        ax = self._ax
-            
-        # Initialises the plot
-        if isinstance(fig,type(None)) and isinstance(ax,type(None)):
-            fig,ax = plt.subplots()
-        elif isinstance(fig,type(None)) or isinstance(ax,type(None)):
-            raise ValueError('Both fig and ax should be given')
-        
         # Check if the given 'spectra' variable is a measurement. Otherwise, returns an white image
         if not isinstance(measurement,MeaRaman): return
         
         # Extracts the data
         df = measurement.get_analysed()
+        if not isinstance(df,pd.DataFrame): return
         list_wavelength = df[measurement.label_wavelength]
         list_intensity = df[measurement.label_intensity]
         
@@ -770,24 +762,24 @@ class MeaRaman_Plotter():
         list_SpectraPosition_scatter = [float(val) for val in list_SpectraPosition_scatter]
         list_scatter_intensity = [float(val) for val in list_scatter_intensity]
         
-        ax.clear()
-        ax.plot(list_SpectraPosition, list_intensity)
-        if len(list_scatter_intensity) > 0: ax.scatter(list_SpectraPosition_scatter,list_scatter_intensity,color='red')
-        for i, txt in enumerate(list_label_scatter): ax.annotate(txt, (list_SpectraPosition_scatter[i], list_scatter_intensity[i]))
+        self._ax.clear()
+        self._ax.plot(list_SpectraPosition, list_intensity)
+        if len(list_scatter_intensity) > 0: self._ax.scatter(list_SpectraPosition_scatter,list_scatter_intensity,color='red')
+        for i, txt in enumerate(list_label_scatter): self._ax.annotate(txt, (list_SpectraPosition_scatter[i], list_scatter_intensity[i]))
         
         xmin = limits[0] if limits[0] else None
         xmax = limits[1] if limits[1] else None
         ymin = limits[2] if limits[2] else None
         ymax = limits[3] if limits[3] else None
-        ax.set_xlim(xmin,xmax)
-        ax.set_ylim(ymin,ymax)
+        self._ax.set_xlim(xmin,xmax)
+        self._ax.set_ylim(ymin,ymax)
         
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(self.intensity_name)
-        ax.set_title(title)
+        self._ax.set_xlabel(xlabel)
+        self._ax.set_ylabel(self.intensity_name)
+        self._ax.set_title(title)
         # ax.legend()
         
-        fig.tight_layout()
+        self._fig.tight_layout()
 
 def test():
     """
