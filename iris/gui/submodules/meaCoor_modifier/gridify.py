@@ -171,6 +171,9 @@ class Gridify(Ui_gridify_setup, qw.QWidget):
         
     # >>> Parameters for the mapping coordinates modification <<<
         self._dict_mapUnit = {}  # Dictionary to store mapping units
+        self._mw_naming = None  # Reference to the naming setup window
+        self._mw_finetune = None  # Reference to the finetune window
+        self._is_deleted = False  # Flag to track if widget is being deleted
         
     # >>> Others <<<
         self._coorHub.add_observer(self._update_list_units)
@@ -256,15 +259,22 @@ class Gridify(Ui_gridify_setup, qw.QWidget):
     
     def _update_list_units(self):
         """Updates the list of mapping units in the combobox"""
-        self._dict_mapUnit.clear()  # Clear the existing dictionary
-        self._dict_mapUnit = {unit.mappingUnit_name: unit for unit in self._coorHub}
+        # Don't update if widget is being deleted
+        if self._is_deleted:
+            return
         
-        selection = self.combo_roi.currentText()
-        self.combo_roi.clear()
-        list_roi_names = list(self._dict_mapUnit.keys())
-        self.combo_roi.addItems(list_roi_names)
-        
-        if selection in list_roi_names: self.combo_roi.setCurrentText(selection)
+        try:
+            self._dict_mapUnit.clear()  # Clear the existing dictionary
+            self._dict_mapUnit = {unit.mappingUnit_name: unit for unit in self._coorHub}
+            
+            selection = self.combo_roi.currentText()
+            self.combo_roi.clear()
+            list_roi_names = list(self._dict_mapUnit.keys())
+            self.combo_roi.addItems(list_roi_names)
+            
+            if selection in list_roi_names: self.combo_roi.setCurrentText(selection)
+        except Exception:
+            pass
         
     @Slot()
     def reset_and_handle_cancellation(self):
@@ -370,6 +380,33 @@ class Gridify(Ui_gridify_setup, qw.QWidget):
         if len(list_newMapCoor) > 0:
             self._coorHub.extend(list_newMapCoor)
         self.reset_and_handle_cancellation()
+        
+    def deleteLater(self) -> None:
+        # Set flag to prevent callbacks after deletion
+        self._is_deleted = True
+        
+        # Clean up any observers or resources here if needed
+        try:
+            self._coorHub.remove_observer(self._update_list_units)
+        except Exception:
+            pass
+        
+        # Clean up child windows if they exist
+        if hasattr(self, '_mw_naming') and self._mw_naming is not None:
+            try:
+                self._mw_naming.close()
+                self._mw_naming.deleteLater()
+            except Exception:
+                pass
+        
+        if hasattr(self, '_mw_finetune') and self._mw_finetune is not None:
+            try:
+                self._mw_finetune.close()
+                self._mw_finetune.deleteLater()
+            except Exception:
+                pass
+        
+        return super().deleteLater()
     
 class Gridify_NamingSetup(Ui_gridify_setup_naming, qw.QMainWindow):
     sig_cancelled = Signal()

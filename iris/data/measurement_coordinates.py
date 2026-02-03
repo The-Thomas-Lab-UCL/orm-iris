@@ -157,13 +157,25 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         if not callable(observer): raise TypeError(f"Expected Callable, got {type(observer)}")
         self._list_observers.append(observer)
         
+    def remove_observer(self, observer:Callable):
+        """
+        Removes an observer from the list of observers.
+        
+        Args:
+            observer (Callable): The observer to remove.
+        """
+        if not callable(observer): raise TypeError(f"Expected Callable, got {type(observer)}")
+        try:
+            if observer in self._list_observers: self._list_observers.remove(observer)
+        except Exception as e: print(f"Error removing observer: {e}")
+        
     def _notify_observers(self):
         """
         Notifies all observers in the list of observers.
         """
         for observer in self._list_observers:
             try: observer()
-            except Exception as e: print(f"Error notifying observer observer: {e}")
+            except Exception as e: print(f"Error notifying observer: {e}")
         
     def search_mappingCoor(self, mappingUnit_name:str) -> int|None:
         """
