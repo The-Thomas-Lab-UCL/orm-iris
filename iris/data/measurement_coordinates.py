@@ -163,7 +163,7 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         """
         for observer in self._list_observers:
             try: observer()
-            except Exception as e: print(f"Error notifying observer {observer}: {e}")
+            except Exception as e: print(f"Error notifying observer observer: {e}")
         
     def search_mappingCoor(self, mappingUnit_name:str) -> int|None:
         """
