@@ -215,11 +215,11 @@ class Rect_Video(Ui_Rect_Video, qw.QWidget):
             self.blockSignals(False)
             return
         
-        dist_x = abs(self._list_rect_meaCoors_mm[1][0] - self._list_rect_meaCoors_mm[0][0])
-        dist_y = abs(self._list_rect_meaCoors_mm[1][1] - self._list_rect_meaCoors_mm[0][1])
+        dist_x_um = abs(self._list_rect_meaCoors_mm[1][0] - self._list_rect_meaCoors_mm[0][0])*1e3
+        dist_y_um = abs(self._list_rect_meaCoors_mm[1][1] - self._list_rect_meaCoors_mm[0][1])*1e3
         
-        points_x = int(dist_x/resUm_x)+1 if resUm_x>0 else 1
-        points_y = int(dist_y/resUm_y)+1 if resUm_y>0 else 1
+        points_x = int(dist_x_um/resUm_x)+1 if resUm_x>0 else 1
+        points_y = int(dist_y_um/resUm_y)+1 if resUm_y>0 else 1
         
         self.spin_resXPt.setValue(points_x)
         self.spin_resYPt.setValue(points_y)
@@ -239,11 +239,11 @@ class Rect_Video(Ui_Rect_Video, qw.QWidget):
             self.blockSignals(False)
             return
         
-        dist_x = abs(self._list_rect_meaCoors_mm[1][0] - self._list_rect_meaCoors_mm[0][0])
-        dist_y = abs(self._list_rect_meaCoors_mm[1][1] - self._list_rect_meaCoors_mm[0][1])
+        dist_x_um = abs(self._list_rect_meaCoors_mm[1][0] - self._list_rect_meaCoors_mm[0][0])*1e3
+        dist_y_um = abs(self._list_rect_meaCoors_mm[1][1] - self._list_rect_meaCoors_mm[0][1])*1e3
         
-        resUm_x = dist_x/(res_x_pt-1) if res_x_pt>1 else 0
-        resUm_y = dist_y/(res_y_pt-1) if res_y_pt>1 else 0
+        resUm_x = dist_x_um/(res_x_pt-1) if res_x_pt>1 else 0
+        resUm_y = dist_y_um/(res_y_pt-1) if res_y_pt>1 else 0
         
         self.spin_resXum.setValue(resUm_x)
         self.spin_resYum.setValue(resUm_y)
