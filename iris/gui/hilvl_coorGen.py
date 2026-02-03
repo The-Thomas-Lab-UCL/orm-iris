@@ -81,9 +81,18 @@ class Wdg_CoorModifier(Ui_coorMod, qw.QWidget):
         self.combo_methods.currentTextChanged.connect(
             lambda text: self.show_chosen_mapModMethod(text))
         
-        # > Initial map modifier method setup <
-        self._current_mapModMethod = MapMod1(**self._dict_mapModMethods_kwargs)
-        self.lyt_holder_modifiers.addWidget(self._current_mapModMethod)
+        # > Initial map modifier method setup - create all widgets upfront <
+        self._dict_mapModMethod_widgets = {}
+        for method_name, method_class in self._dict_mapModMethods.items():
+            widget = method_class(**self._dict_mapModMethods_kwargs)
+            self._dict_mapModMethod_widgets[method_name] = widget
+            self.lyt_holder_modifiers.addWidget(widget)
+            widget.hide()
+        
+        # Show the first one
+        first_method_name = list(self._dict_mapModMethods.keys())[0]
+        self._current_mapModMethod = self._dict_mapModMethod_widgets[first_method_name]
+        self._current_mapModMethod.show()
         
     @Slot(str)
     def show_chosen_mapModMethod(self, method_name:str):
@@ -93,14 +102,13 @@ class Wdg_CoorModifier(Ui_coorMod, qw.QWidget):
         Args:
             method_name (str): The name of the mapping method to show.
         """
-        widgets = get_all_widgets_from_layout(self.lyt_holder_modifiers)
+        # Hide the current widget
+        if self._current_mapModMethod is not None:
+            self._current_mapModMethod.hide()
         
-        for widget in widgets:
-            widget.deleteLater()
-        qw.QApplication.processEvents()
-        
-        self._current_map_method = self._dict_mapModMethods[method_name](**self._dict_mapModMethods_kwargs)
-        self.lyt_holder_modifiers.addWidget(self._current_map_method)
+        # Show the selected widget
+        self._current_mapModMethod = self._dict_mapModMethod_widgets[method_name]
+        self._current_mapModMethod.show()
     
 class Wdg_Hilvl_CoorGenerator(qw.QWidget):
     """
@@ -170,8 +178,17 @@ class Wdg_Hilvl_CoorGenerator(qw.QWidget):
             '5. Image points': Map5,
             '6. Single point Z-scan': Map6,
             }   # Mapping methods, to be programmed manually
-        self._current_map_method = Map1(**self._dict_mappingmethods_kwargs)
-        wdg.lyt_coorGen_holder.addWidget(self._current_map_method)
+        
+        # Create all mapping method widgets upfront and store them
+        self._dict_mappingmethod_widgets = {}
+        for method_name, method_class in self._dict_mappingmethods.items():
+            widget = method_class(**self._dict_mappingmethods_kwargs)
+            self._dict_mappingmethod_widgets[method_name] = widget
+            wdg.lyt_coorGen_holder.addWidget(widget)
+            widget.hide()
+        
+        self._current_map_method = self._dict_mappingmethod_widgets['1. Start/End']
+        self._current_map_method.show()
         
         # > Widget setup <
         # Mapping method selection
@@ -213,14 +230,13 @@ class Wdg_Hilvl_CoorGenerator(qw.QWidget):
         Args:
             method_name (str): The name of the mapping method to show.
         """
-        widgets = get_all_widgets_from_layout(self._widget.lyt_coorGen_holder)
+        # Hide the current widget
+        if self._current_map_method is not None:
+            self._current_map_method.hide()
         
-        for widget in widgets:
-            widget.deleteLater()
-        qw.QApplication.processEvents()
-        
-        self._current_map_method:Map1 = self._dict_mappingmethods[method_name](**self._dict_mappingmethods_kwargs)
-        self._widget.lyt_coorGen_holder.addWidget(self._current_map_method)
+        # Show the selected widget
+        self._current_map_method = self._dict_mappingmethod_widgets[method_name]
+        self._current_map_method.show()
                 
     @Slot()
     def _generate_mapping_coordinate_2D(self):

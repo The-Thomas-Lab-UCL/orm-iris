@@ -61,6 +61,8 @@ class CanvasUpdater_Worker(QObject):
         # print(f'{get_timestamp_us_str()}: Updating canvas image with {len(list_clickCoor_pixel)} points')
         img = self._motion_controller.get_current_image()
         
+        # Clear and update atomically to prevent flickering
+        self._canvas_image.clear_all_annotations()
         self.sig_updateImage.emit(img)
         self.sig_annotateMultiPoints.emit(list_clickCoor_pixel,True,True)
     
@@ -78,6 +80,8 @@ class CanvasUpdater_Worker(QObject):
         # print(f'{get_timestamp_us_str()}: Updating canvas rectangle annotation with coordinates {list_rect_meaCoors_pixel}')
         
         img = self._motion_controller.get_current_image()
+        # Clear and update atomically to prevent flickering
+        self._canvas_image.clear_all_annotations()
         self.sig_updateImage.emit(img)
         self._canvas_image.stop_recordClicks()
         self.sig_annotateRectangle.emit(list_rect_meaCoors_pixel[0],list_rect_meaCoors_pixel[1],True)
@@ -116,6 +120,7 @@ class Rect_Video(Ui_Rect_Video, qw.QWidget):
         self._imgUnit:MeaImg_Unit|None = None       # The image measurement unit used
         self._img:Image|None = None                  # The image shown on the canvas
         self._flg_mode:Literal['point','rectangle'] = 'point'   # The current mode of the coordinate generator
+        self._last_stagecoor_mm:tuple|None = None   # Track last coordinates to avoid redundant updates
         
     # >>> Video feed setup <<<
         # Parameters
@@ -215,11 +220,11 @@ class Rect_Video(Ui_Rect_Video, qw.QWidget):
             self.blockSignals(False)
             return
         
-        dist_x = abs(self._list_rect_meaCoors_mm[1][0] - self._list_rect_meaCoors_mm[0][0])
-        dist_y = abs(self._list_rect_meaCoors_mm[1][1] - self._list_rect_meaCoors_mm[0][1])
+        dist_x_um = abs(self._list_rect_meaCoors_mm[1][0] - self._list_rect_meaCoors_mm[0][0])*1e3
+        dist_y_um = abs(self._list_rect_meaCoors_mm[1][1] - self._list_rect_meaCoors_mm[0][1])*1e3
         
-        points_x = int(dist_x/resUm_x)+1 if resUm_x>0 else 1
-        points_y = int(dist_y/resUm_y)+1 if resUm_y>0 else 1
+        points_x = int(dist_x_um/resUm_x)+1 if resUm_x>0 else 1
+        points_y = int(dist_y_um/resUm_y)+1 if resUm_y>0 else 1
         
         self.spin_resXPt.setValue(points_x)
         self.spin_resYPt.setValue(points_y)
@@ -239,11 +244,11 @@ class Rect_Video(Ui_Rect_Video, qw.QWidget):
             self.blockSignals(False)
             return
         
-        dist_x = abs(self._list_rect_meaCoors_mm[1][0] - self._list_rect_meaCoors_mm[0][0])
-        dist_y = abs(self._list_rect_meaCoors_mm[1][1] - self._list_rect_meaCoors_mm[0][1])
+        dist_x_um = abs(self._list_rect_meaCoors_mm[1][0] - self._list_rect_meaCoors_mm[0][0])*1e3
+        dist_y_um = abs(self._list_rect_meaCoors_mm[1][1] - self._list_rect_meaCoors_mm[0][1])*1e3
         
-        resUm_x = dist_x/(res_x_pt-1) if res_x_pt>1 else 0
-        resUm_y = dist_y/(res_y_pt-1) if res_y_pt>1 else 0
+        resUm_x = dist_x_um/(res_x_pt-1) if res_x_pt>1 else 0
+        resUm_y = dist_y_um/(res_y_pt-1) if res_y_pt>1 else 0
         
         self.spin_resXum.setValue(resUm_x)
         self.spin_resYum.setValue(resUm_y)
@@ -354,6 +359,10 @@ class Rect_Video(Ui_Rect_Video, qw.QWidget):
         # Switch to rectangle mode (to commit the selected ROI) and emit signal to update resolution
         self._flg_mode = 'rectangle'
         self.sig_updateResPt.emit()
+        
+        # Force update the canvas
+        self._last_stagecoor_mm = None
+        self._update_canvas()
     
     @Slot()
     def _reset_click_coors(self):
@@ -362,6 +371,7 @@ class Rect_Video(Ui_Rect_Video, qw.QWidget):
         """
         self._list_clickMeaCoor_mm.clear()
         self._list_rect_meaCoors_mm.clear()
+        self._last_stagecoor_mm = None  # Reset coordinate tracking
         self.lbl_scanEdges.setText('None')
         self._flg_mode = 'point'
         
@@ -374,7 +384,7 @@ class Rect_Video(Ui_Rect_Video, qw.QWidget):
         Updates the image shown on the canvas
         """
         if not self.isVisible():
-            print('Canvas not visible, skipping update')
+            # print('Canvas not visible, skipping update')
             return  # Do not update if the widget is not visible
         
         if not isinstance(self._imgUnit,MeaImg_Unit) or not self._imgUnit.check_calibration_exist(): return
@@ -384,7 +394,14 @@ class Rect_Video(Ui_Rect_Video, qw.QWidget):
         if not isinstance(stagecoor_mm,tuple): return
         if not all(isinstance(c,float) for c in stagecoor_mm): return
         
-        self._canvas_video.clear_all_annotations()
+        # Only update if coordinates have changed significantly (avoid constant redraws)
+        if self._last_stagecoor_mm is not None:
+            coord_diff = sum(abs(a - b) for a, b in zip(stagecoor_mm, self._last_stagecoor_mm))
+            if coord_diff < 1e-6:  # Less than 1 micrometer change
+                return
+        
+        self._last_stagecoor_mm = stagecoor_mm
+        
         if self._flg_mode == 'point':
             list_clickCoor_pixel = [self._imgUnit.convert_stg2imgpt(
                 coor_stage_mm=stagecoor_mm, # pyright: ignore[reportArgumentType] ; Checked above

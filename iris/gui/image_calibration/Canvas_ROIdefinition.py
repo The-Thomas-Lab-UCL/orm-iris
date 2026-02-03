@@ -219,6 +219,13 @@ class Canvas_Image_Annotations(QGraphicsView):
         
         x1, y1 = coor1
         x2, y2 = coor2
+        
+        x1_min = min(x1,x2)
+        x2_max = max(x1,x2)
+        y1_min = min(y1,y2)
+        y2_max = max(y1,y2)
+        x1, y1, x2, y2 = x1_min, y1_min, x2_max, y2_max
+        
         x1 = (x1/scale_val)
         y1 = (y1/scale_val)
         x2 = (x2/scale_val)
