@@ -22,6 +22,7 @@ from iris.gui.submodules.meaCoor_modifier.topology_visualiser import TopologyVis
 from iris.gui.submodules.meaCoor_modifier.translateXYZ import TranslateXYZ as MapMod4
 from iris.gui.submodules.meaCoor_modifier.gridify import Gridify as MapMod5
 from iris.gui.submodules.meaCoor_modifier.ellipsify import Ellipsify as MapMod6
+from iris.gui.submodules.meaCoor_modifier.multitranslateXYZ import MultiTranslatorXYZ as MapMod7
 
 from iris.utils.general import get_all_widgets_from_layout
 
@@ -75,6 +76,7 @@ class Wdg_CoorModifier(Ui_coorMod, qw.QWidget):
             '4. Translate XYZ': MapMod4,
             '5. Gridify': MapMod5,
             '6. Ellipsify': MapMod6,
+            '7. Multi-translate XYZ': MapMod7,
         }   # Mapping methods, to be programmed manually
 
         self.combo_methods.addItems(list(self._dict_mapModMethods.keys()))
