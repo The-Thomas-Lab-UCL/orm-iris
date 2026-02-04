@@ -826,21 +826,21 @@ class Wdg_MotionController(qw.QGroupBox):
         except Exception as e:
             qw.QMessageBox.critical(self, 'Error', 'Failed to load flatfield correction:\n' + str(e))
 
-    def set_camera_exposure(self):
+    def set_camera_exposure_ms(self):
         """
         Sets the camera exposure time in microseconds
         """
         main_window = self.window()
-        if not hasattr(self._camera_ctrl,'set_exposure_time') or not hasattr(self._camera_ctrl,'get_exposure_time'):
+        if not hasattr(self._camera_ctrl,'set_exposure_time_us') or not hasattr(self._camera_ctrl,'get_exposure_time_us'):
             qw.QMessageBox.critical(main_window, 'Error', 'Camera does not support exposure time setting')
             return
         try:
-            init_exposure_time = self._camera_ctrl.get_exposure_time()
+            init_exposure_time_ms = self._camera_ctrl.get_exposure_time_us()/1e3
             new_exposure_time = messagebox_request_input(
                 parent=main_window,
                 title='Set exposure time',
-                message='Set exposure time in device unit',
-                default=str(init_exposure_time),
+                message='Set exposure time in milliseconds',
+                default=str(init_exposure_time_ms),
                 validator=validator_float_greaterThanZero,
                 invalid_msg='Exposure time must be a positive number',
                 loop_until_valid=True,
@@ -848,8 +848,8 @@ class Wdg_MotionController(qw.QGroupBox):
             if new_exposure_time is None: 
                 qw.QMessageBox.information(main_window, 'Exposure time not set', 'Exposure time not changed')
                 return
-            self._camera_ctrl.set_exposure_time(float(new_exposure_time))
-            qw.QMessageBox.information(main_window, 'Exposure time set', 'Exposure time set to {} ms'.format(self._camera_ctrl.get_exposure_time()))
+            self._camera_ctrl.set_exposure_time_us(float(new_exposure_time)*1e3)
+            qw.QMessageBox.information(main_window, 'Exposure time set', 'Exposure time set to {} ms'.format(self._camera_ctrl.get_exposure_time_us()/1e3))
         except Exception as e:
             qw.QMessageBox.critical(main_window, 'Error', 'Failed to set exposure time:\n' + str(e))
 
@@ -1387,19 +1387,25 @@ class Wdg_MotionController(qw.QGroupBox):
                 # Triggers the frame capture from the camera
                 request = self._combo_vidcorrection.currentText()
                 
+                # print(f'\n{get_timestamp_us_int()} - Video update loop started.')
+                # print(f'1. Requesting image with correction: {request}')
                 if self._stageHub.Enum_CamCorrectionType[request] == self._stageHub.Enum_CamCorrectionType.RAW:
                     img = self._camera_ctrl.img_capture()
                 else:
                     img:Image.Image = self._stageHub.get_image(request=self._stageHub.Enum_CamCorrectionType[request])
                 # video_width = int(img.size[1]/img.size[0]*self._video_height)
                 
+                if not isinstance(img,Image.Image): time.sleep(1/AppVideoEnum.VIDEOFEED_REFRESH_RATE.value); continue
+                # print(f'2. Image received from camera. Size: {img.size}')
                 # Add a scalebar to it
                 img = self._overlay_scalebar(img) if self._chkbox_scalebar.isChecked() else img
                 
+                # print(f'3. Scalebar overlay complete. Size: {img.size}')
                 # Overlay a crosshair if requested
                 if self._chkbox_crosshair.isChecked(): img = draw_crosshair(img)
                 new_frame:QPixmap = ImageQt.toqpixmap(img)
                 
+                # print(f'4. Crosshair overlay complete. Size: {img.size}')
                 # Update the image in the app window
                 # Only update if the frame is different. Sometimes the program isn't done taking the new image.
                 # In this case, it skips the frame update
@@ -1408,11 +1414,14 @@ class Wdg_MotionController(qw.QGroupBox):
                     self._currentFrame = new_frame
                     self._currentImage = img
                 
+                # print(f'5. Video label updated.')
                 # Let the coordinate updater know that the frame is ready if any is waiting
                 self._flg_isNewFrmReady.set()
                 time_elapsed = time.time() - time1
                 if time_elapsed < 1/AppVideoEnum.VIDEOFEED_REFRESH_RATE.value:
                     time.sleep(1/AppVideoEnum.VIDEOFEED_REFRESH_RATE.value - time_elapsed)
+                
+                # print(f'6. Loop complete in {time.time() - time1:.3f} seconds.')
             except Exception as e: print(f'Video feed failed: {e}'); time.sleep(0.02)
     
     @Slot(str,str)

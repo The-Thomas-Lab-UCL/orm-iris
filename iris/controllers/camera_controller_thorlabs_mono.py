@@ -149,7 +149,7 @@ class CameraController_ThorlabsMono(Class_CameraController):
     def get_initialisation_status(self) -> bool:
         return self.flg_initialised
     
-    def set_exposure_time(self, exposure_time_us:int|float) -> None:
+    def set_exposure_time_us(self, exposure_time_us:int|float) -> None:
         """
         Set the exposure time of the camera
 
@@ -162,7 +162,7 @@ class CameraController_ThorlabsMono(Class_CameraController):
             exposure_time_us = int(exposure_time_us)
             self.camera.exposure_time_us = exposure_time_us
             
-    def get_exposure_time(self) -> int|float|None:
+    def get_exposure_time_us(self) -> int|float|None:
         """
         Get the exposure time of the camera
 

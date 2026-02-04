@@ -178,7 +178,7 @@ class CameraController_ThorlabsColor(Class_CameraController):
         
         print('>>>>> Thorlabs color camera terminated <<<<<')
     
-    def set_exposure_time(self, exposure_time_us:int|float) -> None:
+    def set_exposure_time_us(self, exposure_time_us:int|float) -> None:
         """
         Set the exposure time of the camera
 
@@ -189,7 +189,7 @@ class CameraController_ThorlabsColor(Class_CameraController):
             try: self.camera.exposure_time_us = int(exposure_time_us)
             except Exception as e: print('set_exposure_time error:\n{}'.format(e))
             
-    def get_exposure_time(self) -> int|float|None:
+    def get_exposure_time_us(self) -> int|float|None:
         """
         Get the exposure time of the camera
 

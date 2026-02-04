@@ -200,7 +200,7 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
             menu_extensions.addAction('Show "{}"'.format(ext.windowTitle()),ext.show)
         
     # >> Set up the controllers menubar <<
-        menu_controllers.addAction('Set camera exposure time',self._motion.set_camera_exposure)
+        menu_controllers.addAction('Set camera exposure time [ms]',self._motion.set_camera_exposure_ms)
         menu_controllers.addAction('Set the stage timestamp offset [ms]',self.set_RamanStage_offset)
         
     # >> Set up the keybindings <<

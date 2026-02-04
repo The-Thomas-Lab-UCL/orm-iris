@@ -66,7 +66,7 @@ class Class_CameraController:
         return self.flg_initialised
     
     
-    def set_exposure_time(self, exposure_time_us:int|float) -> None:
+    def set_exposure_time_us(self, exposure_time_us:int|float) -> None:
         """
         Set the exposure time of the camera
 
@@ -75,7 +75,7 @@ class Class_CameraController:
         """
         raise NotImplementedError("set_exposure_time() does not exist in this controller")
             
-    def get_exposure_time(self) -> int|float|None:
+    def get_exposure_time_us(self) -> int|float|None:
         """
         Get the exposure time of the camera
 
