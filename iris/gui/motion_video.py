@@ -685,9 +685,9 @@ class Wdg_MotionController(qw.QGroupBox):
         self._iscapturing = threading.Event()  # A flag to prevent multiple concurrent video capture
         self._flg_pause_video = threading.Event()  # A flag to check if the video feed is running
         self._time_last_frame = 0.0   # The timestamp of the last frame captured, used to limit the frame rate
+        self._time_last_img = 0.0     # The timestamp of the last image received
         self._currentImage:Image.Image|None = None   # The current image to be displayed
         self._currentFrame = None               # The current frame to be displayed
-        self._flg_isNewImgReady = threading.Event()  # A flag to wait for the frame to be captured
         
         self._init_video_worker()
         self._init_video()
@@ -1561,18 +1561,23 @@ class Wdg_MotionController(qw.QGroupBox):
         # Defer thread start until after initialization is complete
         self.destroyed.connect(self._thread_autofocus.quit)
         
-    def get_current_image(self, wait_newimage:bool=False) -> Image.Image|None:
+    def get_current_image(self) -> Image.Image|None:
         """
         Returns the current frame of the video feed
         
         Returns:
-            ImageTk.PhotoImage: The current frame of the video feed
-            wait_newimage (bool, optional): Waits for a new image to be taken. Defaults to False.
+            Image.Image|None: The current frame of the video feed in PIL Image format, or None if no image is available
         """
-        if wait_newimage:
-            self._flg_isNewImgReady.clear()
-            self._flg_isNewImgReady.wait()
         return self._currentImage
+    
+    def get_latest_image_with_timestamp(self) -> tuple[Image.Image|None,float]:
+        """
+        Returns the latest captured image along with its timestamp
+
+        Returns:
+            tuple[Image.Image|None,float]: A tuple containing the latest captured image in PIL Image format and its timestamp in seconds, or (None, 0.0) if no image is available
+        """
+        return self._currentImage, self._time_last_img
     
     def get_image_shape(self) -> tuple[int,int]|None:
         """
@@ -1659,6 +1664,7 @@ class Wdg_MotionController(qw.QGroupBox):
         
         QTimer.singleShot(sleep_msec, self.video_update)
     
+    @Slot()
     def _handle_no_frame(self):
         """
         Handles the case where the camera fails to capture an image.
@@ -1666,6 +1672,7 @@ class Wdg_MotionController(qw.QGroupBox):
         self._iscapturing.clear()
         self._trigger_next_video_update()
     
+    @Slot(QPixmap)
     def _handle_qpixmap_capture(self, img_qpixmap:QPixmap):
         """
         Handles the image capture from the camera and updates the video feed with the new image.
@@ -1684,6 +1691,7 @@ class Wdg_MotionController(qw.QGroupBox):
             self._iscapturing.clear()
             self._trigger_next_video_update()
         
+    @Slot(Image.Image)
     def _handle_img_capture(self, img:Image.Image):
         """
         Handles the image capture from the camera and updates the video feed with the new image.
@@ -1693,10 +1701,19 @@ class Wdg_MotionController(qw.QGroupBox):
             img (Image.Image): The captured image in PIL Image format
         """
         if not isinstance(img,Image.Image): return
-        
         self._currentImage = img
-        self._flg_isNewImgReady.set()
+        self._time_last_img = time.time()
     
+    @Slot()
+    def trigger_img_capture(self):
+        request = self._combo_vidcorrection.currentText()
+        self._sig_req_img.emit(
+            Enum_CamCorrectionType[request],
+            self._chkbox_scalebar.isChecked(),
+            self._chkbox_crosshair.isChecked())
+        
+        self._iscapturing.set()
+        
     def video_update(self):
         """
         Updates the video feed, taking in mind Tkinter's single thread.
@@ -1710,13 +1727,7 @@ class Wdg_MotionController(qw.QGroupBox):
             return
         
         # Triggers the frame capture from the camera
-        request = self._combo_vidcorrection.currentText()
-        self._sig_req_img.emit(
-            Enum_CamCorrectionType[request],
-            self._chkbox_scalebar.isChecked(),
-            self._chkbox_crosshair.isChecked())
-        
-        self._iscapturing.set()
+        self.trigger_img_capture()
     
     @Slot(str,str)
     def status_update(self,message=None,bg_colour=None):

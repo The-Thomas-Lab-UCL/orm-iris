@@ -82,6 +82,8 @@ class ImageProcessor_Worker(QObject):
     sig_gotocoor = Signal(tuple, threading.Event)
     sig_statbar_update = Signal(str)
     
+    sig_req_img_capture = Signal()
+    
     flg_stop_imgCapture = threading.Event()
     sig_midMea_error = Signal(str)  # Signal to indicate an error during mid-measurement
     sig_finished_msg = Signal(str, MeaImg_Unit)      # Signal to indicate the process has finished (even due to errors)
@@ -142,7 +144,12 @@ class ImageProcessor_Worker(QObject):
         self.sig_statbar_update.emit('Taking images: {} of {}'.format(1,totalcoor))
         
         msg = self.msg_success
+        
+        print('Starting image capture in worker thread...')
+        self._motion_ctrl.pause_video()
+        ts_before = self._motion_ctrl.get_latest_image_with_timestamp()[1]
         for i,coor in enumerate(meaCoor_mm.mapping_coordinates):
+            print(f'{time.time()}: Moving to coordinate {coor} for image capture')
             x, y, z = coor
             if flg_stop.is_set():
                 msg = self.msg_error + 'Image capture stopped by user'
@@ -152,9 +159,19 @@ class ImageProcessor_Worker(QObject):
             self.sig_gotocoor.emit(coor, flg_mvmt_done)
             flg_mvmt_done.wait()
             
-            time.sleep(ControllerConfigEnum.STAGE_TILING_WAITTIME_SEC.value)  # Allow time for stage to settle
+            print(f'{time.time()}: Triggering image capture for coordinate {coor}')
+            self.sig_req_img_capture.emit()
             
-            img = self._motion_ctrl.get_current_image(wait_newimage=True)
+            while True:
+                print(f'{time.time()}: Waiting for new image to be available for coordinate {coor}')
+                img,ts = self._motion_ctrl.get_latest_image_with_timestamp()
+                if ts == ts_before:
+                    print(f'{time.time()}: No new image received yet for coordinate {coor}, still waiting...')
+                    time.sleep(ControllerConfigEnum.STAGE_TILING_WAITTIME_SEC.value)  # Allow time for stage to settle
+                else:
+                    ts_before = ts
+                    print(f'{time.time()}: New image received for coordinate {coor}, proceeding with processing...')
+                    break
             
             if not isinstance(img,Image.Image):
                 self.sig_midMea_error.emit(self.msg_error + 'No image received from the controller')
@@ -175,6 +192,7 @@ class ImageProcessor_Worker(QObject):
             self.sig_ret_image_processed.emit(img)
             
         self.sig_finished_msg.emit(msg, imgUnit)
+        self._motion_ctrl.resume_video()
 
 class Wdg_HiLvlTiling(qw.QWidget):
     """
@@ -280,6 +298,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
         self._thread.finished.connect(self._thread.deleteLater)
         self._thread.finished.connect(self._worker.deleteLater)
         
+        self._worker.sig_req_img_capture.connect(self._motion_controller.trigger_img_capture)
         self._worker.sig_ret_image_processed.connect(self._canvas_img.set_image)
         self.sig_req_plot_imgunit.connect(self._worker.get_stitched_image)
         
@@ -422,7 +441,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
             return
         
         # > Modify the calibration file
-        img_test = self._motion_controller.get_current_image(wait_newimage=True)
+        img_test = self._motion_controller.get_current_image()
         if not isinstance(img_test,Image.Image):
             qw.QMessageBox.warning(self,'Error','No image received from the controller')
             self.reset_imgCapture_button()
