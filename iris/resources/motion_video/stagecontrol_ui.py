@@ -391,7 +391,7 @@ class Ui_stagecontrol(object):
 
         self.retranslateUi(stagecontrol)
 
-        self.tab_controls.setCurrentIndex(2)
+        self.tab_controls.setCurrentIndex(0)
 
 
         QMetaObject.connectSlotsByName(stagecontrol)
