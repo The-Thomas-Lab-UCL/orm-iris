@@ -41,6 +41,7 @@ from iris.resources.motion_video.brightfieldcontrol_ui import Ui_wdg_brightfield
 from iris.resources.motion_video.stagecontrol_ui import Ui_stagecontrol
 
 WAIT_MOVEMENT_TIMEOUT = 10.0  # Timeout for waiting for the movement to finish [s] (reset if the stage is still moving)
+AUTOFOCUS_BLUR_KERNEL_SIZE = 9  # The kernel size for the median blur in the autofocus algorithm. Larger values can help reduce noise but may also reduce the focus score sensitivity.
 
 class BrightfieldController(qw.QWidget,Ui_wdg_brightfield_controller):
     def __init__(self,parent=None):
@@ -404,27 +405,115 @@ class Motion_GoToCoor_Worker(QObject):
 
 class AutoFocus_Worker(QObject):
     """
-    A worker to perform autofocus by moving the z stage and evaluating the focus metric
+    A worker to perform autofocus by moving the z stage and evaluating the focus metric.
+    To be used in conjunction with the video feed worker to get the images for focus evaluation.
+    The video feed worker has to continuously emit the captured images, and this worker will process them when it is waiting for an image to be captured.
+    Otherwise this autofocus worker will continue to be idle, waiting for the next image to be captured.
     """
-    sig_finished = Signal(float)  # Signal to emit the best focus metric value
+    sig_started = Signal()  # Signal to indicate autofocus has started
+    sig_finished = Signal(float)  # Signal to emit the coordinates with the best focus score
     sig_error = Signal(str)  # Signal to emit an error message
-    
-    def __init__(self, ctrl_z: 'Controller_Z', stageHub:DataStreamer_StageCam, parent=None):
-        super().__init__(parent)
+        
+    def __init__(self, ctrl_z: Controller_Z):
+        super().__init__()
         self.ctrl_z = ctrl_z
-        self.stageHub = stageHub
+        
+        self._is_waiting_for_img = threading.Event()  # A flag to wait for the image to be captured
+        
+        self._list_coor_mm: list[float] = []  # The list of z coordinates in mm
+        self._next_coor_idx: int = 0  # The index of the next z coordinate to move to
+        self._list_focus_score: list[float] = []  # The list of focus scores corresponding to the z coordinates
+        
+        self._img_counter = 0
         
     @Slot()
-    def work(self):
-        pass
+    def start(self, start_z_mm:float, end_z_mm:float, step_size_mm:float):
+        """
+        Performs autofocus by moving the z stage and evaluating the focus metric
+        
+        Args:
+            start_z_mm (float): The starting z position in mm
+            end_z_mm (float): The ending z position in mm
+            step_size_mm (float): The step size for moving the z stage in mm
+        """
+        # Generate the list of z coordinates to move to
+        try:
+            print(f'Starting autofocus with start: {start_z_mm} mm, end: {end_z_mm} mm, step size: {step_size_mm} mm')
+            self._next_coor_idx = 0
+            self._list_coor_mm = np.arange(start_z_mm, end_z_mm + step_size_mm, step_size_mm).tolist()
+            self._list_focus_score.clear()
+            self._go_to_next_coor()
+            
+            self.sig_started.emit()
+        except Exception as e:
+            self.sig_error.emit('Invalid autofocus parameters: {}'.format(e))
+            return
     
+    @Slot()
+    def force_stop(self):
+        """
+        Force stops the autofocus process and clears the state
+        """
+        self._list_coor_mm.clear()
+        self._list_focus_score.clear()
+        self._is_waiting_for_img.clear()
+        
     def _calculate_focus_score(self, image, blur):
         image_filtered = cv.medianBlur(image, blur)
         laplacian = cv.Laplacian(image_filtered, cv.CV_64F)
         focus_score = laplacian.var()
         return focus_score
     
-class VideoUpdater_Worker(QObject):
+    @Slot(Image.Image)
+    def process_image(self, img:Image.Image):
+        if not isinstance(img,Image.Image): return
+        if not self._is_waiting_for_img.is_set(): return
+        if self._img_counter%2 == 0: self._img_counter += 1; return # Process every other image to allow the stage to settle
+        
+        # Prep for the next image
+        self._img_counter = 0
+        self._is_waiting_for_img.clear()
+        
+        try:
+            img_gray = cv.cvtColor(np.array(img), cv.COLOR_RGB2GRAY)
+            focus_score = self._calculate_focus_score(img_gray, blur=AUTOFOCUS_BLUR_KERNEL_SIZE)
+            self._list_focus_score.append(focus_score)
+            
+            print(f'Score: {focus_score:.2f} at Z: {self._list_coor_mm[self._next_coor_idx-1]:.3f} mm')
+            self._go_to_next_coor()
+        except Exception as e:
+            self.sig_error.emit('Error processing image: {}'.format(e))
+            
+    def _go_to_next_coor(self):
+        print('Moving to next coordinate index:', self._next_coor_idx)
+        if self._next_coor_idx >= len(self._list_coor_mm):
+            # Finished all coordinates, emit the best focus score
+            if len(self._list_focus_score) == 0:
+                self.sig_error.emit('No focus scores calculated')
+                return
+            
+            # Find the coordinate with the best focus score
+            best_score = max(self._list_focus_score)
+            best_index = self._list_focus_score.index(best_score)
+            best_coor = self._list_coor_mm[best_index]
+            
+            # Move to the best coordinate
+            self.ctrl_z.move_direct(best_coor)
+            
+            self.sig_finished.emit(best_coor)
+            
+            self._list_coor_mm.clear()
+            self._list_focus_score.clear()
+            return
+        
+        next_z_mm = self._list_coor_mm[self._next_coor_idx]
+        self.ctrl_z.move_direct(next_z_mm)
+        self._is_waiting_for_img.set()
+        self._next_coor_idx += 1
+        print('Moved to Z: {:.3f} mm, waiting for image...'.format(next_z_mm))
+        
+        
+class ImageCapture_Worker(QObject):
     """
     A worker to continuously update the video feed by capturing frames from the camera and applying corrections
     """
@@ -555,6 +644,8 @@ class Wdg_MotionController(qw.QGroupBox):
     _sig_go_to_coordinates = Signal(tuple,threading.Event)
     _sig_req_img = Signal(Enum_CamCorrectionType,bool,bool)
     
+    _sig_req_auto_focus = Signal(float,float,float)
+    
     def __init__(
         self,
         parent,
@@ -591,6 +682,7 @@ class Wdg_MotionController(qw.QGroupBox):
         self._vid_refreshrate = AppVideoEnum.VIDEOFEED_REFRESH_RATE.value # The refresh rate for the video feed in Hz
         self._camera_ctrl:CameraController = self._stageHub.get_camera_controller()
         self._video_height = ControllerConfigEnum.VIDEOFEED_HEIGHT.value    # Video feed height in pixel
+        self._iscapturing = threading.Event()  # A flag to prevent multiple concurrent video capture
         self._flg_pause_video = threading.Event()  # A flag to check if the video feed is running
         self._time_last_frame = 0.0   # The timestamp of the last frame captured, used to limit the frame rate
         self._currentImage:Image.Image|None = None   # The current image to be displayed
@@ -634,6 +726,10 @@ class Wdg_MotionController(qw.QGroupBox):
 
     # >>> Motor parameter setup widgets <<<
         self._init_stageparam_widgets(self._wdg_stage)
+        
+    # >>> Auto-focus setup <<<
+        self._init_autofocus_worker()
+        self._init_autofocus_widgets()
         
     # >>> Status update <<<
         self.sig_statbar_message.connect(self.status_update)
@@ -1395,7 +1491,76 @@ class Wdg_MotionController(qw.QGroupBox):
         
         # Updates the statusbar
         self.sig_statbar_message.emit('Stage controller ready', None)
-
+        
+    def _init_autofocus_widgets(self):
+        """
+        Initialises the autofocus widgets and layouts
+        """
+        def store_start_coor(coor:float|None):
+            if coor is not None: self._wdg_stage.spin_start_autofocus.setValue(coor*1e3)
+        def store_end_coor(coor:float|None):
+            if coor is not None: self._wdg_stage.spin_end_autofocus.setValue(coor*1e3)
+            
+        self._wdg_stage.btn_start_currcoor_autofocus.clicked.connect(lambda: store_start_coor(self.get_coordinates_closest_mm()[2]))
+        self._wdg_stage.btn_end_currcoor_autofocus.clicked.connect(lambda: store_end_coor(self.get_coordinates_closest_mm()[2]))
+        
+    def _perform_autofocus(self):
+        commit = qw.QMessageBox.question(
+            self,
+            'Perform autofocus',
+            'Are you sure you want to perform autofocus with the current parameters?'
+            'This will move the z-stage automatically, which may RISK CRASHING the objective into the sample if the parameters are not set correctly!'
+            ,
+            qw.QMessageBox.Yes | qw.QMessageBox.No, # pyright: ignore[reportAttributeAccessIssue]
+            qw.QMessageBox.No # pyright: ignore[reportAttributeAccessIssue]
+        )
+        if commit != qw.QMessageBox.Yes: return # pyright: ignore[reportAttributeAccessIssue]
+        
+        start = self._wdg_stage.spin_start_autofocus.value()/1e3
+        end = self._wdg_stage.spin_end_autofocus.value()/1e3
+        step = self._wdg_stage.spin_step_autofocus.value()/1e3
+        self._sig_req_auto_focus.emit(start,end,step)
+        
+    def _set_autofocus_running_buttons(self):
+        self._wdg_stage.btn_perform_autofocus.setEnabled(False)
+        self._wdg_stage.btn_stop_autofocus.setEnabled(True)
+        
+    def _reset_autofocus_buttons(self):
+        self._wdg_stage.btn_perform_autofocus.setEnabled(True)
+        self._wdg_stage.btn_stop_autofocus.setEnabled(False)
+        
+    def _handle_autofocus_error(self,msg:str):
+        qw.QMessageBox.critical(self, 'Autofocus error', f'An error occurred during autofocus:\n{msg}')
+        self._reset_autofocus_buttons()
+        
+    def _init_autofocus_worker(self):
+        """
+        Initialises the autofocus worker to be used for the autofocus function
+        """
+        self._worker_autofocus = AutoFocus_Worker(
+            ctrl_z=self.ctrl_z,
+        )
+        self._thread_autofocus = QThread(self)
+        self._worker_autofocus.moveToThread(self._thread_autofocus)
+        self._thread_autofocus.finished.connect(self._worker_autofocus.deleteLater)
+        self._thread_autofocus.finished.connect(self._thread_autofocus.deleteLater)
+        QTimer.singleShot(0, self._thread_autofocus.start)
+        
+        # Connect the signal to allow the autofocus worker to get the images from the video worker
+        self._worker_img_capture.sig_img.connect(self._worker_autofocus.process_image)
+        self._sig_req_auto_focus.connect(self._worker_autofocus.start)
+        self._worker_autofocus.sig_finished.connect(self._reset_autofocus_buttons)
+        self._worker_autofocus.sig_started.connect(self._set_autofocus_running_buttons)
+        self._worker_autofocus.sig_error.connect(self._handle_autofocus_error)
+        
+        # Connect the GUI
+        self._wdg_stage.btn_perform_autofocus.clicked.connect(self._perform_autofocus)
+        self._wdg_stage.btn_stop_autofocus.clicked.connect(self._worker_autofocus.force_stop)
+        
+        
+        # Defer thread start until after initialization is complete
+        self.destroyed.connect(self._thread_autofocus.quit)
+        
     def get_current_image(self, wait_newimage:bool=False) -> Image.Image|None:
         """
         Returns the current frame of the video feed
@@ -1424,35 +1589,35 @@ class Wdg_MotionController(qw.QGroupBox):
         """
         Initialises the video worker to update the video feed in a separate thread
         """
-        self._worker_video = VideoUpdater_Worker(
+        self._worker_img_capture = ImageCapture_Worker(
             camera_controller=self._camera_ctrl,
             stageHub=self._stageHub,
             getter_imgcal=self._getter_imgcal,
         )
         self._thread_video = QThread(self)
-        self._worker_video.moveToThread(self._thread_video)
-        self._thread_video.finished.connect(self._worker_video.deleteLater)
+        self._worker_img_capture.moveToThread(self._thread_video)
+        self._thread_video.finished.connect(self._worker_img_capture.deleteLater)
         self._thread_video.finished.connect(self._thread_video.deleteLater)
         
         # Connect the signal to request an image capture to the worker's grab_image method
-        self._sig_req_img.connect(self._worker_video.grab_image)
-        self._worker_video.sig_error.connect(lambda msg: print(f'Video worker error: {msg}'))
-        self._worker_video.sig_img.connect(self._handle_img_capture)
-        self._worker_video.sig_qpixmap.connect(self._handle_qpixmap_capture)
-        self._worker_video.sig_no_frame.connect(self._trigger_next_video_update)
+        self._sig_req_img.connect(self._worker_img_capture.grab_image)
+        self._worker_img_capture.sig_error.connect(lambda msg: print(f'Video worker error: {msg}'))
+        self._worker_img_capture.sig_img.connect(self._handle_img_capture)
+        self._worker_img_capture.sig_qpixmap.connect(self._handle_qpixmap_capture)
+        self._worker_img_capture.sig_no_frame.connect(self._handle_no_frame)
         
         # Defer thread start until after initialization is complete
         QTimer.singleShot(0, self._thread_video.start)
         self.destroyed.connect(self._thread_video.quit)
     
-    def get_video_worker(self) -> VideoUpdater_Worker:
+    def get_video_worker(self) -> ImageCapture_Worker:
         """
         Returns the video worker to access its methods and signals
 
         Returns:
             VideoUpdater_Worker: The video worker instance
         """
-        return self._worker_video
+        return self._worker_img_capture
     
     def pause_video(self):
         self._flg_pause_video.set()
@@ -1484,6 +1649,8 @@ class Wdg_MotionController(qw.QGroupBox):
         """
         Handles the case where the camera fails to capture an image.
         """
+        if self._iscapturing.is_set(): return
+        
         time_current = time.time()
         diff = time_current - self._time_last_frame
         self._time_last_frame = time_current
@@ -1491,6 +1658,13 @@ class Wdg_MotionController(qw.QGroupBox):
         else: sleep_msec = 0
         
         QTimer.singleShot(sleep_msec, self.video_update)
+    
+    def _handle_no_frame(self):
+        """
+        Handles the case where the camera fails to capture an image.
+        """
+        self._iscapturing.clear()
+        self._trigger_next_video_update()
     
     def _handle_qpixmap_capture(self, img_qpixmap:QPixmap):
         """
@@ -1504,10 +1678,11 @@ class Wdg_MotionController(qw.QGroupBox):
             if self._currentFrame != img_qpixmap:
                 self._lbl_video.setPixmap(img_qpixmap)
                 self._currentFrame = img_qpixmap
-                
-            self._trigger_next_video_update()
             
         except Exception as e: print(f'Failed to update video feed with captured image: {e}')
+        finally:
+            self._iscapturing.clear()
+            self._trigger_next_video_update()
         
     def _handle_img_capture(self, img:Image.Image):
         """
@@ -1527,6 +1702,9 @@ class Wdg_MotionController(qw.QGroupBox):
         Updates the video feed, taking in mind Tkinter's single thread.
         Use in a worker thread, DO NOT use in the mainthread!!!
         """
+        # Prevents multiple triggers of the video update if the camera is still processing the previous capture
+        if self._iscapturing.is_set(): return
+        
         if self._flg_pause_video.is_set():
             QTimer.singleShot(int(1000/self._vid_refreshrate), self.video_update)
             return
@@ -1537,6 +1715,8 @@ class Wdg_MotionController(qw.QGroupBox):
             Enum_CamCorrectionType[request],
             self._chkbox_scalebar.isChecked(),
             self._chkbox_crosshair.isChecked())
+        
+        self._iscapturing.set()
     
     @Slot(str,str)
     def status_update(self,message=None,bg_colour=None):

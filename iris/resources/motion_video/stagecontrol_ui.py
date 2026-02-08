@@ -15,9 +15,10 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QCheckBox, QGridLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QSizePolicy,
-    QSpacerItem, QTabWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QDoubleSpinBox, QFrame,
+    QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QSizePolicy, QSpacerItem, QTabWidget,
+    QVBoxLayout, QWidget)
 
 class Ui_stagecontrol(object):
     def setupUi(self, stagecontrol):
@@ -259,16 +260,138 @@ class Ui_stagecontrol(object):
         self.verticalLayout_2.addLayout(self.lyt_main_grid)
 
         self.tab_controls.addTab(self.tab_advanced, "")
+        self.tab_autofocus = QWidget()
+        self.tab_autofocus.setObjectName(u"tab_autofocus")
+        self.verticalLayout_6 = QVBoxLayout(self.tab_autofocus)
+        self.verticalLayout_6.setObjectName(u"verticalLayout_6")
+        self.gridLayout = QGridLayout()
+        self.gridLayout.setObjectName(u"gridLayout")
+        self.btn_start_currcoor_autofocus = QPushButton(self.tab_autofocus)
+        self.btn_start_currcoor_autofocus.setObjectName(u"btn_start_currcoor_autofocus")
+
+        self.gridLayout.addWidget(self.btn_start_currcoor_autofocus, 1, 0, 1, 2)
+
+        self.label_19 = QLabel(self.tab_autofocus)
+        self.label_19.setObjectName(u"label_19")
+        sizePolicy2 = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        sizePolicy2.setHorizontalStretch(0)
+        sizePolicy2.setVerticalStretch(0)
+        sizePolicy2.setHeightForWidth(self.label_19.sizePolicy().hasHeightForWidth())
+        self.label_19.setSizePolicy(sizePolicy2)
+        self.label_19.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+
+        self.gridLayout.addWidget(self.label_19, 4, 0, 1, 1)
+
+        self.spin_step_autofocus = QDoubleSpinBox(self.tab_autofocus)
+        self.spin_step_autofocus.setObjectName(u"spin_step_autofocus")
+        sizePolicy3 = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        sizePolicy3.setHorizontalStretch(0)
+        sizePolicy3.setVerticalStretch(0)
+        sizePolicy3.setHeightForWidth(self.spin_step_autofocus.sizePolicy().hasHeightForWidth())
+        self.spin_step_autofocus.setSizePolicy(sizePolicy3)
+        self.spin_step_autofocus.setMinimum(0.010000000000000)
+        self.spin_step_autofocus.setMaximum(1000000.000000000000000)
+        self.spin_step_autofocus.setValue(1.000000000000000)
+
+        self.gridLayout.addWidget(self.spin_step_autofocus, 8, 1, 1, 1)
+
+        self.label_17 = QLabel(self.tab_autofocus)
+        self.label_17.setObjectName(u"label_17")
+        sizePolicy2.setHeightForWidth(self.label_17.sizePolicy().hasHeightForWidth())
+        self.label_17.setSizePolicy(sizePolicy2)
+        self.label_17.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+
+        self.gridLayout.addWidget(self.label_17, 0, 0, 1, 1)
+
+        self.spin_end_autofocus = QDoubleSpinBox(self.tab_autofocus)
+        self.spin_end_autofocus.setObjectName(u"spin_end_autofocus")
+        sizePolicy3.setHeightForWidth(self.spin_end_autofocus.sizePolicy().hasHeightForWidth())
+        self.spin_end_autofocus.setSizePolicy(sizePolicy3)
+        self.spin_end_autofocus.setMinimum(-1000000.000000000000000)
+        self.spin_end_autofocus.setMaximum(1000000.000000000000000)
+
+        self.gridLayout.addWidget(self.spin_end_autofocus, 4, 1, 1, 1)
+
+        self.label_18 = QLabel(self.tab_autofocus)
+        self.label_18.setObjectName(u"label_18")
+        sizePolicy2.setHeightForWidth(self.label_18.sizePolicy().hasHeightForWidth())
+        self.label_18.setSizePolicy(sizePolicy2)
+        self.label_18.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+
+        self.gridLayout.addWidget(self.label_18, 8, 0, 1, 1)
+
+        self.line = QFrame(self.tab_autofocus)
+        self.line.setObjectName(u"line")
+        self.line.setFrameShape(QFrame.Shape.HLine)
+        self.line.setFrameShadow(QFrame.Shadow.Sunken)
+
+        self.gridLayout.addWidget(self.line, 6, 0, 1, 2)
+
+        self.line_2 = QFrame(self.tab_autofocus)
+        self.line_2.setObjectName(u"line_2")
+        self.line_2.setFrameShape(QFrame.Shape.HLine)
+        self.line_2.setFrameShadow(QFrame.Shadow.Sunken)
+
+        self.gridLayout.addWidget(self.line_2, 2, 0, 1, 2)
+
+        self.spin_start_autofocus = QDoubleSpinBox(self.tab_autofocus)
+        self.spin_start_autofocus.setObjectName(u"spin_start_autofocus")
+        sizePolicy3.setHeightForWidth(self.spin_start_autofocus.sizePolicy().hasHeightForWidth())
+        self.spin_start_autofocus.setSizePolicy(sizePolicy3)
+        self.spin_start_autofocus.setMinimum(-1000000.000000000000000)
+        self.spin_start_autofocus.setMaximum(1000000.000000000000000)
+
+        self.gridLayout.addWidget(self.spin_start_autofocus, 0, 1, 1, 1)
+
+        self.btn_end_currcoor_autofocus = QPushButton(self.tab_autofocus)
+        self.btn_end_currcoor_autofocus.setObjectName(u"btn_end_currcoor_autofocus")
+
+        self.gridLayout.addWidget(self.btn_end_currcoor_autofocus, 5, 0, 1, 2)
+
+        self.btn_perform_autofocus = QPushButton(self.tab_autofocus)
+        self.btn_perform_autofocus.setObjectName(u"btn_perform_autofocus")
+
+        self.gridLayout.addWidget(self.btn_perform_autofocus, 9, 0, 1, 2)
+
+        self.btn_stop_autofocus = QPushButton(self.tab_autofocus)
+        self.btn_stop_autofocus.setObjectName(u"btn_stop_autofocus")
+        self.btn_stop_autofocus.setEnabled(False)
+        self.btn_stop_autofocus.setStyleSheet(u"background-color: red")
+
+        self.gridLayout.addWidget(self.btn_stop_autofocus, 10, 0, 1, 2)
+
+
+        self.verticalLayout_6.addLayout(self.gridLayout)
+
+        self.tab_controls.addTab(self.tab_autofocus, "")
 
         self.verticalLayout.addWidget(self.tab_controls)
 
 
         self.verticalLayout_3.addLayout(self.verticalLayout)
 
+        QWidget.setTabOrder(self.tab_controls, self.ent_speedxy)
+        QWidget.setTabOrder(self.ent_speedxy, self.ent_speedz)
+        QWidget.setTabOrder(self.ent_speedz, self.ent_stepxy_um)
+        QWidget.setTabOrder(self.ent_stepxy_um, self.ent_stepz_um)
+        QWidget.setTabOrder(self.ent_stepz_um, self.chk_stepmode)
+        QWidget.setTabOrder(self.chk_stepmode, self.ent_goto_x_um)
+        QWidget.setTabOrder(self.ent_goto_x_um, self.ent_goto_y_um)
+        QWidget.setTabOrder(self.ent_goto_y_um, self.ent_goto_z_um)
+        QWidget.setTabOrder(self.ent_goto_z_um, self.btn_goto)
+        QWidget.setTabOrder(self.btn_goto, self.btn_home_xy)
+        QWidget.setTabOrder(self.btn_home_xy, self.btn_home_z)
+        QWidget.setTabOrder(self.btn_home_z, self.spin_start_autofocus)
+        QWidget.setTabOrder(self.spin_start_autofocus, self.btn_start_currcoor_autofocus)
+        QWidget.setTabOrder(self.btn_start_currcoor_autofocus, self.spin_end_autofocus)
+        QWidget.setTabOrder(self.spin_end_autofocus, self.btn_end_currcoor_autofocus)
+        QWidget.setTabOrder(self.btn_end_currcoor_autofocus, self.spin_step_autofocus)
+        QWidget.setTabOrder(self.spin_step_autofocus, self.btn_perform_autofocus)
+        QWidget.setTabOrder(self.btn_perform_autofocus, self.btn_stop_autofocus)
 
         self.retranslateUi(stagecontrol)
 
-        self.tab_controls.setCurrentIndex(0)
+        self.tab_controls.setCurrentIndex(2)
 
 
         QMetaObject.connectSlotsByName(stagecontrol)
@@ -304,5 +427,13 @@ class Ui_stagecontrol(object):
         self.btn_home_xy.setText(QCoreApplication.translate("stagecontrol", u"Home XY", None))
         self.btn_home_z.setText(QCoreApplication.translate("stagecontrol", u"Home Z", None))
         self.tab_controls.setTabText(self.tab_controls.indexOf(self.tab_advanced), QCoreApplication.translate("stagecontrol", u"Advanced", None))
+        self.btn_start_currcoor_autofocus.setText(QCoreApplication.translate("stagecontrol", u"Insert current coordinate", None))
+        self.label_19.setText(QCoreApplication.translate("stagecontrol", u"End point (\u00b5m):", None))
+        self.label_17.setText(QCoreApplication.translate("stagecontrol", u"Start point (\u00b5m):", None))
+        self.label_18.setText(QCoreApplication.translate("stagecontrol", u"Step size (\u00b5m):", None))
+        self.btn_end_currcoor_autofocus.setText(QCoreApplication.translate("stagecontrol", u"Insert current coordinate", None))
+        self.btn_perform_autofocus.setText(QCoreApplication.translate("stagecontrol", u"Perform auto-focus", None))
+        self.btn_stop_autofocus.setText(QCoreApplication.translate("stagecontrol", u"Stop", None))
+        self.tab_controls.setTabText(self.tab_controls.indexOf(self.tab_autofocus), QCoreApplication.translate("stagecontrol", u"Auto-focus", None))
     # retranslateUi
 
