@@ -15,10 +15,10 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QComboBox, QGroupBox, QHBoxLayout,
-    QHeaderView, QLabel, QMainWindow, QPushButton,
-    QSizePolicy, QSpacerItem, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QComboBox, QDoubleSpinBox, QGroupBox,
+    QHBoxLayout, QHeaderView, QLabel, QMainWindow,
+    QPushButton, QSizePolicy, QSpacerItem, QTreeWidget,
+    QTreeWidgetItem, QVBoxLayout, QWidget)
 
 class Ui_gridify_setup_finetuning(object):
     def setupUi(self, gridify_setup_finetuning):
@@ -102,6 +102,28 @@ class Ui_gridify_setup_finetuning(object):
 
         self.verticalLayout_5.addItem(self.verticalSpacer)
 
+        self.label_2 = QLabel(self.groupBox_3)
+        self.label_2.setObjectName(u"label_2")
+
+        self.verticalLayout_5.addWidget(self.label_2)
+
+        self.spin_range_um = QDoubleSpinBox(self.groupBox_3)
+        self.spin_range_um.setObjectName(u"spin_range_um")
+        self.spin_range_um.setMinimum(0.100000000000000)
+        self.spin_range_um.setMaximum(1000000.000000000000000)
+        self.spin_range_um.setValue(50.000000000000000)
+
+        self.verticalLayout_5.addWidget(self.spin_range_um)
+
+        self.btn_autofocus = QPushButton(self.groupBox_3)
+        self.btn_autofocus.setObjectName(u"btn_autofocus")
+
+        self.verticalLayout_5.addWidget(self.btn_autofocus)
+
+        self.verticalSpacer_2 = QSpacerItem(20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+
+        self.verticalLayout_5.addItem(self.verticalSpacer_2)
+
         self.btn_cancel = QPushButton(self.groupBox_3)
         self.btn_cancel.setObjectName(u"btn_cancel")
 
@@ -151,6 +173,8 @@ class Ui_gridify_setup_finetuning(object):
         self.btn_set_nextROI.setText(QCoreApplication.translate("gridify_setup_finetuning", u"Set current coordinate as reference\n"
 "and go to the next ROI", None))
         self.btn_nextROI.setText(QCoreApplication.translate("gridify_setup_finetuning", u"Go to the next ROI", None))
+        self.label_2.setText(QCoreApplication.translate("gridify_setup_finetuning", u"Auto-focus range (\u00b5m):", None))
+        self.btn_autofocus.setText(QCoreApplication.translate("gridify_setup_finetuning", u"Perform auto-focus on all", None))
         self.btn_cancel.setText(QCoreApplication.translate("gridify_setup_finetuning", u"Cancel all modifications", None))
         self.btn_finish.setText(QCoreApplication.translate("gridify_setup_finetuning", u"Finish editing", None))
     # retranslateUi

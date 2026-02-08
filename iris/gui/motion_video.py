@@ -479,13 +479,13 @@ class AutoFocus_Worker(QObject):
             focus_score = self._calculate_focus_score(img_gray, blur=AUTOFOCUS_BLUR_KERNEL_SIZE)
             self._list_focus_score.append(focus_score)
             
-            print(f'Score: {focus_score:.2f} at Z: {self._list_coor_mm[self._next_coor_idx-1]:.3f} mm')
+            # print(f'Score: {focus_score:.2f} at Z: {self._list_coor_mm[self._next_coor_idx-1]:.3f} mm')
             self._go_to_next_coor()
         except Exception as e:
             self.sig_error.emit('Error processing image: {}'.format(e))
             
     def _go_to_next_coor(self):
-        print('Moving to next coordinate index:', self._next_coor_idx)
+        # print('Moving to next coordinate index:', self._next_coor_idx)
         if self._next_coor_idx >= len(self._list_coor_mm):
             # Finished all coordinates, emit the best focus score
             if len(self._list_focus_score) == 0:
@@ -500,6 +500,8 @@ class AutoFocus_Worker(QObject):
             # Move to the best coordinate
             self.ctrl_z.move_direct(best_coor)
             
+            print('Autofocus finished. Best Z: {:.3f} mm with focus score: {:.2f}'.format(best_coor, best_score))
+            
             self.sig_finished.emit(best_coor)
             
             self._list_coor_mm.clear()
@@ -510,7 +512,6 @@ class AutoFocus_Worker(QObject):
         self.ctrl_z.move_direct(next_z_mm)
         self._is_waiting_for_img.set()
         self._next_coor_idx += 1
-        print('Moved to Z: {:.3f} mm, waiting for image...'.format(next_z_mm))
         
         
 class ImageCapture_Worker(QObject):
@@ -1504,21 +1505,32 @@ class Wdg_MotionController(qw.QGroupBox):
         self._wdg_stage.btn_start_currcoor_autofocus.clicked.connect(lambda: store_start_coor(self.get_coordinates_closest_mm()[2]))
         self._wdg_stage.btn_end_currcoor_autofocus.clicked.connect(lambda: store_end_coor(self.get_coordinates_closest_mm()[2]))
         
-    def _perform_autofocus(self):
-        commit = qw.QMessageBox.question(
-            self,
-            'Perform autofocus',
-            'Are you sure you want to perform autofocus with the current parameters?'
-            'This will move the z-stage automatically, which may RISK CRASHING the objective into the sample if the parameters are not set correctly!'
-            ,
-            qw.QMessageBox.Yes | qw.QMessageBox.No, # pyright: ignore[reportAttributeAccessIssue]
-            qw.QMessageBox.No # pyright: ignore[reportAttributeAccessIssue]
-        )
-        if commit != qw.QMessageBox.Yes: return # pyright: ignore[reportAttributeAccessIssue]
+    def get_autofocus_worker(self) -> AutoFocus_Worker:
+        """
+        Returns the autofocus worker to be used for the autofocus function
+
+        Returns:
+            AutoFocus_Worker: The autofocus worker to perform the autofocus function.
+        """
+        return self._worker_autofocus
         
-        start = self._wdg_stage.spin_start_autofocus.value()/1e3
-        end = self._wdg_stage.spin_end_autofocus.value()/1e3
-        step = self._wdg_stage.spin_step_autofocus.value()/1e3
+    def perform_autofocus(self, bypass_confirmation:bool=False, start_mm:float|None=None, end_mm:float|None=None,
+                          step_mm:float|None=None):
+        if not bypass_confirmation:
+            commit = qw.QMessageBox.question(
+                self,
+                'Perform autofocus',
+                'Are you sure you want to perform autofocus with the current parameters?'
+                'This will move the z-stage automatically, which may RISK CRASHING the objective into the sample if the parameters are not set correctly!'
+                ,
+                qw.QMessageBox.Yes | qw.QMessageBox.No, # pyright: ignore[reportAttributeAccessIssue]
+                qw.QMessageBox.No # pyright: ignore[reportAttributeAccessIssue]
+            )
+            if commit != qw.QMessageBox.Yes: return # pyright: ignore[reportAttributeAccessIssue]
+        
+        start = start_mm if start_mm is not None else self._wdg_stage.spin_start_autofocus.value()/1e3
+        end = end_mm if end_mm is not None else self._wdg_stage.spin_end_autofocus.value()/1e3
+        step = step_mm if step_mm is not None else self._wdg_stage.spin_step_autofocus.value()/1e3
         self._sig_req_auto_focus.emit(start,end,step)
         
     def _set_autofocus_running_buttons(self):
@@ -1554,7 +1566,7 @@ class Wdg_MotionController(qw.QGroupBox):
         self._worker_autofocus.sig_error.connect(self._handle_autofocus_error)
         
         # Connect the GUI
-        self._wdg_stage.btn_perform_autofocus.clicked.connect(self._perform_autofocus)
+        self._wdg_stage.btn_perform_autofocus.clicked.connect(self.perform_autofocus)
         self._wdg_stage.btn_stop_autofocus.clicked.connect(self._worker_autofocus.force_stop)
         
         
