@@ -145,11 +145,9 @@ class ImageProcessor_Worker(QObject):
         
         msg = self.msg_success
         
-        print('Starting image capture in worker thread...')
         self._motion_ctrl.pause_video()
         ts_before = self._motion_ctrl.get_latest_image_with_timestamp()[1]
         for i,coor in enumerate(meaCoor_mm.mapping_coordinates):
-            print(f'{time.time()}: Moving to coordinate {coor} for image capture')
             x, y, z = coor
             if flg_stop.is_set():
                 msg = self.msg_error + 'Image capture stopped by user'
@@ -159,18 +157,17 @@ class ImageProcessor_Worker(QObject):
             self.sig_gotocoor.emit(coor, flg_mvmt_done)
             flg_mvmt_done.wait()
             
-            print(f'{time.time()}: Triggering image capture for coordinate {coor}')
             self.sig_req_img_capture.emit()
             
             while True:
-                print(f'{time.time()}: Waiting for new image to be available for coordinate {coor}')
+                # print(f'{time.time()}: Waiting for new image to be available for coordinate {coor}')
                 img,ts = self._motion_ctrl.get_latest_image_with_timestamp()
                 if ts == ts_before:
-                    print(f'{time.time()}: No new image received yet for coordinate {coor}, still waiting...')
+                    # print(f'{time.time()}: No new image received yet for coordinate {coor}, still waiting...')
                     time.sleep(ControllerConfigEnum.STAGE_TILING_WAITTIME_SEC.value)  # Allow time for stage to settle
                 else:
                     ts_before = ts
-                    print(f'{time.time()}: New image received for coordinate {coor}, proceeding with processing...')
+                    # print(f'{time.time()}: New image received for coordinate {coor}, proceeding with processing...')
                     break
             
             if not isinstance(img,Image.Image):
