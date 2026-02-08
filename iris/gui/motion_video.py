@@ -15,8 +15,9 @@ import queue
 
 from PIL import Image, ImageDraw, ImageFont, ImageQt
 import numpy as np
+import cv2 as cv
 
-from typing import Callable, Any
+from typing import Callable, Any, Literal
 
 import time
 
@@ -30,7 +31,7 @@ from iris.utils.general import validator_float_greaterThanZero, messagebox_reque
 
 from iris.data.calibration_objective import ImgMea_Cal
 
-from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam
+from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam, Enum_CamCorrectionType
 
 from iris.gui import AppVideoEnum
 from iris.controllers import ControllerConfigEnum
@@ -401,6 +402,138 @@ class Motion_GoToCoor_Worker(QObject):
 
 #         q_ret.put((speed_xy,speed_z))
 
+class AutoFocus_Worker(QObject):
+    """
+    A worker to perform autofocus by moving the z stage and evaluating the focus metric
+    """
+    sig_finished = Signal(float)  # Signal to emit the best focus metric value
+    sig_error = Signal(str)  # Signal to emit an error message
+    
+    def __init__(self, ctrl_z: 'Controller_Z', stageHub:DataStreamer_StageCam, parent=None):
+        super().__init__(parent)
+        self.ctrl_z = ctrl_z
+        self.stageHub = stageHub
+        
+    @Slot()
+    def work(self):
+        pass
+    
+    def _calculate_focus_score(self, image, blur):
+        image_filtered = cv.medianBlur(image, blur)
+        laplacian = cv.Laplacian(image_filtered, cv.CV_64F)
+        focus_score = laplacian.var()
+        return focus_score
+    
+class VideoUpdater_Worker(QObject):
+    """
+    A worker to continuously update the video feed by capturing frames from the camera and applying corrections
+    """
+    sig_qpixmap = Signal(QPixmap)  # Signal to emit the new frame as a QPixmap
+    sig_img = Signal(Image.Image)  # Signal to emit the new frame as a PIL Image
+    sig_no_frame = Signal()  # Signal to emit when no frame is captured
+    sig_error = Signal(str)  # Signal to emit an error message
+    
+    def __init__(self, camera_controller:CameraController, stageHub:DataStreamer_StageCam, getter_imgcal:Callable[[],ImgMea_Cal]):
+        super().__init__()
+        self._camera_controller = camera_controller
+        self._stageHub = stageHub
+        self._getter_imgcal = getter_imgcal
+        
+    def _overlay_scalebar(self,img:Image.Image) -> Image.Image:
+        """
+        Overlays a scalebar on the image based on the image calibration file
+
+        Args:
+            img (Image.Image): The image to be overlayed with the scalebar
+
+        Returns:
+            Image.Image: The image with the scalebar overlayed
+        """
+        cal = self._getter_imgcal()
+        
+        if not isinstance(cal,ImgMea_Cal) or not cal.check_calibration_set():
+            return img
+        
+        if not isinstance(img,Image.Image): return img
+        
+        scalex = 1/cal.scale_x_pixelPerMm
+        scalebar_length = int(ControllerConfigEnum.SCALEBAR_LENGTH_RATIO.value * img.size[0]) # in pixel
+        scalebar_height = int(ControllerConfigEnum.SCALEBAR_HEIGHT_RATIO.value * img.size[1]) # in pixel
+        
+        length_mm = scalebar_length * scalex
+        font = ControllerConfigEnum.SCALEBAR_FONT.value
+        font_size = int(scalebar_length/10 * ControllerConfigEnum.SCALEBAR_FONT_RATIO.value)
+        line_width = int(scalebar_length/50 * ControllerConfigEnum.SCALEBAR_FONT_RATIO.value)
+        
+        line_offset = scalebar_length/10
+        
+        box_length = scalebar_length + 2*line_offset
+        box_height = scalebar_height + 2*line_offset
+        
+        draw = ImageDraw.Draw(img)
+        # Draw a box around the scalebar, taking consideration of the font size height
+        draw.rectangle([(img.size[0]-box_length, img.size[1]-box_height),
+                        (img.size[0], img.size[1])], fill=(0,0,0))
+        draw.line([(img.size[0]-scalebar_length-line_offset, img.size[1]-line_offset),
+                   (img.size[0]-line_offset, img.size[1]-line_offset)],
+                  fill=(255,255,255), width=line_width)
+        
+        try: text_params = {'text':'{:.0f} µm'.format(abs(length_mm*1e3)), 'font':ImageFont.truetype(font,font_size)}
+        except Exception: raise ValueError('Scalebar font file not found. Please check the font path in the configuration.')
+        
+        text_length = draw.textlength(**text_params)
+        
+        draw.text((img.size[0]-box_length/2-text_length/2, img.size[1]-line_offset*2-line_width-font_size/2),
+                  align='left', fill=(255,255,255), **text_params)
+        return img
+    
+    def _draw_crosshair(self, img:Image.Image) -> Image.Image:
+        width, height = img.size
+        draw = ImageDraw.Draw(img)
+        line_color = (255, 0, 0)
+        # Draw vertical line
+        draw.line([(width/2, 0), (width/2, height)], fill=line_color, width=3)
+        # Draw horizontal line
+        draw.line([(0, height/2), (width, height/2)], fill=line_color, width=3)
+        return img
+    
+    @Slot(Enum_CamCorrectionType, bool, bool)
+    def grab_image(self, img_corr:Enum_CamCorrectionType, scalebar:bool, crosshair:bool):
+        """
+        Updates the video feed, taking in mind Tkinter's single thread.
+        Use in a worker thread, DO NOT use in the mainthread!!!
+        
+        Args:
+            img_corr (Enum_CamCorrectionType): The type of image correction to be applied to the captured frame
+            scalebar (bool): Whether to overlay a scalebar on the image
+            crosshair (bool): Whether to overlay a crosshair on the image
+        """
+        if not img_corr in Enum_CamCorrectionType:
+            self.sig_error.emit('Invalid video correction type: {}'.format(img_corr))
+            return
+        
+        try:
+            if img_corr == Enum_CamCorrectionType.RAW: img = self._camera_controller.img_capture()
+            else: img:Image.Image = self._stageHub.get_image(request=img_corr)
+            
+            if not isinstance(img,Image.Image):
+                self.sig_no_frame.emit()
+                return
+            
+            # Add a scalebar to it
+            img = self._overlay_scalebar(img) if scalebar else img
+            if crosshair: img = self._draw_crosshair(img)
+            
+            new_frame:QPixmap = ImageQt.toqpixmap(img)
+            
+            self.sig_img.emit(img)
+            self.sig_qpixmap.emit(new_frame)
+            
+        except Exception as e:
+            print(f'Video feed failed: {e}')
+            self.sig_no_frame.emit()
+            self.sig_error.emit('Failed to capture video frame: {}'.format(e))
+
 class Wdg_MotionController(qw.QGroupBox):
     """
     A class to control the app subwindow for the motion:
@@ -420,6 +553,7 @@ class Wdg_MotionController(qw.QGroupBox):
     sig_breathing_stopped = Signal()
     
     _sig_go_to_coordinates = Signal(tuple,threading.Event)
+    _sig_req_img = Signal(Enum_CamCorrectionType,bool,bool)
     
     def __init__(
         self,
@@ -454,12 +588,17 @@ class Wdg_MotionController(qw.QGroupBox):
         main_layout.addWidget(self._statbar)
         
     # >>> Video widgets and parameter setup <<<
+        self._vid_refreshrate = AppVideoEnum.VIDEOFEED_REFRESH_RATE.value # The refresh rate for the video feed in Hz
         self._camera_ctrl:CameraController = self._stageHub.get_camera_controller()
         self._video_height = ControllerConfigEnum.VIDEOFEED_HEIGHT.value    # Video feed height in pixel
-        self._flg_isvideorunning = False         # A flag to turn on/off the video
+        self._flg_pause_video = threading.Event()  # A flag to check if the video feed is running
+        self._time_last_frame = 0.0   # The timestamp of the last frame captured, used to limit the frame rate
         self._currentImage:Image.Image|None = None   # The current image to be displayed
         self._currentFrame = None               # The current frame to be displayed
-        self._flg_isNewFrmReady = threading.Event()  # A flag to wait for the frame to be captured
+        self._flg_isNewImgReady = threading.Event()  # A flag to wait for the frame to be captured
+        
+        self._init_video_worker()
+        self._init_video()
         
         # >> Sub-frame setup <<
         self._init_video_widgets(stageHub, wdg_video)
@@ -501,7 +640,7 @@ class Wdg_MotionController(qw.QGroupBox):
         self.sig_statbar_message.emit('Initialising the motion controllers','yellow')
         self._motion_controller_initialisation()
         self._init_workers()
-        QTimer.singleShot(10, self.video_initialise)
+        QTimer.singleShot(10, self.resume_video)
 
     def _init_stageparam_widgets(self, widget:StageControl):
         """
@@ -672,7 +811,7 @@ class Wdg_MotionController(qw.QGroupBox):
         # > Video controllers
         self._btn_videotoggle = wdg_video.btn_camera_onoff
         self._btn_reinit_conn = wdg_video.pushButton_2
-        self._btn_videotoggle.released.connect(lambda: self.video_initialise())
+        self._btn_videotoggle.released.connect(lambda: self.resume_video())
         # self._btn_reinit_conn.released.connect(lambda: self.reinitialise_connection('camera'))
         self._btn_reinit_conn.setEnabled(False)
         self._btn_videotoggle.setStyleSheet('background-color: yellow')
@@ -695,7 +834,7 @@ class Wdg_MotionController(qw.QGroupBox):
         # Video corrections
         self._dict_vidcorrection = {}
         self._combo_vidcorrection = wdg_video.combo_image_correction
-        self._combo_vidcorrection.addItems(list(stageHub.Enum_CamCorrectionType.__members__))
+        self._combo_vidcorrection.addItems(list(Enum_CamCorrectionType.__members__))
         self._combo_vidcorrection.setCurrentIndex(0)
         
     
@@ -835,7 +974,9 @@ class Wdg_MotionController(qw.QGroupBox):
             qw.QMessageBox.critical(main_window, 'Error', 'Camera does not support exposure time setting')
             return
         try:
-            init_exposure_time_ms = self._camera_ctrl.get_exposure_time_us()/1e3
+            init_exposure_time_ms = self._camera_ctrl.get_exposure_time_us()
+            if init_exposure_time_ms is None: raise ValueError('Failed to get current exposure time from the camera')
+            init_exposure_time_ms = init_exposure_time_ms/1e3
             new_exposure_time = messagebox_request_input(
                 parent=main_window,
                 title='Set exposure time',
@@ -883,39 +1024,6 @@ class Wdg_MotionController(qw.QGroupBox):
         self._chkbox_crosshair.setChecked(False)
         self._chkbox_scalebar.setChecked(False)
         return
-        
-    def video_terminate(self):
-        self._flg_isvideorunning = False
-        # By turning this flag off, the video autoupdater should automatically terminate, 
-        # disconnect from the camera, and resets all the parameters for next use.
-        
-        # Turn the button back into a camera on button
-        self._btn_videotoggle.released.disconnect()
-        self._btn_videotoggle.setText('Turn camera ON')
-        self._btn_videotoggle.released.connect(lambda: self.video_initialise())
-        self._btn_videotoggle.setStyleSheet('background-color: yellow')
-    
-    def video_initialise(self):
-        """
-        Initialises the video:
-        1. Define the controller
-        2. Sets the first frame
-        3. Starts the multi-threading to start the autoupdater
-        """
-        try:
-            if self._flg_isvideorunning: return
-            # Initialise the video capture
-            ## camera initialisation moved to self.video_update for responsiveness
-            # Start multithreading for the video to constantly update the captured frame
-            threading.Thread(target=self.video_update, daemon=True).start()
-            
-            # Turn the button into a video stop button
-            self._btn_videotoggle.released.disconnect()
-            self._btn_videotoggle.setText('Turn camera OFF')
-            self._btn_videotoggle.released.connect(lambda: self.video_terminate())
-            self._btn_videotoggle.setStyleSheet('background-color: red')
-        except Exception as e:
-            print(f'Video feed cannot start:\n{e}')
         
     def _start_breathing_z(self) -> None:
         """
@@ -1297,8 +1405,8 @@ class Wdg_MotionController(qw.QGroupBox):
             wait_newimage (bool, optional): Waits for a new image to be taken. Defaults to False.
         """
         if wait_newimage:
-            self._flg_isNewFrmReady.clear()
-            self._flg_isNewFrmReady.wait()
+            self._flg_isNewImgReady.clear()
+            self._flg_isNewImgReady.wait()
         return self._currentImage
     
     def get_image_shape(self) -> tuple[int,int]|None:
@@ -1312,117 +1420,123 @@ class Wdg_MotionController(qw.QGroupBox):
             return self._currentImage.size
         return None
     
-    def _overlay_scalebar(self,img:Image.Image) -> Image.Image:
+    def _init_video_worker(self):
         """
-        Overlays a scalebar on the image based on the image calibration file
-
-        Args:
-            img (Image.Image): The image to be overlayed with the scalebar
+        Initialises the video worker to update the video feed in a separate thread
+        """
+        self._worker_video = VideoUpdater_Worker(
+            camera_controller=self._camera_ctrl,
+            stageHub=self._stageHub,
+            getter_imgcal=self._getter_imgcal,
+        )
+        self._thread_video = QThread(self)
+        self._worker_video.moveToThread(self._thread_video)
+        self._thread_video.finished.connect(self._worker_video.deleteLater)
+        self._thread_video.finished.connect(self._thread_video.deleteLater)
+        
+        # Connect the signal to request an image capture to the worker's grab_image method
+        self._sig_req_img.connect(self._worker_video.grab_image)
+        self._worker_video.sig_error.connect(lambda msg: print(f'Video worker error: {msg}'))
+        self._worker_video.sig_img.connect(self._handle_img_capture)
+        self._worker_video.sig_qpixmap.connect(self._handle_qpixmap_capture)
+        self._worker_video.sig_no_frame.connect(self._trigger_next_video_update)
+        
+        # Defer thread start until after initialization is complete
+        QTimer.singleShot(0, self._thread_video.start)
+        self.destroyed.connect(self._thread_video.quit)
+    
+    def get_video_worker(self) -> VideoUpdater_Worker:
+        """
+        Returns the video worker to access its methods and signals
 
         Returns:
-            Image.Image: The image with the scalebar overlayed
+            VideoUpdater_Worker: The video worker instance
         """
-        cal = self._getter_imgcal()
+        return self._worker_video
+    
+    def pause_video(self):
+        self._flg_pause_video.set()
         
-        if not isinstance(cal,ImgMea_Cal) or not cal.check_calibration_set():
-            return img
+        # Turn the button back into a camera on button
+        self._btn_videotoggle.released.disconnect()
+        self._btn_videotoggle.setText('Resume video feed')
+        self._btn_videotoggle.released.connect(lambda: self.resume_video())
+        self._btn_videotoggle.setStyleSheet('background-color: yellow; color: black')
+    
+    def resume_video(self):
+        self._flg_pause_video.clear()
         
-        if not isinstance(img,Image.Image): return img
+        # Turn the button into a video stop button
+        self._btn_videotoggle.released.disconnect()
+        self._btn_videotoggle.setText('Pause video feed')
+        self._btn_videotoggle.released.connect(lambda: self.pause_video())
+        self._btn_videotoggle.setStyleSheet('background-color: red')
+    
+    def _init_video(self):
+        if not self._camera_ctrl.get_initialisation_status(): self._camera_ctrl.__init__()
+        self._currentFrame = None            # Empties the current frame
         
-        scalex = 1/cal.scale_x_pixelPerMm
-        scalebar_length = int(ControllerConfigEnum.SCALEBAR_LENGTH_RATIO.value * img.size[0]) # in pixel
-        scalebar_height = int(ControllerConfigEnum.SCALEBAR_HEIGHT_RATIO.value * img.size[1]) # in pixel
+        # Loops the image updater to create outputs the video capture frame by frame
+        self._flg_pause_video.clear()
+        QTimer.singleShot(0, self.video_update)
+    
+    def _trigger_next_video_update(self):
+        """
+        Handles the case where the camera fails to capture an image.
+        """
+        time_current = time.time()
+        diff = time_current - self._time_last_frame
+        self._time_last_frame = time_current
+        if diff < 1/self._vid_refreshrate: sleep_msec = int((1/self._vid_refreshrate - diff)*1e3)
+        else: sleep_msec = 0
         
-        length_mm = scalebar_length * scalex
-        font = ControllerConfigEnum.SCALEBAR_FONT.value
-        font_size = int(scalebar_length/10 * ControllerConfigEnum.SCALEBAR_FONT_RATIO.value)
-        line_width = int(scalebar_length/50 * ControllerConfigEnum.SCALEBAR_FONT_RATIO.value)
+        QTimer.singleShot(sleep_msec, self.video_update)
+    
+    def _handle_qpixmap_capture(self, img_qpixmap:QPixmap):
+        """
+        Handles the image capture from the camera and updates the video feed with the new image.
+        Should be used as a callback for the camera controller's image capture method.
+
+        Args:
+            img_qpixmap (QPixmap): The captured image in QPixmap format
+        """
+        try:
+            if self._currentFrame != img_qpixmap:
+                self._lbl_video.setPixmap(img_qpixmap)
+                self._currentFrame = img_qpixmap
+                
+            self._trigger_next_video_update()
+            
+        except Exception as e: print(f'Failed to update video feed with captured image: {e}')
         
-        line_offset = scalebar_length/10
+    def _handle_img_capture(self, img:Image.Image):
+        """
+        Handles the image capture from the camera and updates the video feed with the new image.
+        Should be used as a callback for the camera controller's image capture method.
+
+        Args:
+            img (Image.Image): The captured image in PIL Image format
+        """
+        if not isinstance(img,Image.Image): return
         
-        box_length = scalebar_length + 2*line_offset
-        box_height = scalebar_height + 2*line_offset
-        
-        draw = ImageDraw.Draw(img)
-        # Draw a box around the scalebar, taking consideration of the font size height
-        draw.rectangle([(img.size[0]-box_length, img.size[1]-box_height),
-                        (img.size[0], img.size[1])], fill=(0,0,0))
-        draw.line([(img.size[0]-scalebar_length-line_offset, img.size[1]-line_offset),
-                   (img.size[0]-line_offset, img.size[1]-line_offset)],
-                  fill=(255,255,255), width=line_width)
-        
-        try: text_params = {'text':'{:.0f} µm'.format(abs(length_mm*1e3)), 'font':ImageFont.truetype(font,font_size)}
-        except Exception: raise ValueError('Scalebar font file not found. Please check the font path in the configuration.')
-        
-        text_length = draw.textlength(**text_params)
-        
-        draw.text((img.size[0]-box_length/2-text_length/2, img.size[1]-line_offset*2-line_width-font_size/2),
-                  align='left', fill=(255,255,255), **text_params)
-        return img
+        self._currentImage = img
+        self._flg_isNewImgReady.set()
     
     def video_update(self):
         """
         Updates the video feed, taking in mind Tkinter's single thread.
         Use in a worker thread, DO NOT use in the mainthread!!!
         """
-        def draw_crosshair(img:Image.Image) -> Image.Image:
-            width, height = img.size
-            draw = ImageDraw.Draw(img)
-            line_color = (255, 0, 0)
-            # Draw vertical line
-            draw.line([(width/2, 0), (width/2, height)], fill=line_color, width=3)
-            # Draw horizontal line
-            draw.line([(0, height/2), (width, height/2)], fill=line_color, width=3)
-            return img
+        if self._flg_pause_video.is_set():
+            QTimer.singleShot(int(1000/self._vid_refreshrate), self.video_update)
+            return
         
-        # Initialise the camera controller and grabs the first image
-        if not self._camera_ctrl.get_initialisation_status(): self._camera_ctrl.__init__()
-        self._currentFrame = None            # Empties the current frame
-        
-        # Loops the image updater to create outputs the video capture frame by frame
-        self._flg_isvideorunning = True  # Enables the autoupdater
-        while self._flg_isvideorunning:
-            try:
-                time1 = time.time()
-                # Triggers the frame capture from the camera
-                request = self._combo_vidcorrection.currentText()
-                
-                # print(f'\n{get_timestamp_us_int()} - Video update loop started.')
-                # print(f'1. Requesting image with correction: {request}')
-                if self._stageHub.Enum_CamCorrectionType[request] == self._stageHub.Enum_CamCorrectionType.RAW:
-                    img = self._camera_ctrl.img_capture()
-                else:
-                    img:Image.Image = self._stageHub.get_image(request=self._stageHub.Enum_CamCorrectionType[request])
-                # video_width = int(img.size[1]/img.size[0]*self._video_height)
-                
-                if not isinstance(img,Image.Image): time.sleep(1/AppVideoEnum.VIDEOFEED_REFRESH_RATE.value); continue
-                # print(f'2. Image received from camera. Size: {img.size}')
-                # Add a scalebar to it
-                img = self._overlay_scalebar(img) if self._chkbox_scalebar.isChecked() else img
-                
-                # print(f'3. Scalebar overlay complete. Size: {img.size}')
-                # Overlay a crosshair if requested
-                if self._chkbox_crosshair.isChecked(): img = draw_crosshair(img)
-                new_frame:QPixmap = ImageQt.toqpixmap(img)
-                
-                # print(f'4. Crosshair overlay complete. Size: {img.size}')
-                # Update the image in the app window
-                # Only update if the frame is different. Sometimes the program isn't done taking the new image.
-                # In this case, it skips the frame update
-                if self._currentFrame != new_frame:
-                    self._lbl_video.setPixmap(new_frame)
-                    self._currentFrame = new_frame
-                    self._currentImage = img
-                
-                # print(f'5. Video label updated.')
-                # Let the coordinate updater know that the frame is ready if any is waiting
-                self._flg_isNewFrmReady.set()
-                time_elapsed = time.time() - time1
-                if time_elapsed < 1/AppVideoEnum.VIDEOFEED_REFRESH_RATE.value:
-                    time.sleep(1/AppVideoEnum.VIDEOFEED_REFRESH_RATE.value - time_elapsed)
-                
-                # print(f'6. Loop complete in {time.time() - time1:.3f} seconds.')
-            except Exception as e: print(f'Video feed failed: {e}'); time.sleep(0.02)
+        # Triggers the frame capture from the camera
+        request = self._combo_vidcorrection.currentText()
+        self._sig_req_img.emit(
+            Enum_CamCorrectionType[request],
+            self._chkbox_scalebar.isChecked(),
+            self._chkbox_crosshair.isChecked())
     
     @Slot(str,str)
     def status_update(self,message=None,bg_colour=None):
@@ -1446,7 +1560,7 @@ class Wdg_MotionController(qw.QGroupBox):
         Terminates the motion controller
         """
         self._flg_isrunning.clear()
-        self.video_terminate()  # Terminates the camera controller as well
+        self.pause_video()  # Terminates the camera controller as well
         self.ctrl_xy.terminate()
         self.ctrl_z.terminate()
         self._camera_ctrl.camera_termination()

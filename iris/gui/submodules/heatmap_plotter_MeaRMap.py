@@ -211,6 +211,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         
         # Combobox update timer
         # self._sig_request_update_comboboxes.connect(lambda: self._update_comboboxes())
+        self._mappingHub.add_observer(self._sig_request_update_comboboxes.emit)
         self._sig_request_update_comboboxes.connect(lambda: self.request_combobox_update())
         self._timer_combobox = QTimer(self)
         self._timer_combobox.setInterval(1000)
