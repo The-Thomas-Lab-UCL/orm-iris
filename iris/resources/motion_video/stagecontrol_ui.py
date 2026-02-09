@@ -16,9 +16,10 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDoubleSpinBox, QFrame,
-    QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QSizePolicy, QSpacerItem, QTabWidget,
-    QVBoxLayout, QWidget)
+    QGridLayout, QHBoxLayout, QHeaderView, QLabel,
+    QLineEdit, QPushButton, QSizePolicy, QSpacerItem,
+    QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+    QWidget)
 
 class Ui_stagecontrol(object):
     def setupUi(self, stagecontrol):
@@ -27,8 +28,13 @@ class Ui_stagecontrol(object):
         stagecontrol.resize(828, 628)
         self.verticalLayout_3 = QVBoxLayout(stagecontrol)
         self.verticalLayout_3.setObjectName(u"verticalLayout_3")
-        self.verticalLayout = QVBoxLayout()
-        self.verticalLayout.setObjectName(u"verticalLayout")
+        self.main_layout = QVBoxLayout()
+        self.main_layout.setObjectName(u"main_layout")
+        self.lyt_brightfield = QVBoxLayout()
+        self.lyt_brightfield.setObjectName(u"lyt_brightfield")
+
+        self.main_layout.addLayout(self.lyt_brightfield)
+
         self.horizontalLayout = QHBoxLayout()
         self.horizontalLayout.setObjectName(u"horizontalLayout")
         self.label_16 = QLabel(stagecontrol)
@@ -42,7 +48,7 @@ class Ui_stagecontrol(object):
         self.horizontalLayout.addWidget(self.lbl_coor_um)
 
 
-        self.verticalLayout.addLayout(self.horizontalLayout)
+        self.main_layout.addLayout(self.horizontalLayout)
 
         self.tab_controls = QTabWidget(stagecontrol)
         self.tab_controls.setObjectName(u"tab_controls")
@@ -364,11 +370,39 @@ class Ui_stagecontrol(object):
         self.verticalLayout_6.addLayout(self.gridLayout)
 
         self.tab_controls.addTab(self.tab_autofocus, "")
+        self.tab_memory = QWidget()
+        self.tab_memory.setObjectName(u"tab_memory")
+        self.verticalLayout_7 = QVBoxLayout(self.tab_memory)
+        self.verticalLayout_7.setObjectName(u"verticalLayout_7")
+        self.verticalLayout_5 = QVBoxLayout()
+        self.verticalLayout_5.setObjectName(u"verticalLayout_5")
+        self.tree_memory = QTreeWidget(self.tab_memory)
+        __qtreewidgetitem = QTreeWidgetItem()
+        __qtreewidgetitem.setText(0, u"1");
+        self.tree_memory.setHeaderItem(__qtreewidgetitem)
+        self.tree_memory.setObjectName(u"tree_memory")
 
-        self.verticalLayout.addWidget(self.tab_controls)
+        self.verticalLayout_5.addWidget(self.tree_memory)
+
+        self.btn_memory_save = QPushButton(self.tab_memory)
+        self.btn_memory_save.setObjectName(u"btn_memory_save")
+
+        self.verticalLayout_5.addWidget(self.btn_memory_save)
+
+        self.btn_memory_goto = QPushButton(self.tab_memory)
+        self.btn_memory_goto.setObjectName(u"btn_memory_goto")
+
+        self.verticalLayout_5.addWidget(self.btn_memory_goto)
 
 
-        self.verticalLayout_3.addLayout(self.verticalLayout)
+        self.verticalLayout_7.addLayout(self.verticalLayout_5)
+
+        self.tab_controls.addTab(self.tab_memory, "")
+
+        self.main_layout.addWidget(self.tab_controls)
+
+
+        self.verticalLayout_3.addLayout(self.main_layout)
 
         QWidget.setTabOrder(self.tab_controls, self.ent_speedxy)
         QWidget.setTabOrder(self.ent_speedxy, self.ent_speedz)
@@ -435,5 +469,8 @@ class Ui_stagecontrol(object):
         self.btn_perform_autofocus.setText(QCoreApplication.translate("stagecontrol", u"Perform auto-focus", None))
         self.btn_stop_autofocus.setText(QCoreApplication.translate("stagecontrol", u"Stop", None))
         self.tab_controls.setTabText(self.tab_controls.indexOf(self.tab_autofocus), QCoreApplication.translate("stagecontrol", u"Auto-focus", None))
+        self.btn_memory_save.setText(QCoreApplication.translate("stagecontrol", u"Store current coordinate", None))
+        self.btn_memory_goto.setText(QCoreApplication.translate("stagecontrol", u"Go to selected coordinate", None))
+        self.tab_controls.setTabText(self.tab_controls.indexOf(self.tab_memory), QCoreApplication.translate("stagecontrol", u"Memory", None))
     # retranslateUi
 

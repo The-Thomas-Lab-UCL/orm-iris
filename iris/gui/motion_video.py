@@ -72,12 +72,6 @@ class BrightfieldController(qw.QWidget,Ui_wdg_brightfield_controller):
             self.main_layout.insertWidget(self._dock_original_index, self.dock_video)
             self.dock_video.setFloating(False)
 
-class StageControl(qw.QWidget, Ui_stagecontrol):
-    def __init__(self,parent=None):
-        super().__init__(parent)
-        self.setupUi(self)
-        self.setLayout(self.verticalLayout)
-
 class CustomButton(qw.QPushButton):
     # Define custom signals for left and right clicks
     rightClicked = Signal()
@@ -624,7 +618,7 @@ class ImageCapture_Worker(QObject):
             self.sig_no_frame.emit()
             self.sig_error.emit('Failed to capture video frame: {}'.format(e))
 
-class Wdg_MotionController(qw.QGroupBox):
+class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
     """
     A class to control the app subwindow for the motion:
     - video output
@@ -659,6 +653,9 @@ class Wdg_MotionController(qw.QGroupBox):
         ):
         # Initialise the class
         super().__init__(parent)
+        self.setupUi(self)
+        self.setLayout(self.main_layout)
+        
         self._stageHub:DataStreamer_StageCam = stageHub
         self._getter_imgcal = getter_imgcal   # A getter method to get the image calibration
         
@@ -669,15 +666,11 @@ class Wdg_MotionController(qw.QGroupBox):
         self.flg_issimulation = flg_issimulation    # If True, request the motion controller to do a simulation instead
         
     # >>> Top layout <<<
-        main_layout = qw.QVBoxLayout(self)  # The main layout for the entire frame
         wdg_video = BrightfieldController(self)  # Top layout compartment for the video
-        self._wdg_stage = StageControl(self)
         self._statbar = qw.QStatusBar(self)  # Status bar at the bottom
         self._statbar.showMessage("Video and stage initialisation")
         
-        main_layout.addWidget(wdg_video)
-        main_layout.addWidget(self._wdg_stage)
-        main_layout.addWidget(self._statbar)
+        self.main_layout.addWidget(self._statbar)
         
     # >>> Video widgets and parameter setup <<<
         self._vid_refreshrate = AppVideoEnum.VIDEOFEED_REFRESH_RATE.value # The refresh rate for the video feed in Hz
@@ -694,7 +687,7 @@ class Wdg_MotionController(qw.QGroupBox):
         self._init_video()
         
         # >> Sub-frame setup <<
-        self._init_video_widgets(stageHub, wdg_video)
+        self._init_video_widgets(wdg_video)
         
     # >>> Motion widgets and parameter setup <<<
         # Set up the variable for the controller later
@@ -716,21 +709,24 @@ class Wdg_MotionController(qw.QGroupBox):
         self._flg_connectionReady_xyz.set()
         
     # >>> Continuous motion controller widgets <<<
-        self._init_xyz_control_widgets(self._wdg_stage)
+        self._init_xyz_control_widgets()
         
     # >>> Jogging configuration widgets <<<
-        self._init_xyz_jog_widgets(self._wdg_stage)
+        self._init_xyz_jog_widgets()
 
     # >>> Go to coordinate widgets <<<
         # Add the entry boxes
-        self._init_gotocoor_widgets(self._wdg_stage)
+        self._init_gotocoor_widgets()
 
     # >>> Motor parameter setup widgets <<<
-        self._init_stageparam_widgets(self._wdg_stage)
+        self._init_stageparam_widgets()
         
     # >>> Auto-focus setup <<<
         self._init_autofocus_worker()
         self._init_autofocus_widgets()
+        
+    # >>> Coordinate memory setup <<<
+        self._init_coor_memory_widgets()
         
     # >>> Status update <<<
         self.sig_statbar_message.connect(self.status_update)
@@ -739,22 +735,19 @@ class Wdg_MotionController(qw.QGroupBox):
         self._init_workers()
         QTimer.singleShot(10, self.resume_video)
 
-    def _init_stageparam_widgets(self, widget:StageControl):
+    def _init_stageparam_widgets(self):
         """
         Initialises the widgets for the motor parameter setup
-
-        Args:
-            widget (StageControl): The widget to add the motor parameter setups to
         """
         # Coordinate reporting
         # > Coordinate reporting
-        self._lbl_coor = widget.lbl_coor_um
+        self._lbl_coor = self.lbl_coor_um
         
         # Add the entry boxes, label, and button for the speed parameter setups
-        self.lbl_speed_xy = widget.lbl_speedxy
-        self.lbl_speed_z = widget.lbl_speedz
-        self.ent_speed_xy = widget.ent_speedxy
-        self.ent_speed_z = widget.ent_speedz
+        self.lbl_speed_xy = self.lbl_speedxy
+        self.lbl_speed_z = self.lbl_speedz
+        self.ent_speed_xy = self.ent_speedxy
+        self.ent_speed_z = self.ent_speedz
         
         # Bind the functions
         self.ent_speed_xy.returnPressed.connect(lambda: self._set_vel_acc_params())
@@ -765,10 +758,10 @@ class Wdg_MotionController(qw.QGroupBox):
         self.ent_speed_z.setEnabled(False)
 
         # Add the entry boxes, label, and button for the jogging parameter setup
-        self.lbl_jog_xy = widget.lbl_stepsizexy
-        self.lbl_jog_z = widget.lbl_stepsizez
-        self.ent_jog_xy = widget.ent_stepxy_um
-        self.ent_jog_z = widget.ent_stepz_um
+        self.lbl_jog_xy = self.lbl_stepsizexy
+        self.lbl_jog_z = self.lbl_stepsizez
+        self.ent_jog_xy = self.ent_stepxy_um
+        self.ent_jog_z = self.ent_stepz_um
 
         # Bind the functions
         self.ent_jog_xy.returnPressed.connect(lambda: self._set_jog_params())
@@ -778,26 +771,20 @@ class Wdg_MotionController(qw.QGroupBox):
         self.ent_jog_xy.setEnabled(False)
         self.ent_jog_z.setEnabled(False)
 
-    def _init_xyz_jog_widgets(self, widget: StageControl):
+    def _init_xyz_jog_widgets(self):
         """
         Initialises the widgets for the jogging configuration
-
-        Args:
-            widget (StageControl): The widget to add the jogging configuration to
         """
-        self._chkbox_jog_enabled = widget.chk_stepmode
+        self._chkbox_jog_enabled = self.chk_stepmode
         self._chkbox_jog_enabled.setChecked(False)  # A flag to check if the jogging is enabled
 
-    def _init_gotocoor_widgets(self, widget:StageControl):
+    def _init_gotocoor_widgets(self):
         """
         Initialises the widgets for the go to coordinate setup
-
-        Args:
-            widget (StageControl): The widget to add the go to coordinate controls to
         """
-        self.ent_coor_x = widget.ent_goto_x_um
-        self.ent_coor_y = widget.ent_goto_y_um
-        self.ent_coor_z = widget.ent_goto_z_um
+        self.ent_coor_x = self.ent_goto_x_um
+        self.ent_coor_y = self.ent_goto_y_um
+        self.ent_coor_z = self.ent_goto_z_um
 
         # Bind: Enter to go to the coordinates
         self.ent_coor_x.returnPressed.connect(lambda: self._move_go_to())
@@ -805,16 +792,13 @@ class Wdg_MotionController(qw.QGroupBox):
         self.ent_coor_z.returnPressed.connect(lambda: self._move_go_to())
         
         # Add the go to button
-        btn_goto = widget.btn_goto
+        btn_goto = self.btn_goto
         btn_goto.released.connect(lambda: self._move_go_to())
         btn_goto.setEnabled(False)
 
-    def _init_xyz_control_widgets(self, widget:StageControl):
+    def _init_xyz_control_widgets(self):
         """
         Initialises the widgets for the xyz stage control.
-
-        Args:
-            widget (StageControl): The widget to add the stage control buttons to
         """
         # Add the buttons (disabled until controller initialisation)
         ## Add the buttons for the xy stage
@@ -846,7 +830,7 @@ class Wdg_MotionController(qw.QGroupBox):
         self.btn_xy_left.set_right_click_function(lambda: self.move_jog('xrev'))
         
         # Layout configuration
-        sslyt_xy_move = widget.lyt_xy
+        sslyt_xy_move = self.lyt_xy
         sslyt_xy_move.addWidget(self.btn_xy_up,0,1)
         sslyt_xy_move.addWidget(self.btn_xy_left,1,0)
         sslyt_xy_move.addWidget(self.btn_xy_right,1,2)
@@ -874,15 +858,15 @@ class Wdg_MotionController(qw.QGroupBox):
         self.btn_z_down.set_right_click_function(lambda: self.move_jog('zrev'))
         
         # Layout configuration
-        sslyt_z_move = widget.lyt_z
+        sslyt_z_move = self.lyt_z
         sslyt_z_move.addWidget(self.btn_z_up)
         sslyt_z_move.addWidget(self.btn_z_down)
         sslyt_z_move.addStretch(1)
         sslyt_z_move.addWidget(self._btn_z_breathing)
         
         ## Home/Calibration buttons
-        self.btn_xy_home = widget.btn_home_xy
-        self.btn_z_home = widget.btn_home_z
+        self.btn_xy_home = self.btn_home_xy
+        self.btn_z_home = self.btn_home_z
         
         self.btn_xy_home.setEnabled(False)
         self.btn_z_home.setEnabled(False)
@@ -890,20 +874,18 @@ class Wdg_MotionController(qw.QGroupBox):
         self.btn_xy_home.released.connect(lambda: self.motion_button_manager('xyhome'))
         self.btn_z_home.released.connect(lambda: self.motion_button_manager('zhome'))
         
-    def _init_video_widgets(self, stageHub: DataStreamer_StageCam, wdg_video: BrightfieldController):
+    def _init_video_widgets(self, wdg_video: BrightfieldController):
         """
         Initialises the video widgets and layouts
 
         Args:
-            stageHub (DataStreamer_StageCam): The stage hub for video streaming
             wdg_video (BrightfieldController): The widget for the video feed
         """
         # > Video
-        lyt = qw.QVBoxLayout()
         self._lbl_video = ResizableQLabel(min_height=1,parent=wdg_video)    # A label to show the video feed
-
-        wdg_video.wdg_video.setLayout(lyt)
-        lyt.addWidget(self._lbl_video)
+        wdg_video.lyt_video.addWidget(self._lbl_video)
+        
+        self.lyt_brightfield.addWidget(wdg_video)
         
         # > Video controllers
         self._btn_videotoggle = wdg_video.btn_camera_onoff
@@ -1480,14 +1462,14 @@ class Wdg_MotionController(qw.QGroupBox):
         """
         Disables all stage control widgets
         """
-        all_widgets = get_all_widgets(self._wdg_stage)
+        all_widgets = get_all_widgets(self)
         [widget.setEnabled(False) for widget in all_widgets if isinstance(widget,(qw.QPushButton,qw.QLineEdit))]
         
     def enable_widgets(self):
         """
         Enables all stage control widgets
         """
-        all_widgets = get_all_widgets(self._wdg_stage)
+        all_widgets = get_all_widgets(self)
         [widget.setEnabled(True) for widget in all_widgets if isinstance(widget,(qw.QPushButton,qw.QLineEdit))]
         
         # Updates the statusbar
@@ -1498,12 +1480,12 @@ class Wdg_MotionController(qw.QGroupBox):
         Initialises the autofocus widgets and layouts
         """
         def store_start_coor(coor:float|None):
-            if coor is not None: self._wdg_stage.spin_start_autofocus.setValue(coor*1e3)
+            if coor is not None: self.spin_start_autofocus.setValue(coor*1e3)
         def store_end_coor(coor:float|None):
-            if coor is not None: self._wdg_stage.spin_end_autofocus.setValue(coor*1e3)
+            if coor is not None: self.spin_end_autofocus.setValue(coor*1e3)
             
-        self._wdg_stage.btn_start_currcoor_autofocus.clicked.connect(lambda: store_start_coor(self.get_coordinates_closest_mm()[2]))
-        self._wdg_stage.btn_end_currcoor_autofocus.clicked.connect(lambda: store_end_coor(self.get_coordinates_closest_mm()[2]))
+        self.btn_start_currcoor_autofocus.clicked.connect(lambda: store_start_coor(self.get_coordinates_closest_mm()[2]))
+        self.btn_end_currcoor_autofocus.clicked.connect(lambda: store_end_coor(self.get_coordinates_closest_mm()[2]))
         
     def get_autofocus_worker(self) -> AutoFocus_Worker:
         """
@@ -1528,18 +1510,18 @@ class Wdg_MotionController(qw.QGroupBox):
             )
             if commit != qw.QMessageBox.Yes: return # pyright: ignore[reportAttributeAccessIssue]
         
-        start = start_mm if start_mm is not None else self._wdg_stage.spin_start_autofocus.value()/1e3
-        end = end_mm if end_mm is not None else self._wdg_stage.spin_end_autofocus.value()/1e3
-        step = step_mm if step_mm is not None else self._wdg_stage.spin_step_autofocus.value()/1e3
+        start = start_mm if start_mm is not None else self.spin_start_autofocus.value()/1e3
+        end = end_mm if end_mm is not None else self.spin_end_autofocus.value()/1e3
+        step = step_mm if step_mm is not None else self.spin_step_autofocus.value()/1e3
         self._sig_req_auto_focus.emit(start,end,step)
         
     def _set_autofocus_running_buttons(self):
-        self._wdg_stage.btn_perform_autofocus.setEnabled(False)
-        self._wdg_stage.btn_stop_autofocus.setEnabled(True)
+        self.btn_perform_autofocus.setEnabled(False)
+        self.btn_stop_autofocus.setEnabled(True)
         
     def _reset_autofocus_buttons(self):
-        self._wdg_stage.btn_perform_autofocus.setEnabled(True)
-        self._wdg_stage.btn_stop_autofocus.setEnabled(False)
+        self.btn_perform_autofocus.setEnabled(True)
+        self.btn_stop_autofocus.setEnabled(False)
         
     def _handle_autofocus_error(self,msg:str):
         qw.QMessageBox.critical(self, 'Autofocus error', f'An error occurred during autofocus:\n{msg}')
@@ -1566,8 +1548,8 @@ class Wdg_MotionController(qw.QGroupBox):
         self._worker_autofocus.sig_error.connect(self._handle_autofocus_error)
         
         # Connect the GUI
-        self._wdg_stage.btn_perform_autofocus.clicked.connect(self.perform_autofocus)
-        self._wdg_stage.btn_stop_autofocus.clicked.connect(self._worker_autofocus.force_stop)
+        self.btn_perform_autofocus.clicked.connect(self.perform_autofocus)
+        self.btn_stop_autofocus.clicked.connect(self._worker_autofocus.force_stop)
         
         
         # Defer thread start until after initialization is complete
@@ -1740,6 +1722,12 @@ class Wdg_MotionController(qw.QGroupBox):
         
         # Triggers the frame capture from the camera
         self.trigger_img_capture()
+    
+    def _init_coor_memory_widgets(self):
+        """
+        Initialises the coordinate memory widgets and layouts
+        """
+        pass
     
     @Slot(str,str)
     def status_update(self,message=None,bg_colour=None):

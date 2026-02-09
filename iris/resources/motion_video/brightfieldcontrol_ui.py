@@ -43,12 +43,10 @@ class Ui_wdg_brightfield_controller(object):
         self.verticalLayout_3.setObjectName(u"verticalLayout_3")
         self.verticalLayout_2 = QVBoxLayout()
         self.verticalLayout_2.setObjectName(u"verticalLayout_2")
-        self.wdg_video = QWidget(self.dockWidgetContents)
-        self.wdg_video.setObjectName(u"wdg_video")
-        sizePolicy.setHeightForWidth(self.wdg_video.sizePolicy().hasHeightForWidth())
-        self.wdg_video.setSizePolicy(sizePolicy)
+        self.lyt_video = QVBoxLayout()
+        self.lyt_video.setObjectName(u"lyt_video")
 
-        self.verticalLayout_2.addWidget(self.wdg_video)
+        self.verticalLayout_2.addLayout(self.lyt_video)
 
         self.horizontalLayout_3 = QHBoxLayout()
         self.horizontalLayout_3.setObjectName(u"horizontalLayout_3")
