@@ -58,11 +58,25 @@
      <layout class="QVBoxLayout" name="lyt_holder_controls"/>
     </item>
     <item>
-     <widget class="QPushButton" name="btn_capture">
-      <property name="text">
-       <string>Perform image tiling</string>
-      </property>
-     </widget>
+     <layout class="QHBoxLayout" name="horizontalLayout_2">
+      <item>
+       <widget class="QPushButton" name="btn_capture">
+        <property name="text">
+         <string>Perform image tiling</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btn_stop">
+        <property name="styleSheet">
+         <string notr="true">background-color:red; color:white</string>
+        </property>
+        <property name="text">
+         <string>Stop</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
     </item>
    </layout>
   </widget>
@@ -70,7 +84,6 @@
  <tabstops>
   <tabstop>chk_lres</tabstop>
   <tabstop>combo_img</tabstop>
-  <tabstop>btn_capture</tabstop>
  </tabstops>
  <resources/>
  <connections/>
