@@ -41,7 +41,7 @@ from iris.resources.motion_video.brightfieldcontrol_ui import Ui_wdg_brightfield
 from iris.resources.motion_video.stagecontrol_ui import Ui_stagecontrol
 
 WAIT_MOVEMENT_TIMEOUT = 10.0  # Timeout for waiting for the movement to finish [s] (reset if the stage is still moving)
-AUTOFOCUS_BLUR_KERNEL_SIZE = 9  # The kernel size for the median blur in the autofocus algorithm. Larger values can help reduce noise but may also reduce the focus score sensitivity.
+AUTOFOCUS_BLUR_KERNEL_SIZE = 1  # The kernel size for the median blur in the autofocus algorithm. Larger values can help reduce noise but may also reduce the focus score sensitivity.
 
 class BrightfieldController(qw.QWidget,Ui_wdg_brightfield_controller):
     def __init__(self,parent=None):
@@ -408,9 +408,10 @@ class AutoFocus_Worker(QObject):
     sig_finished = Signal(float)  # Signal to emit the coordinates with the best focus score
     sig_error = Signal(str)  # Signal to emit an error message
         
-    def __init__(self, ctrl_z: Controller_Z):
+    def __init__(self, ctrl_z:Controller_Z, flg_stop:threading.Event):
         super().__init__()
         self.ctrl_z = ctrl_z
+        self.flg_stop = flg_stop
         
         self._is_waiting_for_img = threading.Event()  # A flag to wait for the image to be captured
         
@@ -419,9 +420,10 @@ class AutoFocus_Worker(QObject):
         self._list_focus_score: list[float] = []  # The list of focus scores corresponding to the z coordinates
         
         self._img_counter = 0
+        self._kernel_size = AUTOFOCUS_BLUR_KERNEL_SIZE
         
-    @Slot()
-    def start(self, start_z_mm:float, end_z_mm:float, step_size_mm:float):
+    @Slot(float,float,float, int)
+    def start(self, start_z_mm:float, end_z_mm:float, step_size_mm:float, kernel_size:int):
         """
         Performs autofocus by moving the z stage and evaluating the focus metric
         
@@ -429,11 +431,16 @@ class AutoFocus_Worker(QObject):
             start_z_mm (float): The starting z position in mm
             end_z_mm (float): The ending z position in mm
             step_size_mm (float): The step size for moving the z stage in mm
+            kernel_size (int): The kernel size for the median blur in the focus score calculation. Larger values can help reduce noise but may also reduce the focus score sensitivity.
         """
         # Generate the list of z coordinates to move to
         try:
+            assert isinstance(kernel_size,int) and kernel_size > 0 and kernel_size % 2 == 1, 'Kernel size must be a positive odd integer'
+            self._kernel_size = kernel_size
+            self.flg_stop.clear()
             print(f'Starting autofocus with start: {start_z_mm} mm, end: {end_z_mm} mm, step size: {step_size_mm} mm')
             self._next_coor_idx = 0
+            if start_z_mm > end_z_mm: step_size_mm= -abs(step_size_mm)
             self._list_coor_mm = np.arange(start_z_mm, end_z_mm + step_size_mm, step_size_mm).tolist()
             self._list_focus_score.clear()
             self._go_to_next_coor()
@@ -444,7 +451,7 @@ class AutoFocus_Worker(QObject):
             return
     
     @Slot()
-    def force_stop(self):
+    def _force_stop(self):
         """
         Force stops the autofocus process and clears the state
         """
@@ -470,7 +477,7 @@ class AutoFocus_Worker(QObject):
         
         try:
             img_gray = cv.cvtColor(np.array(img), cv.COLOR_RGB2GRAY)
-            focus_score = self._calculate_focus_score(img_gray, blur=AUTOFOCUS_BLUR_KERNEL_SIZE)
+            focus_score = self._calculate_focus_score(img_gray, blur=self._kernel_size)
             self._list_focus_score.append(focus_score)
             
             # print(f'Score: {focus_score:.2f} at Z: {self._list_coor_mm[self._next_coor_idx-1]:.3f} mm')
@@ -500,6 +507,11 @@ class AutoFocus_Worker(QObject):
             
             self._list_coor_mm.clear()
             self._list_focus_score.clear()
+            return
+        
+        if self.flg_stop.is_set():
+            self._force_stop()
+            self.sig_error.emit('Autofocus stopped by user')
             return
         
         next_z_mm = self._list_coor_mm[self._next_coor_idx]
@@ -639,7 +651,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
     _sig_go_to_coordinates = Signal(tuple,threading.Event)
     _sig_req_img = Signal(Enum_CamCorrectionType,bool,bool)
     
-    _sig_req_auto_focus = Signal(float,float,float)
+    _sig_req_auto_focus = Signal(float,float,float,int)
     
     def __init__(
         self,
@@ -1513,7 +1525,8 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         start = start_mm if start_mm is not None else self.spin_start_autofocus.value()/1e3
         end = end_mm if end_mm is not None else self.spin_end_autofocus.value()/1e3
         step = step_mm if step_mm is not None else self.spin_step_autofocus.value()/1e3
-        self._sig_req_auto_focus.emit(start,end,step)
+        kernel = self.spin_kernelsize.value()
+        self._sig_req_auto_focus.emit(start,end,step,kernel)
         
     def _set_autofocus_running_buttons(self):
         self.btn_perform_autofocus.setEnabled(False)
@@ -1531,8 +1544,10 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         """
         Initialises the autofocus worker to be used for the autofocus function
         """
+        self._flg_autofocus_stop = threading.Event()
         self._worker_autofocus = AutoFocus_Worker(
             ctrl_z=self.ctrl_z,
+            flg_stop=self._flg_autofocus_stop,
         )
         self._thread_autofocus = QThread(self)
         self._worker_autofocus.moveToThread(self._thread_autofocus)
@@ -1549,8 +1564,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         
         # Connect the GUI
         self.btn_perform_autofocus.clicked.connect(self.perform_autofocus)
-        self.btn_stop_autofocus.clicked.connect(self._worker_autofocus.force_stop)
-        
+        self.btn_stop_autofocus.clicked.connect(self._flg_autofocus_stop.set)
         
         # Defer thread start until after initialization is complete
         self.destroyed.connect(self._thread_autofocus.quit)
