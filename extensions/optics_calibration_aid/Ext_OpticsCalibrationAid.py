@@ -102,8 +102,8 @@ class Ext_OpticsCalibrationAid(Extension_MainWindow):
     _sig_remove_queue = Signal(queue.Queue)
     _sig_perform_continuous_measurement = Signal()
     
-    def __init__(self,master, intermediary: Intermediary) -> None:
-        super().__init__(master, intermediary)
+    def __init__(self,parent, intermediary: Intermediary) -> None:
+        super().__init__(parent, intermediary)
         self.setWindowTitle("Optics Calibration Aid")
         self._spectrometer = Spectrometer()
         self._frm_raman:Frm_Raman = self._intermediary.get_raman_controller_gui()
