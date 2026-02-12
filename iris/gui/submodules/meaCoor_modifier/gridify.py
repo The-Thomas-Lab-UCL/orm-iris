@@ -5,7 +5,7 @@ the coordinates in the X, Y and Z direction.
 
 from PySide6.QtGui import QCloseEvent
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QTimer, QModelIndex
+from PySide6.QtCore import Signal, Slot, QTimer, QModelIndex, QObject, QThread
 
 from enum import Enum
 import threading
@@ -591,10 +591,44 @@ class Gridify_NamingSetup(Ui_gridify_setup_naming, qw.QMainWindow):
         self._programmatic_close = True
         self.close()
         
-class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
+class StageComm_Worker(QObject):
+    """
+    A worker to communicate with the stage to move and set the speed.
+    """
     sig_gotocoor = Signal(tuple, threading.Event)
+    sig_setspeed = Signal(float, float, threading.Event)
+        
+    def __init__(self, ctrl_motion_video: Wdg_MotionController):
+        super().__init__()
+        self._controller = ctrl_motion_video
+        self.sig_gotocoor.connect(ctrl_motion_video.get_goto_worker().work)
+        self.sig_setspeed.connect(ctrl_motion_video.set_vel_relative)
+        
+    @Slot(tuple, bool)
+    def goto_coordinate(self, coor_mm: tuple, maxspeed:bool):
+        try:
+            current_speed = self._controller.get_VelocityParameters()
+            if maxspeed:
+                event_finish_speed = threading.Event()
+                self.sig_setspeed.emit(100.0, 100.0, event_finish_speed) # Set to max speed (example values, adjust as needed)
+                event_finish_speed.wait()
+            
+            event_finish = threading.Event()
+            self.sig_gotocoor.emit(coor_mm, event_finish)
+            event_finish.wait()
+            
+            if maxspeed:
+                self._controller.set_vel_relative(*current_speed)
+                
+        except Exception as e: print(f"Error in goto_coordinate: {e}")
+        
+        
+class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
+    
     sig_list_modified_ROI = Signal(list)
     sig_cancelled = Signal()
+    
+    _sig_gotocoor = Signal(tuple, bool)
     
     def __init__(self, gridify_main:Gridify, list_mapping_coor:list[MeaCoor_mm],
                  list_loc:list[tuple[int, int]], ctrl_motion_video:Wdg_MotionController,
@@ -618,7 +652,6 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
         self._ctrl_motion_video = ctrl_motion_video
         
     # >> Connect signals <<<
-        self.sig_gotocoor.connect(self._ctrl_motion_video.get_goto_worker().work)
         self.sig_list_modified_ROI.connect(self._gridify_main.handle_gridify_completion)
         self.sig_cancelled.connect(self._gridify_main.reset_and_handle_cancellation)
         
@@ -642,12 +675,22 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
         self._last_imgqt = None
         QTimer.singleShot(0, self._auto_video_updater)  # Initial call to start the video feed immediately
         
+    # >>> Goto worker setup <<<
+        self._init_goto_worker()
+        
     # >>> Autofocus setup <<<
         self._init_autofocus_workers()
         self.btn_autofocus.clicked.connect(self._start_autofocus)
         
     # >>> Others <<<
         self._programmatic_close = False
+        
+    def _init_goto_worker(self):
+        self._thread_goto = QThread()
+        self._goto_worker = StageComm_Worker(self._ctrl_motion_video)
+        self._sig_gotocoor.connect(self._goto_worker.goto_coordinate)
+        self._goto_worker.moveToThread(self._thread_goto)
+        self._thread_goto.start()
         
     def _init_autofocus_workers(self):
         self._autofocus_worker = self._ctrl_motion_video.get_autofocus_worker()
@@ -928,7 +971,7 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
         target_coor = (target_coor[0], target_coor[1], target_coor[2])
         
         try:
-            self.sig_gotocoor.emit(target_coor, threading.Event())
+            self._sig_gotocoor.emit(target_coor, self.chk_maxspeed.isChecked())
         except Exception as e:
             qw.QMessageBox.critical(self, "Error", f"Failed to move to coordinates: {e}")
             return
