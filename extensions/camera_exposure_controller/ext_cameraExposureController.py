@@ -10,19 +10,9 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(SCRIPT_DIR))
     sys.path.insert(0, os.path.dirname(EXT_DIR))
 
-from PySide6.QtGui import QCloseEvent
 import PySide6.QtWidgets as qw
 from PySide6.QtCore import Qt # For context
-from PySide6.QtCore import Signal, Slot, QTimer, QObject
-
-import threading
-import queue
-import time
-
-import matplotlib.pyplot as plt
-from matplotlib.axes import Axes
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-import pandas as pd
+from PySide6.QtCore import Slot
 
 from extensions.extension_template import Extension_MainWindow
 from extensions.extension_intermediary import Ext_DataIntermediary as Intermediary
@@ -47,6 +37,7 @@ class Ext_CameraExposureController(Ui_camera_exposure_controller, Extension_Main
         self.btn_preset2.clicked.connect(self._set_preset2_time)
         
         self.chk_stayOnTop.stateChanged.connect(self._toggle_always_on_top)
+        self._toggle_always_on_top() # Set the initial state of the always on top checkbox
         
         try:
             current_exposure_time_us = self._camera.get_exposure_time_us()
@@ -56,6 +47,10 @@ class Ext_CameraExposureController(Ui_camera_exposure_controller, Extension_Main
             qw.QMessageBox.warning(self,'Error getting current exposure time',f'Error getting the current exposure time from the camera: {e}')
         
         self._init_signals()
+        
+    def closeEvent(self, event):
+        event.ignore()
+        self.hide()
         
     def _show_instruction(self):
         qw.QMessageBox.information(self,'Camera Exposure Controller Instructions',self.msg_instruction)
