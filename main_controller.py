@@ -46,7 +46,7 @@ from main_analyser import main_analyser
 
 from extensions.extension_intermediary import Ext_DataIntermediary
 from extensions.extension_template import Extension_MainWindow
-from extensions.optics_calibration_aid.Ext_OpticsCalibrationAid import Ext_OpticsCalibrationAid
+from extensions.optics_calibration_aid.ext_opticsCalibrationAid import Ext_OpticsCalibrationAid
 from extensions.camera_exposure_controller.ext_cameraExposureController import Ext_CameraExposureController
 
 # NOTE: controller classes and enums imported lazily inside MainWindow_Controller.__init__
