@@ -15,8 +15,9 @@ import queue
 
 from PIL import Image, ImageDraw, ImageFont, ImageQt
 import numpy as np
+import cv2 as cv
 
-from typing import Callable, Any
+from typing import Callable, Any, Literal
 
 import time
 
@@ -30,7 +31,7 @@ from iris.utils.general import validator_float_greaterThanZero, messagebox_reque
 
 from iris.data.calibration_objective import ImgMea_Cal
 
-from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam
+from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam, Enum_CamCorrectionType
 
 from iris.gui import AppVideoEnum
 from iris.controllers import ControllerConfigEnum
@@ -40,6 +41,7 @@ from iris.resources.motion_video.brightfieldcontrol_ui import Ui_wdg_brightfield
 from iris.resources.motion_video.stagecontrol_ui import Ui_stagecontrol
 
 WAIT_MOVEMENT_TIMEOUT = 10.0  # Timeout for waiting for the movement to finish [s] (reset if the stage is still moving)
+AUTOFOCUS_BLUR_KERNEL_SIZE = 1  # The kernel size for the median blur in the autofocus algorithm. Larger values can help reduce noise but may also reduce the focus score sensitivity.
 
 class BrightfieldController(qw.QWidget,Ui_wdg_brightfield_controller):
     def __init__(self,parent=None):
@@ -69,12 +71,6 @@ class BrightfieldController(qw.QWidget,Ui_wdg_brightfield_controller):
             self.main_layout.insertWidget(self._dock_original_index, self.dock_video)
             self.main_layout.insertWidget(self._dock_original_index, self.dock_video)
             self.dock_video.setFloating(False)
-
-class StageControl(qw.QWidget, Ui_stagecontrol):
-    def __init__(self,parent=None):
-        super().__init__(parent)
-        self.setupUi(self)
-        self.setLayout(self.verticalLayout)
 
 class CustomButton(qw.QPushButton):
     # Define custom signals for left and right clicks
@@ -401,7 +397,240 @@ class Motion_GoToCoor_Worker(QObject):
 
 #         q_ret.put((speed_xy,speed_z))
 
-class Wdg_MotionController(qw.QGroupBox):
+class AutoFocus_Worker(QObject):
+    """
+    A worker to perform autofocus by moving the z stage and evaluating the focus metric.
+    To be used in conjunction with the video feed worker to get the images for focus evaluation.
+    The video feed worker has to continuously emit the captured images, and this worker will process them when it is waiting for an image to be captured.
+    Otherwise this autofocus worker will continue to be idle, waiting for the next image to be captured.
+    """
+    sig_started = Signal()  # Signal to indicate autofocus has started
+    sig_finished = Signal(float)  # Signal to emit the coordinates with the best focus score
+    sig_error = Signal(str)  # Signal to emit an error message
+        
+    def __init__(self, ctrl_z:Controller_Z, flg_stop:threading.Event):
+        super().__init__()
+        self.ctrl_z = ctrl_z
+        self.flg_stop = flg_stop
+        
+        self._is_waiting_for_img = threading.Event()  # A flag to wait for the image to be captured
+        
+        self._list_coor_mm: list[float] = []  # The list of z coordinates in mm
+        self._next_coor_idx: int = 0  # The index of the next z coordinate to move to
+        self._list_focus_score: list[float] = []  # The list of focus scores corresponding to the z coordinates
+        
+        self._img_counter = 0
+        self._kernel_size = AUTOFOCUS_BLUR_KERNEL_SIZE
+        
+    @Slot(float,float,float, int)
+    def start(self, start_z_mm:float, end_z_mm:float, step_size_mm:float, kernel_size:int):
+        """
+        Performs autofocus by moving the z stage and evaluating the focus metric
+        
+        Args:
+            start_z_mm (float): The starting z position in mm
+            end_z_mm (float): The ending z position in mm
+            step_size_mm (float): The step size for moving the z stage in mm
+            kernel_size (int): The kernel size for the median blur in the focus score calculation. Larger values can help reduce noise but may also reduce the focus score sensitivity.
+        """
+        # Generate the list of z coordinates to move to
+        try:
+            assert isinstance(kernel_size,int) and kernel_size > 0 and kernel_size % 2 == 1, 'Kernel size must be a positive odd integer'
+            self._kernel_size = kernel_size
+            self.flg_stop.clear()
+            print(f'Starting autofocus with start: {start_z_mm} mm, end: {end_z_mm} mm, step size: {step_size_mm} mm')
+            self._next_coor_idx = 0
+            if start_z_mm > end_z_mm: step_size_mm= -abs(step_size_mm)
+            self._list_coor_mm = np.arange(start_z_mm, end_z_mm + step_size_mm, step_size_mm).tolist()
+            self._list_focus_score.clear()
+            self._go_to_next_coor()
+            
+            self.sig_started.emit()
+        except Exception as e:
+            self.sig_error.emit('Invalid autofocus parameters: {}'.format(e))
+            return
+    
+    @Slot()
+    def _force_stop(self):
+        """
+        Force stops the autofocus process and clears the state
+        """
+        self._list_coor_mm.clear()
+        self._list_focus_score.clear()
+        self._is_waiting_for_img.clear()
+        
+    def _calculate_focus_score(self, image, blur):
+        image_filtered = cv.medianBlur(image, blur)
+        laplacian = cv.Laplacian(image_filtered, cv.CV_64F)
+        focus_score = laplacian.var()
+        return focus_score
+    
+    @Slot(Image.Image)
+    def process_image(self, img:Image.Image):
+        if not isinstance(img,Image.Image): return
+        if not self._is_waiting_for_img.is_set(): return
+        if self._img_counter%2 == 0: self._img_counter += 1; return # Process every other image to allow the stage to settle
+        
+        # Prep for the next image
+        self._img_counter = 0
+        self._is_waiting_for_img.clear()
+        
+        try:
+            img_gray = cv.cvtColor(np.array(img), cv.COLOR_RGB2GRAY)
+            focus_score = self._calculate_focus_score(img_gray, blur=self._kernel_size)
+            self._list_focus_score.append(focus_score)
+            
+            # print(f'Score: {focus_score:.2f} at Z: {self._list_coor_mm[self._next_coor_idx-1]:.3f} mm')
+            self._go_to_next_coor()
+        except Exception as e:
+            self.sig_error.emit('Error processing image: {}'.format(e))
+            
+    def _go_to_next_coor(self):
+        # print('Moving to next coordinate index:', self._next_coor_idx)
+        if self._next_coor_idx >= len(self._list_coor_mm):
+            # Finished all coordinates, emit the best focus score
+            if len(self._list_focus_score) == 0:
+                self.sig_error.emit('No focus scores calculated')
+                return
+            
+            # Find the coordinate with the best focus score
+            best_score = max(self._list_focus_score)
+            best_index = self._list_focus_score.index(best_score)
+            best_coor = self._list_coor_mm[best_index]
+            
+            # Move to the best coordinate
+            self.ctrl_z.move_direct(best_coor)
+            
+            print('Autofocus finished. Best Z: {:.3f} mm with focus score: {:.2f}'.format(best_coor, best_score))
+            
+            self.sig_finished.emit(best_coor)
+            
+            self._list_coor_mm.clear()
+            self._list_focus_score.clear()
+            return
+        
+        if self.flg_stop.is_set():
+            self._force_stop()
+            self.sig_error.emit('Autofocus stopped by user')
+            return
+        
+        next_z_mm = self._list_coor_mm[self._next_coor_idx]
+        self.ctrl_z.move_direct(next_z_mm)
+        self._is_waiting_for_img.set()
+        self._next_coor_idx += 1
+        
+        
+class ImageCapture_Worker(QObject):
+    """
+    A worker to continuously update the video feed by capturing frames from the camera and applying corrections
+    """
+    sig_qpixmap = Signal(QPixmap)  # Signal to emit the new frame as a QPixmap
+    sig_img = Signal(Image.Image)  # Signal to emit the new frame as a PIL Image
+    sig_no_frame = Signal()  # Signal to emit when no frame is captured
+    sig_error = Signal(str)  # Signal to emit an error message
+    
+    def __init__(self, camera_controller:CameraController, stageHub:DataStreamer_StageCam, getter_imgcal:Callable[[],ImgMea_Cal]):
+        super().__init__()
+        self._camera_controller = camera_controller
+        self._stageHub = stageHub
+        self._getter_imgcal = getter_imgcal
+        
+    def _overlay_scalebar(self,img:Image.Image) -> Image.Image:
+        """
+        Overlays a scalebar on the image based on the image calibration file
+
+        Args:
+            img (Image.Image): The image to be overlayed with the scalebar
+
+        Returns:
+            Image.Image: The image with the scalebar overlayed
+        """
+        cal = self._getter_imgcal()
+        
+        if not isinstance(cal,ImgMea_Cal) or not cal.check_calibration_set():
+            return img
+        
+        if not isinstance(img,Image.Image): return img
+        
+        scalex = 1/cal.scale_x_pixelPerMm
+        scalebar_length = int(ControllerConfigEnum.SCALEBAR_LENGTH_RATIO.value * img.size[0]) # in pixel
+        scalebar_height = int(ControllerConfigEnum.SCALEBAR_HEIGHT_RATIO.value * img.size[1]) # in pixel
+        
+        length_mm = scalebar_length * scalex
+        font = ControllerConfigEnum.SCALEBAR_FONT.value
+        font_size = int(scalebar_length/10 * ControllerConfigEnum.SCALEBAR_FONT_RATIO.value)
+        line_width = int(scalebar_length/50 * ControllerConfigEnum.SCALEBAR_FONT_RATIO.value)
+        
+        line_offset = scalebar_length/10
+        
+        box_length = scalebar_length + 2*line_offset
+        box_height = scalebar_height + 2*line_offset
+        
+        draw = ImageDraw.Draw(img)
+        # Draw a box around the scalebar, taking consideration of the font size height
+        draw.rectangle([(img.size[0]-box_length, img.size[1]-box_height),
+                        (img.size[0], img.size[1])], fill=(0,0,0))
+        draw.line([(img.size[0]-scalebar_length-line_offset, img.size[1]-line_offset),
+                   (img.size[0]-line_offset, img.size[1]-line_offset)],
+                  fill=(255,255,255), width=line_width)
+        
+        try: text_params = {'text':'{:.0f} µm'.format(abs(length_mm*1e3)), 'font':ImageFont.truetype(font,font_size)}
+        except Exception: raise ValueError('Scalebar font file not found. Please check the font path in the configuration.')
+        
+        text_length = draw.textlength(**text_params)
+        
+        draw.text((img.size[0]-box_length/2-text_length/2, img.size[1]-line_offset*2-line_width-font_size/2),
+                  align='left', fill=(255,255,255), **text_params)
+        return img
+    
+    def _draw_crosshair(self, img:Image.Image) -> Image.Image:
+        width, height = img.size
+        draw = ImageDraw.Draw(img)
+        line_color = (255, 0, 0)
+        # Draw vertical line
+        draw.line([(width/2, 0), (width/2, height)], fill=line_color, width=3)
+        # Draw horizontal line
+        draw.line([(0, height/2), (width, height/2)], fill=line_color, width=3)
+        return img
+    
+    @Slot(Enum_CamCorrectionType, bool, bool)
+    def grab_image(self, img_corr:Enum_CamCorrectionType, scalebar:bool, crosshair:bool):
+        """
+        Updates the video feed, taking in mind Tkinter's single thread.
+        Use in a worker thread, DO NOT use in the mainthread!!!
+        
+        Args:
+            img_corr (Enum_CamCorrectionType): The type of image correction to be applied to the captured frame
+            scalebar (bool): Whether to overlay a scalebar on the image
+            crosshair (bool): Whether to overlay a crosshair on the image
+        """
+        if not img_corr in Enum_CamCorrectionType:
+            self.sig_error.emit('Invalid video correction type: {}'.format(img_corr))
+            return
+        
+        try:
+            if img_corr == Enum_CamCorrectionType.RAW: img = self._camera_controller.img_capture()
+            else: img:Image.Image = self._stageHub.get_image(request=img_corr)
+            
+            if not isinstance(img,Image.Image):
+                self.sig_no_frame.emit()
+                return
+            
+            # Add a scalebar to it
+            img = self._overlay_scalebar(img) if scalebar else img
+            if crosshair: img = self._draw_crosshair(img)
+            
+            new_frame:QPixmap = ImageQt.toqpixmap(img)
+            
+            self.sig_img.emit(img)
+            self.sig_qpixmap.emit(new_frame)
+            
+        except Exception as e:
+            print(f'Video feed failed: {e}')
+            self.sig_no_frame.emit()
+            self.sig_error.emit('Failed to capture video frame: {}'.format(e))
+
+class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
     """
     A class to control the app subwindow for the motion:
     - video output
@@ -420,6 +649,9 @@ class Wdg_MotionController(qw.QGroupBox):
     sig_breathing_stopped = Signal()
     
     _sig_go_to_coordinates = Signal(tuple,threading.Event)
+    _sig_req_img = Signal(Enum_CamCorrectionType,bool,bool)
+    
+    _sig_req_auto_focus = Signal(float,float,float,int)
     
     def __init__(
         self,
@@ -433,6 +665,9 @@ class Wdg_MotionController(qw.QGroupBox):
         ):
         # Initialise the class
         super().__init__(parent)
+        self.setupUi(self)
+        self.setLayout(self.main_layout)
+        
         self._stageHub:DataStreamer_StageCam = stageHub
         self._getter_imgcal = getter_imgcal   # A getter method to get the image calibration
         
@@ -443,26 +678,28 @@ class Wdg_MotionController(qw.QGroupBox):
         self.flg_issimulation = flg_issimulation    # If True, request the motion controller to do a simulation instead
         
     # >>> Top layout <<<
-        main_layout = qw.QVBoxLayout(self)  # The main layout for the entire frame
         wdg_video = BrightfieldController(self)  # Top layout compartment for the video
-        self._wdg_stage = StageControl(self)
         self._statbar = qw.QStatusBar(self)  # Status bar at the bottom
         self._statbar.showMessage("Video and stage initialisation")
         
-        main_layout.addWidget(wdg_video)
-        main_layout.addWidget(self._wdg_stage)
-        main_layout.addWidget(self._statbar)
+        self.main_layout.addWidget(self._statbar)
         
     # >>> Video widgets and parameter setup <<<
+        self._vid_refreshrate = AppVideoEnum.VIDEOFEED_REFRESH_RATE.value # The refresh rate for the video feed in Hz
         self._camera_ctrl:CameraController = self._stageHub.get_camera_controller()
         self._video_height = ControllerConfigEnum.VIDEOFEED_HEIGHT.value    # Video feed height in pixel
-        self._flg_isvideorunning = False         # A flag to turn on/off the video
+        self._iscapturing = threading.Event()  # A flag to prevent multiple concurrent video capture
+        self._flg_pause_video = threading.Event()  # A flag to check if the video feed is running
+        self._time_last_frame = 0.0   # The timestamp of the last frame captured, used to limit the frame rate
+        self._time_last_img = 0.0     # The timestamp of the last image received
         self._currentImage:Image.Image|None = None   # The current image to be displayed
         self._currentFrame = None               # The current frame to be displayed
-        self._flg_isNewFrmReady = threading.Event()  # A flag to wait for the frame to be captured
+        
+        self._init_video_worker()
+        self._init_video()
         
         # >> Sub-frame setup <<
-        self._init_video_widgets(stageHub, wdg_video)
+        self._init_video_widgets(wdg_video)
         
     # >>> Motion widgets and parameter setup <<<
         # Set up the variable for the controller later
@@ -484,41 +721,45 @@ class Wdg_MotionController(qw.QGroupBox):
         self._flg_connectionReady_xyz.set()
         
     # >>> Continuous motion controller widgets <<<
-        self._init_xyz_control_widgets(self._wdg_stage)
+        self._init_xyz_control_widgets()
         
     # >>> Jogging configuration widgets <<<
-        self._init_xyz_jog_widgets(self._wdg_stage)
+        self._init_xyz_jog_widgets()
 
     # >>> Go to coordinate widgets <<<
         # Add the entry boxes
-        self._init_gotocoor_widgets(self._wdg_stage)
+        self._init_gotocoor_widgets()
 
     # >>> Motor parameter setup widgets <<<
-        self._init_stageparam_widgets(self._wdg_stage)
+        self._init_stageparam_widgets()
+        
+    # >>> Auto-focus setup <<<
+        self._init_autofocus_worker()
+        self._init_autofocus_widgets()
+        
+    # >>> Coordinate memory setup <<<
+        self._init_coor_memory_widgets()
         
     # >>> Status update <<<
         self.sig_statbar_message.connect(self.status_update)
         self.sig_statbar_message.emit('Initialising the motion controllers','yellow')
         self._motion_controller_initialisation()
         self._init_workers()
-        QTimer.singleShot(10, self.video_initialise)
+        QTimer.singleShot(10, self.resume_video)
 
-    def _init_stageparam_widgets(self, widget:StageControl):
+    def _init_stageparam_widgets(self):
         """
         Initialises the widgets for the motor parameter setup
-
-        Args:
-            widget (StageControl): The widget to add the motor parameter setups to
         """
         # Coordinate reporting
         # > Coordinate reporting
-        self._lbl_coor = widget.lbl_coor_um
+        self._lbl_coor = self.lbl_coor_um
         
         # Add the entry boxes, label, and button for the speed parameter setups
-        self.lbl_speed_xy = widget.lbl_speedxy
-        self.lbl_speed_z = widget.lbl_speedz
-        self.ent_speed_xy = widget.ent_speedxy
-        self.ent_speed_z = widget.ent_speedz
+        self.lbl_speed_xy = self.lbl_speedxy
+        self.lbl_speed_z = self.lbl_speedz
+        self.ent_speed_xy = self.ent_speedxy
+        self.ent_speed_z = self.ent_speedz
         
         # Bind the functions
         self.ent_speed_xy.returnPressed.connect(lambda: self._set_vel_acc_params())
@@ -529,10 +770,10 @@ class Wdg_MotionController(qw.QGroupBox):
         self.ent_speed_z.setEnabled(False)
 
         # Add the entry boxes, label, and button for the jogging parameter setup
-        self.lbl_jog_xy = widget.lbl_stepsizexy
-        self.lbl_jog_z = widget.lbl_stepsizez
-        self.ent_jog_xy = widget.ent_stepxy_um
-        self.ent_jog_z = widget.ent_stepz_um
+        self.lbl_jog_xy = self.lbl_stepsizexy
+        self.lbl_jog_z = self.lbl_stepsizez
+        self.ent_jog_xy = self.ent_stepxy_um
+        self.ent_jog_z = self.ent_stepz_um
 
         # Bind the functions
         self.ent_jog_xy.returnPressed.connect(lambda: self._set_jog_params())
@@ -542,26 +783,20 @@ class Wdg_MotionController(qw.QGroupBox):
         self.ent_jog_xy.setEnabled(False)
         self.ent_jog_z.setEnabled(False)
 
-    def _init_xyz_jog_widgets(self, widget: StageControl):
+    def _init_xyz_jog_widgets(self):
         """
         Initialises the widgets for the jogging configuration
-
-        Args:
-            widget (StageControl): The widget to add the jogging configuration to
         """
-        self._chkbox_jog_enabled = widget.chk_stepmode
+        self._chkbox_jog_enabled = self.chk_stepmode
         self._chkbox_jog_enabled.setChecked(False)  # A flag to check if the jogging is enabled
 
-    def _init_gotocoor_widgets(self, widget:StageControl):
+    def _init_gotocoor_widgets(self):
         """
         Initialises the widgets for the go to coordinate setup
-
-        Args:
-            widget (StageControl): The widget to add the go to coordinate controls to
         """
-        self.ent_coor_x = widget.ent_goto_x_um
-        self.ent_coor_y = widget.ent_goto_y_um
-        self.ent_coor_z = widget.ent_goto_z_um
+        self.ent_coor_x = self.ent_goto_x_um
+        self.ent_coor_y = self.ent_goto_y_um
+        self.ent_coor_z = self.ent_goto_z_um
 
         # Bind: Enter to go to the coordinates
         self.ent_coor_x.returnPressed.connect(lambda: self._move_go_to())
@@ -569,16 +804,13 @@ class Wdg_MotionController(qw.QGroupBox):
         self.ent_coor_z.returnPressed.connect(lambda: self._move_go_to())
         
         # Add the go to button
-        btn_goto = widget.btn_goto
+        btn_goto = self.btn_goto
         btn_goto.released.connect(lambda: self._move_go_to())
         btn_goto.setEnabled(False)
 
-    def _init_xyz_control_widgets(self, widget:StageControl):
+    def _init_xyz_control_widgets(self):
         """
         Initialises the widgets for the xyz stage control.
-
-        Args:
-            widget (StageControl): The widget to add the stage control buttons to
         """
         # Add the buttons (disabled until controller initialisation)
         ## Add the buttons for the xy stage
@@ -610,7 +842,7 @@ class Wdg_MotionController(qw.QGroupBox):
         self.btn_xy_left.set_right_click_function(lambda: self.move_jog('xrev'))
         
         # Layout configuration
-        sslyt_xy_move = widget.lyt_xy
+        sslyt_xy_move = self.lyt_xy
         sslyt_xy_move.addWidget(self.btn_xy_up,0,1)
         sslyt_xy_move.addWidget(self.btn_xy_left,1,0)
         sslyt_xy_move.addWidget(self.btn_xy_right,1,2)
@@ -638,15 +870,15 @@ class Wdg_MotionController(qw.QGroupBox):
         self.btn_z_down.set_right_click_function(lambda: self.move_jog('zrev'))
         
         # Layout configuration
-        sslyt_z_move = widget.lyt_z
+        sslyt_z_move = self.lyt_z
         sslyt_z_move.addWidget(self.btn_z_up)
         sslyt_z_move.addWidget(self.btn_z_down)
         sslyt_z_move.addStretch(1)
         sslyt_z_move.addWidget(self._btn_z_breathing)
         
         ## Home/Calibration buttons
-        self.btn_xy_home = widget.btn_home_xy
-        self.btn_z_home = widget.btn_home_z
+        self.btn_xy_home = self.btn_home_xy
+        self.btn_z_home = self.btn_home_z
         
         self.btn_xy_home.setEnabled(False)
         self.btn_z_home.setEnabled(False)
@@ -654,25 +886,23 @@ class Wdg_MotionController(qw.QGroupBox):
         self.btn_xy_home.released.connect(lambda: self.motion_button_manager('xyhome'))
         self.btn_z_home.released.connect(lambda: self.motion_button_manager('zhome'))
         
-    def _init_video_widgets(self, stageHub: DataStreamer_StageCam, wdg_video: BrightfieldController):
+    def _init_video_widgets(self, wdg_video: BrightfieldController):
         """
         Initialises the video widgets and layouts
 
         Args:
-            stageHub (DataStreamer_StageCam): The stage hub for video streaming
             wdg_video (BrightfieldController): The widget for the video feed
         """
         # > Video
-        lyt = qw.QVBoxLayout()
         self._lbl_video = ResizableQLabel(min_height=1,parent=wdg_video)    # A label to show the video feed
-
-        wdg_video.wdg_video.setLayout(lyt)
-        lyt.addWidget(self._lbl_video)
+        wdg_video.lyt_video.addWidget(self._lbl_video)
+        
+        self.lyt_brightfield.addWidget(wdg_video)
         
         # > Video controllers
         self._btn_videotoggle = wdg_video.btn_camera_onoff
         self._btn_reinit_conn = wdg_video.pushButton_2
-        self._btn_videotoggle.released.connect(lambda: self.video_initialise())
+        self._btn_videotoggle.released.connect(lambda: self.resume_video())
         # self._btn_reinit_conn.released.connect(lambda: self.reinitialise_connection('camera'))
         self._btn_reinit_conn.setEnabled(False)
         self._btn_videotoggle.setStyleSheet('background-color: yellow')
@@ -695,7 +925,7 @@ class Wdg_MotionController(qw.QGroupBox):
         # Video corrections
         self._dict_vidcorrection = {}
         self._combo_vidcorrection = wdg_video.combo_image_correction
-        self._combo_vidcorrection.addItems(list(stageHub.Enum_CamCorrectionType.__members__))
+        self._combo_vidcorrection.addItems(list(Enum_CamCorrectionType.__members__))
         self._combo_vidcorrection.setCurrentIndex(0)
         
     
@@ -835,7 +1065,9 @@ class Wdg_MotionController(qw.QGroupBox):
             qw.QMessageBox.critical(main_window, 'Error', 'Camera does not support exposure time setting')
             return
         try:
-            init_exposure_time_ms = self._camera_ctrl.get_exposure_time_us()/1e3
+            init_exposure_time_ms = self._camera_ctrl.get_exposure_time_us()
+            if init_exposure_time_ms is None: raise ValueError('Failed to get current exposure time from the camera')
+            init_exposure_time_ms = init_exposure_time_ms/1e3
             new_exposure_time = messagebox_request_input(
                 parent=main_window,
                 title='Set exposure time',
@@ -883,39 +1115,6 @@ class Wdg_MotionController(qw.QGroupBox):
         self._chkbox_crosshair.setChecked(False)
         self._chkbox_scalebar.setChecked(False)
         return
-        
-    def video_terminate(self):
-        self._flg_isvideorunning = False
-        # By turning this flag off, the video autoupdater should automatically terminate, 
-        # disconnect from the camera, and resets all the parameters for next use.
-        
-        # Turn the button back into a camera on button
-        self._btn_videotoggle.released.disconnect()
-        self._btn_videotoggle.setText('Turn camera ON')
-        self._btn_videotoggle.released.connect(lambda: self.video_initialise())
-        self._btn_videotoggle.setStyleSheet('background-color: yellow')
-    
-    def video_initialise(self):
-        """
-        Initialises the video:
-        1. Define the controller
-        2. Sets the first frame
-        3. Starts the multi-threading to start the autoupdater
-        """
-        try:
-            if self._flg_isvideorunning: return
-            # Initialise the video capture
-            ## camera initialisation moved to self.video_update for responsiveness
-            # Start multithreading for the video to constantly update the captured frame
-            threading.Thread(target=self.video_update, daemon=True).start()
-            
-            # Turn the button into a video stop button
-            self._btn_videotoggle.released.disconnect()
-            self._btn_videotoggle.setText('Turn camera OFF')
-            self._btn_videotoggle.released.connect(lambda: self.video_terminate())
-            self._btn_videotoggle.setStyleSheet('background-color: red')
-        except Exception as e:
-            print(f'Video feed cannot start:\n{e}')
         
     def _start_breathing_z(self) -> None:
         """
@@ -1275,31 +1474,118 @@ class Wdg_MotionController(qw.QGroupBox):
         """
         Disables all stage control widgets
         """
-        all_widgets = get_all_widgets(self._wdg_stage)
+        all_widgets = get_all_widgets(self)
         [widget.setEnabled(False) for widget in all_widgets if isinstance(widget,(qw.QPushButton,qw.QLineEdit))]
         
     def enable_widgets(self):
         """
         Enables all stage control widgets
         """
-        all_widgets = get_all_widgets(self._wdg_stage)
+        all_widgets = get_all_widgets(self)
         [widget.setEnabled(True) for widget in all_widgets if isinstance(widget,(qw.QPushButton,qw.QLineEdit))]
         
         # Updates the statusbar
         self.sig_statbar_message.emit('Stage controller ready', None)
+        
+    def _init_autofocus_widgets(self):
+        """
+        Initialises the autofocus widgets and layouts
+        """
+        def store_start_coor(coor:float|None):
+            if coor is not None: self.spin_start_autofocus.setValue(coor*1e3)
+        def store_end_coor(coor:float|None):
+            if coor is not None: self.spin_end_autofocus.setValue(coor*1e3)
+            
+        self.btn_start_currcoor_autofocus.clicked.connect(lambda: store_start_coor(self.get_coordinates_closest_mm()[2]))
+        self.btn_end_currcoor_autofocus.clicked.connect(lambda: store_end_coor(self.get_coordinates_closest_mm()[2]))
+        
+    def get_autofocus_worker(self) -> AutoFocus_Worker:
+        """
+        Returns the autofocus worker to be used for the autofocus function
 
-    def get_current_image(self, wait_newimage:bool=False) -> Image.Image|None:
+        Returns:
+            AutoFocus_Worker: The autofocus worker to perform the autofocus function.
+        """
+        return self._worker_autofocus
+        
+    def perform_autofocus(self, bypass_confirmation:bool=False, start_mm:float|None=None, end_mm:float|None=None,
+                          step_mm:float|None=None):
+        if not bypass_confirmation:
+            commit = qw.QMessageBox.question(
+                self,
+                'Perform autofocus',
+                'Are you sure you want to perform autofocus with the current parameters?'
+                'This will move the z-stage automatically, which may RISK CRASHING the objective into the sample if the parameters are not set correctly!'
+                ,
+                qw.QMessageBox.Yes | qw.QMessageBox.No, # pyright: ignore[reportAttributeAccessIssue]
+                qw.QMessageBox.No # pyright: ignore[reportAttributeAccessIssue]
+            )
+            if commit != qw.QMessageBox.Yes: return # pyright: ignore[reportAttributeAccessIssue]
+        
+        start = start_mm if start_mm is not None else self.spin_start_autofocus.value()/1e3
+        end = end_mm if end_mm is not None else self.spin_end_autofocus.value()/1e3
+        step = step_mm if step_mm is not None else self.spin_step_autofocus.value()/1e3
+        kernel = self.spin_kernelsize.value()
+        self._sig_req_auto_focus.emit(start,end,step,kernel)
+        
+    def _set_autofocus_running_buttons(self):
+        self.btn_perform_autofocus.setEnabled(False)
+        self.btn_stop_autofocus.setEnabled(True)
+        
+    def _reset_autofocus_buttons(self):
+        self.btn_perform_autofocus.setEnabled(True)
+        self.btn_stop_autofocus.setEnabled(False)
+        
+    def _handle_autofocus_error(self,msg:str):
+        qw.QMessageBox.critical(self, 'Autofocus error', f'An error occurred during autofocus:\n{msg}')
+        self._reset_autofocus_buttons()
+        
+    def _init_autofocus_worker(self):
+        """
+        Initialises the autofocus worker to be used for the autofocus function
+        """
+        self._flg_autofocus_stop = threading.Event()
+        self._worker_autofocus = AutoFocus_Worker(
+            ctrl_z=self.ctrl_z,
+            flg_stop=self._flg_autofocus_stop,
+        )
+        self._thread_autofocus = QThread(self)
+        self._worker_autofocus.moveToThread(self._thread_autofocus)
+        self._thread_autofocus.finished.connect(self._worker_autofocus.deleteLater)
+        self._thread_autofocus.finished.connect(self._thread_autofocus.deleteLater)
+        QTimer.singleShot(0, self._thread_autofocus.start)
+        
+        # Connect the signal to allow the autofocus worker to get the images from the video worker
+        self._worker_img_capture.sig_img.connect(self._worker_autofocus.process_image)
+        self._sig_req_auto_focus.connect(self._worker_autofocus.start)
+        self._worker_autofocus.sig_finished.connect(self._reset_autofocus_buttons)
+        self._worker_autofocus.sig_started.connect(self._set_autofocus_running_buttons)
+        self._worker_autofocus.sig_error.connect(self._handle_autofocus_error)
+        
+        # Connect the GUI
+        self.btn_perform_autofocus.clicked.connect(self.perform_autofocus)
+        self.btn_stop_autofocus.clicked.connect(self._flg_autofocus_stop.set)
+        
+        # Defer thread start until after initialization is complete
+        self.destroyed.connect(self._thread_autofocus.quit)
+        
+    def get_current_image(self) -> Image.Image|None:
         """
         Returns the current frame of the video feed
         
         Returns:
-            ImageTk.PhotoImage: The current frame of the video feed
-            wait_newimage (bool, optional): Waits for a new image to be taken. Defaults to False.
+            Image.Image|None: The current frame of the video feed in PIL Image format, or None if no image is available
         """
-        if wait_newimage:
-            self._flg_isNewFrmReady.clear()
-            self._flg_isNewFrmReady.wait()
         return self._currentImage
+    
+    def get_latest_image_with_timestamp(self) -> tuple[Image.Image|None,float]:
+        """
+        Returns the latest captured image along with its timestamp
+
+        Returns:
+            tuple[Image.Image|None,float]: A tuple containing the latest captured image in PIL Image format and its timestamp in seconds, or (None, 0.0) if no image is available
+        """
+        return self._currentImage, self._time_last_img
     
     def get_image_shape(self) -> tuple[int,int]|None:
         """
@@ -1312,117 +1598,150 @@ class Wdg_MotionController(qw.QGroupBox):
             return self._currentImage.size
         return None
     
-    def _overlay_scalebar(self,img:Image.Image) -> Image.Image:
+    def _init_video_worker(self):
         """
-        Overlays a scalebar on the image based on the image calibration file
-
-        Args:
-            img (Image.Image): The image to be overlayed with the scalebar
+        Initialises the video worker to update the video feed in a separate thread
+        """
+        self._worker_img_capture = ImageCapture_Worker(
+            camera_controller=self._camera_ctrl,
+            stageHub=self._stageHub,
+            getter_imgcal=self._getter_imgcal,
+        )
+        self._thread_video = QThread(self)
+        self._worker_img_capture.moveToThread(self._thread_video)
+        self._thread_video.finished.connect(self._worker_img_capture.deleteLater)
+        self._thread_video.finished.connect(self._thread_video.deleteLater)
+        
+        # Connect the signal to request an image capture to the worker's grab_image method
+        self._sig_req_img.connect(self._worker_img_capture.grab_image)
+        self._worker_img_capture.sig_error.connect(lambda msg: print(f'Video worker error: {msg}'))
+        self._worker_img_capture.sig_img.connect(self._handle_img_capture)
+        self._worker_img_capture.sig_qpixmap.connect(self._handle_qpixmap_capture)
+        self._worker_img_capture.sig_no_frame.connect(self._handle_no_frame)
+        
+        # Defer thread start until after initialization is complete
+        QTimer.singleShot(0, self._thread_video.start)
+        self.destroyed.connect(self._thread_video.quit)
+    
+    def get_video_worker(self) -> ImageCapture_Worker:
+        """
+        Returns the video worker to access its methods and signals
 
         Returns:
-            Image.Image: The image with the scalebar overlayed
+            VideoUpdater_Worker: The video worker instance
         """
-        cal = self._getter_imgcal()
-        
-        if not isinstance(cal,ImgMea_Cal) or not cal.check_calibration_set():
-            return img
-        
-        if not isinstance(img,Image.Image): return img
-        
-        scalex = 1/cal.scale_x_pixelPerMm
-        scalebar_length = int(ControllerConfigEnum.SCALEBAR_LENGTH_RATIO.value * img.size[0]) # in pixel
-        scalebar_height = int(ControllerConfigEnum.SCALEBAR_HEIGHT_RATIO.value * img.size[1]) # in pixel
-        
-        length_mm = scalebar_length * scalex
-        font = ControllerConfigEnum.SCALEBAR_FONT.value
-        font_size = int(scalebar_length/10 * ControllerConfigEnum.SCALEBAR_FONT_RATIO.value)
-        line_width = int(scalebar_length/50 * ControllerConfigEnum.SCALEBAR_FONT_RATIO.value)
-        
-        line_offset = scalebar_length/10
-        
-        box_length = scalebar_length + 2*line_offset
-        box_height = scalebar_height + 2*line_offset
-        
-        draw = ImageDraw.Draw(img)
-        # Draw a box around the scalebar, taking consideration of the font size height
-        draw.rectangle([(img.size[0]-box_length, img.size[1]-box_height),
-                        (img.size[0], img.size[1])], fill=(0,0,0))
-        draw.line([(img.size[0]-scalebar_length-line_offset, img.size[1]-line_offset),
-                   (img.size[0]-line_offset, img.size[1]-line_offset)],
-                  fill=(255,255,255), width=line_width)
-        
-        try: text_params = {'text':'{:.0f} µm'.format(abs(length_mm*1e3)), 'font':ImageFont.truetype(font,font_size)}
-        except Exception: raise ValueError('Scalebar font file not found. Please check the font path in the configuration.')
-        
-        text_length = draw.textlength(**text_params)
-        
-        draw.text((img.size[0]-box_length/2-text_length/2, img.size[1]-line_offset*2-line_width-font_size/2),
-                  align='left', fill=(255,255,255), **text_params)
-        return img
+        return self._worker_img_capture
     
+    def pause_video(self):
+        self._flg_pause_video.set()
+        
+        # Turn the button back into a camera on button
+        self._btn_videotoggle.released.disconnect()
+        self._btn_videotoggle.setText('Resume video feed')
+        self._btn_videotoggle.released.connect(lambda: self.resume_video())
+        self._btn_videotoggle.setStyleSheet('background-color: yellow; color: black')
+    
+    def resume_video(self):
+        self._flg_pause_video.clear()
+        
+        # Turn the button into a video stop button
+        self._btn_videotoggle.released.disconnect()
+        self._btn_videotoggle.setText('Pause video feed')
+        self._btn_videotoggle.released.connect(lambda: self.pause_video())
+        self._btn_videotoggle.setStyleSheet('background-color: red')
+    
+    def _init_video(self):
+        if not self._camera_ctrl.get_initialisation_status(): self._camera_ctrl.__init__()
+        self._currentFrame = None            # Empties the current frame
+        
+        # Loops the image updater to create outputs the video capture frame by frame
+        self._flg_pause_video.clear()
+        QTimer.singleShot(0, self.video_update)
+    
+    def _trigger_next_video_update(self):
+        """
+        Handles the case where the camera fails to capture an image.
+        """
+        if self._iscapturing.is_set(): return
+        
+        time_current = time.time()
+        diff = time_current - self._time_last_frame
+        self._time_last_frame = time_current
+        if diff < 1/self._vid_refreshrate: sleep_msec = int((1/self._vid_refreshrate - diff)*1e3)
+        else: sleep_msec = 0
+        
+        QTimer.singleShot(sleep_msec, self.video_update)
+    
+    @Slot()
+    def _handle_no_frame(self):
+        """
+        Handles the case where the camera fails to capture an image.
+        """
+        self._iscapturing.clear()
+        self._trigger_next_video_update()
+    
+    @Slot(QPixmap)
+    def _handle_qpixmap_capture(self, img_qpixmap:QPixmap):
+        """
+        Handles the image capture from the camera and updates the video feed with the new image.
+        Should be used as a callback for the camera controller's image capture method.
+
+        Args:
+            img_qpixmap (QPixmap): The captured image in QPixmap format
+        """
+        try:
+            if self._currentFrame != img_qpixmap:
+                self._lbl_video.setPixmap(img_qpixmap)
+                self._currentFrame = img_qpixmap
+            
+        except Exception as e: print(f'Failed to update video feed with captured image: {e}')
+        finally:
+            self._iscapturing.clear()
+            self._trigger_next_video_update()
+        
+    @Slot(Image.Image)
+    def _handle_img_capture(self, img:Image.Image):
+        """
+        Handles the image capture from the camera and updates the video feed with the new image.
+        Should be used as a callback for the camera controller's image capture method.
+
+        Args:
+            img (Image.Image): The captured image in PIL Image format
+        """
+        if not isinstance(img,Image.Image): return
+        self._currentImage = img
+        self._time_last_img = time.time()
+    
+    @Slot()
+    def trigger_img_capture(self):
+        request = self._combo_vidcorrection.currentText()
+        self._sig_req_img.emit(
+            Enum_CamCorrectionType[request],
+            self._chkbox_scalebar.isChecked(),
+            self._chkbox_crosshair.isChecked())
+        
+        self._iscapturing.set()
+        
     def video_update(self):
         """
         Updates the video feed, taking in mind Tkinter's single thread.
         Use in a worker thread, DO NOT use in the mainthread!!!
         """
-        def draw_crosshair(img:Image.Image) -> Image.Image:
-            width, height = img.size
-            draw = ImageDraw.Draw(img)
-            line_color = (255, 0, 0)
-            # Draw vertical line
-            draw.line([(width/2, 0), (width/2, height)], fill=line_color, width=3)
-            # Draw horizontal line
-            draw.line([(0, height/2), (width, height/2)], fill=line_color, width=3)
-            return img
+        # Prevents multiple triggers of the video update if the camera is still processing the previous capture
+        if self._iscapturing.is_set(): return
         
-        # Initialise the camera controller and grabs the first image
-        if not self._camera_ctrl.get_initialisation_status(): self._camera_ctrl.__init__()
-        self._currentFrame = None            # Empties the current frame
+        if self._flg_pause_video.is_set():
+            QTimer.singleShot(int(1000/self._vid_refreshrate), self.video_update)
+            return
         
-        # Loops the image updater to create outputs the video capture frame by frame
-        self._flg_isvideorunning = True  # Enables the autoupdater
-        while self._flg_isvideorunning:
-            try:
-                time1 = time.time()
-                # Triggers the frame capture from the camera
-                request = self._combo_vidcorrection.currentText()
-                
-                # print(f'\n{get_timestamp_us_int()} - Video update loop started.')
-                # print(f'1. Requesting image with correction: {request}')
-                if self._stageHub.Enum_CamCorrectionType[request] == self._stageHub.Enum_CamCorrectionType.RAW:
-                    img = self._camera_ctrl.img_capture()
-                else:
-                    img:Image.Image = self._stageHub.get_image(request=self._stageHub.Enum_CamCorrectionType[request])
-                # video_width = int(img.size[1]/img.size[0]*self._video_height)
-                
-                if not isinstance(img,Image.Image): time.sleep(1/AppVideoEnum.VIDEOFEED_REFRESH_RATE.value); continue
-                # print(f'2. Image received from camera. Size: {img.size}')
-                # Add a scalebar to it
-                img = self._overlay_scalebar(img) if self._chkbox_scalebar.isChecked() else img
-                
-                # print(f'3. Scalebar overlay complete. Size: {img.size}')
-                # Overlay a crosshair if requested
-                if self._chkbox_crosshair.isChecked(): img = draw_crosshair(img)
-                new_frame:QPixmap = ImageQt.toqpixmap(img)
-                
-                # print(f'4. Crosshair overlay complete. Size: {img.size}')
-                # Update the image in the app window
-                # Only update if the frame is different. Sometimes the program isn't done taking the new image.
-                # In this case, it skips the frame update
-                if self._currentFrame != new_frame:
-                    self._lbl_video.setPixmap(new_frame)
-                    self._currentFrame = new_frame
-                    self._currentImage = img
-                
-                # print(f'5. Video label updated.')
-                # Let the coordinate updater know that the frame is ready if any is waiting
-                self._flg_isNewFrmReady.set()
-                time_elapsed = time.time() - time1
-                if time_elapsed < 1/AppVideoEnum.VIDEOFEED_REFRESH_RATE.value:
-                    time.sleep(1/AppVideoEnum.VIDEOFEED_REFRESH_RATE.value - time_elapsed)
-                
-                # print(f'6. Loop complete in {time.time() - time1:.3f} seconds.')
-            except Exception as e: print(f'Video feed failed: {e}'); time.sleep(0.02)
+        # Triggers the frame capture from the camera
+        self.trigger_img_capture()
+    
+    def _init_coor_memory_widgets(self):
+        """
+        Initialises the coordinate memory widgets and layouts
+        """
+        pass
     
     @Slot(str,str)
     def status_update(self,message=None,bg_colour=None):
@@ -1446,7 +1765,7 @@ class Wdg_MotionController(qw.QGroupBox):
         Terminates the motion controller
         """
         self._flg_isrunning.clear()
-        self.video_terminate()  # Terminates the camera controller as well
+        self.pause_video()  # Terminates the camera controller as well
         self.ctrl_xy.terminate()
         self.ctrl_z.terminate()
         self._camera_ctrl.camera_termination()

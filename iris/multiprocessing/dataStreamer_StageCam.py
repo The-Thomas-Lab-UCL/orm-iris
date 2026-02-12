@@ -66,6 +66,14 @@ from iris.multiprocessing import MPMeaHubEnum
 
 IMAGECAL_KERNELSIZE = 61
 
+class Enum_CamCorrectionType(Enum):
+    """
+    Enumeration for the type of camera image request
+    """
+    RAW = 'raw'
+    FLATFIELD = 'flatfield'
+    BACKGROUND_SUBTRACTION = 'background_subtraction'
+
 class DataStreamer_StageCam(mp.Process):
     def __init__(self, xy_controller: Controller_XY, z_controller: Controller_Z,
                  cam_controller: CameraController, namespace:StageNamespace):
@@ -196,6 +204,7 @@ class DataStreamer_StageCam(mp.Process):
             Returns:
                 tuple[int,tuple[float,float,float]]: timestamp, coordinate
             """
+            idx = 0
             try:
                 while True:
                     with self._lock: idx = bisect.bisect_left(self._list_timestamp,timestamp)
@@ -230,8 +239,10 @@ class DataStreamer_StageCam(mp.Process):
                 flg_data = self._pipe.poll(timeout=0.5)
                 if not flg_data: continue
                 
+                coor = None
+                req_type = None
+                timestamp = None
                 try:
-                    coor = None
                     req_type,timestamp = self._pipe.recv()
                     if req_type == DataStreamer_StageCam.Enum_CoorType.CLOSEST:
                         coor = self.get_closest_coordinate(timestamp)
@@ -256,14 +267,6 @@ class DataStreamer_StageCam(mp.Process):
         def join(self,timeout:float|None=None):
             self._flg_selfrunning.clear()
             self._thread.join(timeout)
-    
-    class Enum_CamCorrectionType(Enum):
-        """
-        Enumeration for the type of camera image request
-        """
-        RAW = 'raw'
-        FLATFIELD = 'flatfield'
-        BACKGROUND_SUBTRACTION = 'background_subtraction'
     
     class Enum_CommandType(Enum):
         """
@@ -424,25 +427,28 @@ class DataStreamer_StageCam(mp.Process):
             based on the user request.
             """
             self._flg_selfrunning.set()
+            return_pkg = None # Placeholder for the processed image
+            request = None
+            proc_img = None
             while self._flg_selfrunning.is_set():
                 flg_data = self._pipe.poll(timeout=0.5)
                 if not flg_data: continue
                 try:
-                    return_pkg = None # Placeholder for the processed image
                     request = self._pipe.recv()
                     img = self._cam_controller.img_capture()
                     arr_img = np.array(img)
                     
-                    if request == DataStreamer_StageCam.Enum_CamCorrectionType.RAW:
+                    if request == Enum_CamCorrectionType.RAW:
                         proc_img = arr_img
-                    elif request == DataStreamer_StageCam.Enum_CamCorrectionType.FLATFIELD:
+                    elif request == Enum_CamCorrectionType.FLATFIELD:
                         proc_img = self._correct_arr_flatfield(arr_img)
-                    elif request == DataStreamer_StageCam.Enum_CamCorrectionType.BACKGROUND_SUBTRACTION:
+                    elif request == Enum_CamCorrectionType.BACKGROUND_SUBTRACTION:
                         proc_img = self._correct_backgroundSubtraction_3channel(arr_img)
                     else:
                         return_pkg = self._handle_other_requests(request)
                         
-                    if request in DataStreamer_StageCam.Enum_CamCorrectionType.__members__.values():
+                    if request in Enum_CamCorrectionType.__members__.values():
+                        if proc_img is None: raise ValueError('Processed image is None')
                         return_pkg = self._convert_arr2img(proc_img)
                         
                 except Exception as e:
@@ -574,7 +580,7 @@ class DataStreamer_StageCam(mp.Process):
         Returns:
             np.ndarray: Image
         """
-        assert isinstance(request,self.Enum_CamCorrectionType), 'Invalid request type'
+        assert isinstance(request,Enum_CamCorrectionType), 'Invalid request type'
         with self._lock_pipe:
             self._cam_pipe_main.send(request)
             img = self._cam_pipe_main.recv()

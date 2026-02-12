@@ -642,8 +642,55 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
         self._last_imgqt = None
         QTimer.singleShot(0, self._auto_video_updater)  # Initial call to start the video feed immediately
         
+    # >>> Autofocus setup <<<
+        self._init_autofocus_workers()
+        self.btn_autofocus.clicked.connect(self._start_autofocus)
+        
     # >>> Others <<<
         self._programmatic_close = False
+        
+    def _init_autofocus_workers(self):
+        self._autofocus_worker = self._ctrl_motion_video.get_autofocus_worker()
+        self._autofocus_worker.sig_finished.connect(self._handle_autofocus_finished)
+        
+    def _start_autofocus(self):
+        confirm = qw.QMessageBox.question(
+            self,
+            "Confirm Autofocus",
+            "This will move the stage automatically and perform autofocus.\n"
+            "CAUTION: This may move the stage to an unsafe position, such as CRASHING the objective.\n"
+            "Do you want to proceed?",
+            qw.QMessageBox.Yes | qw.QMessageBox.No, # pyright: ignore[reportAttributeAccessIssue] ; pyqt5 vs PySide6 difference
+            qw.QMessageBox.No # pyright: ignore[reportAttributeAccessIssue] ; pyqt5 vs PySide6 difference
+        )
+        if confirm != qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue] ; pyqt5 vs PySide6 difference
+            return
+        
+        self._perform_autofocus()
+        
+    @Slot(float)
+    def _handle_autofocus_finished(self, coor_z_mm: float):
+        self._update_coordinate_withGivenZCoor(coor_z_mm)
+        self._go_to_nextMappingCoor()
+        self._perform_autofocus()
+        
+    @Slot()
+    def _perform_autofocus(self):
+        result = self._get_selected_mappingCoor()
+        if not result: return
+        
+        idx, mapping_coor = result
+        if idx == len(self._list_mapping_coor) - 1: return
+        
+        target_coor_mm = self._calculate_target_coordinate(mapping_coor)
+        target_coor_mm = target_coor_mm.astype(float)
+        target_coor_mm = (target_coor_mm[0], target_coor_mm[1], target_coor_mm[2])
+        
+        range_mm = self.spin_range_um.value() / 1e3
+        start_mm = target_coor_mm[2] - range_mm/2
+        end_mm = target_coor_mm[2] + range_mm/2
+        
+        self._ctrl_motion_video.perform_autofocus(start_mm=start_mm, end_mm=end_mm, bypass_confirmation=True)
         
     @Slot()
     def _auto_video_updater(self):
@@ -763,6 +810,39 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
             
         return np.array([x, y, z])
     
+    def _update_coordinate_withGivenZCoor(self, z_coor_mm:float) -> None:
+        """Updates the selected coordinate with the current position of the motion controller"""
+        result = self._get_selected_mappingCoor()
+        if not result: return
+        
+        idx, mapping_coor = result
+        
+        current_coor = self._ctrl_motion_video.get_coordinates_closest_mm()
+        current_coor = np.array([current_coor[0], current_coor[1], z_coor_mm])
+        
+        new_center_coor = calculate_coordinatesCenter(
+            ref_coor=current_coor,
+            mappingCoor=mapping_coor,
+            loc_xy=Enums_RefXY(self.combo_xy.currentText()),
+            loc_z=Enums_RefZ(self.combo_z.currentText())
+        )
+        
+        # Update the mapping coordinates by translating them to the new center coordinates
+        translated_coor = np.array(mapping_coor.mapping_coordinates) + (new_center_coor - np.mean(mapping_coor.mapping_coordinates, axis=0))
+        translated_coor_tup = [tuple(coor) for coor in translated_coor]
+        new_mapping_coor = MeaCoor_mm(
+            mappingUnit_name=mapping_coor.mappingUnit_name,
+            mapping_coordinates=translated_coor_tup
+        )
+        
+        # Update the mapping coordinates in the list
+        self._list_mapping_coor[idx] = new_mapping_coor
+        self._list_mod[idx] = True  # Mark the coordinate as modified
+        self._update_treeview()
+
+        return
+    
+    @Slot()
     def _update_coordinate_withCurrentCoor_and_go_next(self) -> None:
         """Updates the selected coordinate with the current position of the motion controller
         and moves the motion controller to the next coordinate"""

@@ -35,14 +35,7 @@
          <item>
           <layout class="QVBoxLayout" name="verticalLayout_2">
            <item>
-            <widget class="QWidget" name="wdg_video" native="true">
-             <property name="sizePolicy">
-              <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-               <horstretch>1</horstretch>
-               <verstretch>1</verstretch>
-              </sizepolicy>
-             </property>
-            </widget>
+            <layout class="QVBoxLayout" name="lyt_video"/>
            </item>
            <item>
             <layout class="QHBoxLayout" name="horizontalLayout_3">
