@@ -70,13 +70,23 @@ class Ui_tiling_method(object):
 
         self.main_layout.addLayout(self.lyt_holder_controls)
 
+        self.horizontalLayout_2 = QHBoxLayout()
+        self.horizontalLayout_2.setObjectName(u"horizontalLayout_2")
         self.btn_capture = QPushButton(self.verticalLayoutWidget)
         self.btn_capture.setObjectName(u"btn_capture")
 
-        self.main_layout.addWidget(self.btn_capture)
+        self.horizontalLayout_2.addWidget(self.btn_capture)
+
+        self.btn_stop = QPushButton(self.verticalLayoutWidget)
+        self.btn_stop.setObjectName(u"btn_stop")
+        self.btn_stop.setStyleSheet(u"background-color:red; color:white")
+
+        self.horizontalLayout_2.addWidget(self.btn_stop)
+
+
+        self.main_layout.addLayout(self.horizontalLayout_2)
 
         QWidget.setTabOrder(self.chk_lres, self.combo_img)
-        QWidget.setTabOrder(self.combo_img, self.btn_capture)
 
         self.retranslateUi(tiling_method)
 
@@ -87,5 +97,6 @@ class Ui_tiling_method(object):
         tiling_method.setWindowTitle(QCoreApplication.translate("tiling_method", u"Form", None))
         self.chk_lres.setText(QCoreApplication.translate("tiling_method", u"Show low-resolution image (faster processing)", None))
         self.btn_capture.setText(QCoreApplication.translate("tiling_method", u"Perform image tiling", None))
+        self.btn_stop.setText(QCoreApplication.translate("tiling_method", u"Stop", None))
     # retranslateUi
 
