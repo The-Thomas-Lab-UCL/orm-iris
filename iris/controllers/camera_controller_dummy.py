@@ -28,21 +28,8 @@ class CameraController_Dummy(Class_CameraController):
         
         self.flg_initialised = True
         
-        self._exposure_time_sec = 10e-3  # Simulated exposure time in seconds
-        
+        self._exposure_time_us = 10e-3# Initial exposure time in microseconds
         print('\n>>>>> DUMMY camera controller is used <<<<<')
-        
-    def set_exposure_time_us(self, exposure_time_us:int|float) -> None:
-        """
-        Set the exposure time of the camera
-
-        Args:
-            exposure_time_us (int | float): Exposure time in microseconds
-        """
-        self._exposure_time_sec = exposure_time_us / 1e6
-        
-    def get_exposure_time_us(self) -> int | float | None:
-        return self._exposure_time_sec * 1e6
         
     def get_identifier(self) -> str:
         return "Dummy camera controller"
@@ -54,11 +41,18 @@ class CameraController_Dummy(Class_CameraController):
         print('Terminating the camera')
         self.flg_initialised = False
     
+    def set_exposure_time_us(self, exposure_time_us: int | float) -> None:
+        self._exposure_time_us = exposure_time_us
+        print(f'Exposure time set to {exposure_time_us} us')
+    
+    def get_exposure_time_us(self) -> int | float | None:
+        return self._exposure_time_us
+    
     def get_initialisation_status(self) -> bool:
         return self.flg_initialised
     
     def frame_capture(self) -> (np.ndarray|None):
-        time.sleep(self._exposure_time_sec)  # Simulate the exposure time delay
+        time.sleep(self._exposure_time_us/1e6) # Simulate the exposure time delay
         return self._frame
     
     def img_capture(self) -> Image.Image:

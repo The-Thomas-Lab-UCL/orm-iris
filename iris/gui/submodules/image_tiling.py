@@ -84,16 +84,17 @@ class ImageProcessor_Worker(QObject):
     
     sig_req_img_capture = Signal()
     
-    flg_stop_imgCapture = threading.Event()
-    sig_midMea_error = Signal(str)  # Signal to indicate an error during mid-measurement
-    sig_finished_msg = Signal(str, MeaImg_Unit)      # Signal to indicate the process has finished (even due to errors)
+    sig_finished_msg = Signal(str)
+    sig_finished_unit = Signal(MeaImg_Unit)
     
-    msg_success = 'Image capture complete'
+    msg_all_finished = 'Image capture complete'
     msg_error = 'Error in ImageTiling_Worker: '
+    msg_stopped = 'Image capture stopped by user'
     
-    def __init__(self, motion_controller:Wdg_MotionController):
+    def __init__(self, motion_controller:Wdg_MotionController, flg_stop:threading.Event):
         super().__init__()
         self._motion_ctrl = motion_controller
+        self.flg_stop = flg_stop
         
         self.sig_gotocoor.connect(self._motion_ctrl.get_goto_worker().work)
         
@@ -112,25 +113,45 @@ class ImageProcessor_Worker(QObject):
         except Exception as e:
             print('Error in get_stitched_image:', e)
     
-    @Slot(MeaCoor_mm,MeaImg_Unit,ImageTiling_Params)
-    def take_image(self, meaCoor_mm:MeaCoor_mm, imgUnit:MeaImg_Unit,
-        tiling_params:ImageTiling_Params) -> None:
+    @Slot(list,list,ImageTiling_Params)
+    def take_list_image(self, list_meaCoor_mm:list[MeaCoor_mm], list_imgUnit:list[MeaImg_Unit],
+                        tiling_params:ImageTiling_Params) -> None:
+        """
+        Take images at the given measurement coordinates and store them in the given image units.
+
+        Args:
+            list_meaCoor_mm (list[MeaCoor_mm]): List of measurement coordinates
+            list_imgUnit (list[MeaImg_Unit]): List of image units to store the captured images
+            tiling_params (ImageTiling_Params): Parameters for tiling
+        """
+        self.flg_stop.clear()
+        
+        for meaCoor_mm, imgUnit in zip(list_meaCoor_mm, list_imgUnit):
+            if self.flg_stop.is_set():
+                self.sig_finished_msg.emit(self.msg_stopped)
+                return
+            new_imgUnit = self._take_image(meaCoor_mm, imgUnit, tiling_params)
+            
+            if not isinstance(new_imgUnit, MeaImg_Unit):
+                self.sig_finished_msg.emit(self.msg_error + 'Image capture failed')
+                return
+            self.sig_finished_unit.emit(new_imgUnit)
+            
+        self.sig_finished_msg.emit(self.msg_all_finished)
+    
+    def _take_image(self, meaCoor_mm:MeaCoor_mm, imgUnit:MeaImg_Unit,
+        tiling_params:ImageTiling_Params) -> MeaImg_Unit|None:
         """
         Take an image at the given measurement coordinates and store it in the given image unit.
         
         Args:
-            meacoor (MeaCoor_mm): Measurement coordinates
+            meaCoor_mm (MeaCoor_mm): Measurement coordinates
             imgUnit (MeaImg_Unit): Image unit to store the captured image
             tiling_params (ImageTiling_Params): Parameters for tiling
         """
-        flg_stop = self.flg_stop_imgCapture
-        if flg_stop.is_set(): return
-        
         # Check that all tiling parameters are valid
         try: tiling_params.check_validity()
-        except Exception as e: 
-            self.sig_midMea_error.emit(self.msg_error + f'Invalid tiling parameters: {e}')
-            return
+        except Exception as e: print(e); return
         
         # Extract tiling parameters
         shape = tiling_params.shape
@@ -140,17 +161,15 @@ class ImageProcessor_Worker(QObject):
         cropy_mm = tiling_params.cropy_mm
         
         totalcoor = len(meaCoor_mm.mapping_coordinates)
-        flg_stop.clear()
+        self.flg_stop.clear()
         self.sig_statbar_update.emit('Taking images: {} of {}'.format(1,totalcoor))
         
-        msg = self.msg_success
         
         self._motion_ctrl.pause_video()
         ts_before = self._motion_ctrl.get_latest_image_with_timestamp()[1]
         for i,coor in enumerate(meaCoor_mm.mapping_coordinates):
             x, y, z = coor
-            if flg_stop.is_set():
-                msg = self.msg_error + 'Image capture stopped by user'
+            if self.flg_stop.is_set():
                 break
             
             flg_mvmt_done = threading.Event()
@@ -171,7 +190,7 @@ class ImageProcessor_Worker(QObject):
                     break
             
             if not isinstance(img,Image.Image):
-                self.sig_midMea_error.emit(self.msg_error + 'No image received from the controller')
+                print('Error in _take_image: No image received from the controller')
                 continue
             
             img = img.crop((cropx_pixel,cropy_pixel,shape[0]-cropx_pixel,shape[1]-cropy_pixel))
@@ -188,8 +207,8 @@ class ImageProcessor_Worker(QObject):
             img = imgUnit.get_image_all_stitched(low_res=True)[0]
             self.sig_ret_image_processed.emit(img)
             
-        self.sig_finished_msg.emit(msg, imgUnit)
         self._motion_ctrl.resume_video()
+        return imgUnit
 
 class Wdg_HiLvlTiling(qw.QWidget):
     """
@@ -200,7 +219,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
     sig_req_takeImage = Signal()
     sig_update_combobox = Signal()
     
-    sig_capture_img = Signal(MeaCoor_mm,MeaImg_Unit,ImageTiling_Params)
+    sig_capture_list_img = Signal(list, list, ImageTiling_Params)
     
     
     def __init__(
@@ -263,8 +282,10 @@ class Wdg_HiLvlTiling(qw.QWidget):
         
         self._combo_imgunits.currentIndexChanged.connect(self._plot_imgunit_combobox)
         self._btn_takeImages = wdg.btn_capture
-        self._btn_takeImages_txt = self._btn_takeImages.text()
+        self._btn_stop = wdg.btn_stop
         self._btn_takeImages.clicked.connect(self._take_image)
+        self._flg_stop_capture = threading.Event()
+        self._btn_stop.clicked.connect(self._flg_stop_capture.set)
         
     # >>> Coordinate generation frame <<<
         wdg_tree = Wdg_Treeview_MappingCoordinates(parent=self, mappingCoorHub=self._coorHub)
@@ -288,7 +309,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
         """
         # >>> Worker setup <<<
         self._thread = QThread()
-        self._worker = ImageProcessor_Worker(self._motion_controller)
+        self._worker = ImageProcessor_Worker(self._motion_controller, flg_stop=self._flg_stop_capture)
         self._worker.moveToThread(self._thread)
         self._thread.start()
         self.destroyed.connect(self._thread.quit)
@@ -304,8 +325,10 @@ class Wdg_HiLvlTiling(qw.QWidget):
         self.sig_update_combobox.connect(self._update_combobox)
         
         # Image capture signals
-        self.sig_capture_img.connect(self._worker.take_image)
+        self.sig_capture_list_img.connect(self._worker.take_list_image)
         self._worker.sig_finished_msg.connect(self._handle_imageCapture_finished)
+        self._worker.sig_finished_msg.connect(self.reset_imgCapture_button)
+        self._worker.sig_finished_unit.connect(self._handle_imageCapture_finished_unit)
         
     def _plot_imgunit_combobox(self):
         """
@@ -356,33 +379,39 @@ class Wdg_HiLvlTiling(qw.QWidget):
         self._combo_imgunits.setEnabled(True)
         self._combo_imgunits.blockSignals(False)
         
-    @Slot(str, MeaImg_Unit)
-    def _handle_imageCapture_finished(self, msg:str, imgUnit:MeaImg_Unit):
+    @Slot(str)
+    def _handle_imageCapture_finished(self, msg:str):
         """
         Handle the image capture finished signal
         
         Args:
             msg (str): Message to display
         """
-        # Save the image unit into the hub
-        self._dataHub_img.get_ImageMeasurement_Hub().append_ImageMeasurementUnit(imgUnit)
+        if msg == self._worker.msg_all_finished:
+            qw.QMessageBox.information(self,'Image capture',msg) 
+        elif msg == self._worker.msg_stopped:
+            qw.QMessageBox.information(self,'Image capture',msg)
+        elif msg.startswith(self._worker.msg_error):
+            qw.QMessageBox.warning(self,'Image capture',msg)
+        else:
+            qw.QMessageBox.warning(self,'Image capture','Unknown message: {}'.format(msg))
         
-        # Handle the GUI
-        self._statbar.showMessage(msg,5000)
-        self.reset_imgCapture_button()
-        self._motion_controller.enable_widgets()
-        
-        # Plot the image unit
-        self._combo_imgunits.setCurrentText(imgUnit.get_IdName()[1])
+    def _handle_imageCapture_finished_unit(self, imgUnit:MeaImg_Unit):
+        """
+        Handle the image capture finished signal for each unit captured and saves it into the hub
 
+        Args:
+            imgUnit (MeaImg_Unit): The captured ImageUnit
+        """
+        try: self._dataHub_img.get_ImageMeasurement_Hub().append_ImageMeasurementUnit(imgUnit)
+        except Exception as e: qw.QMessageBox.warning(self,'Error saving ImageUnit',f'Error saving the captured ImageUnit: {e}')
+        
+        try: self._combo_imgunits.setCurrentText(imgUnit.get_IdName()[1])
+        except Exception as e: qw.QMessageBox.warning(self,'Error updating combobox',f'Error updating the combobox to the captured ImageUnit: {e}')
+        
     def reset_imgCapture_button(self):
-        self._btn_takeImages.setText(self._btn_takeImages_txt)
-        self._btn_takeImages.setStyleSheet('')
-        
-        try: self._btn_takeImages.clicked.disconnect()
-        except: pass
-        self._btn_takeImages.clicked.connect(self._take_image)
-        
+        self._btn_stop.setEnabled(False)
+        self._btn_takeImages.setEnabled(True)
         self._motion_controller.enable_widgets()
         
     def _get_selected_ImageUnit(self) -> MeaImg_Unit:
@@ -407,11 +436,8 @@ class Wdg_HiLvlTiling(qw.QWidget):
             flg_stop (threading.Event): Event to stop the function
         """
         # > Setup the button <
-        try: self._btn_takeImages.clicked.disconnect()
-        except: pass
-        self._btn_takeImages.setText('STOP')
-        self._btn_takeImages.setStyleSheet('background-color: red; color: white;')
-        self._btn_takeImages.clicked.connect(self._worker.flg_stop_imgCapture.set)
+        self._btn_takeImages.setEnabled(False)
+        self._btn_stop.setEnabled(True)
         self._motion_controller.disable_widgets()
         
         # > Initial checks <
@@ -470,7 +496,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
         # > Prep the image storage <
         list_imgUnit = []
         for meaCoor_mm in list_meaCoor_mm:
-            list_Hub_names = self._dataHub_img.get_ImageMeasurement_Hub().get_list_ImageUnit_ids()
+            list_unavailable_names = self._dataHub_img.get_ImageMeasurement_Hub().get_list_ImageUnit_names()
             # Request for the names and check its validity
             while True:
                 result = qw.QInputDialog.getText(
@@ -484,7 +510,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
                 if not ok: # User cancelled
                     self.reset_imgCapture_button()
                     return
-                if imgname in list_Hub_names:
+                if imgname in list_unavailable_names:
                     retry = qw.QMessageBox.question(
                         self,
                         'Error',
@@ -497,6 +523,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
                     else: continue
                 break
             list_imgUnit.append(MeaImg_Unit(unit_name=imgname,calibration=cal))
+            list_unavailable_names.append(imgname) # To prevent duplicate names in the next iterations
         
         # > Send the coordinates to the worker for the image capture <
         tiling_params = ImageTiling_Params(
@@ -506,7 +533,5 @@ class Wdg_HiLvlTiling(qw.QWidget):
             cropx_mm=cropx_mm,
             cropy_mm=cropy_mm,
         )
-        for imgUnit, meaCoor_mm in zip(list_imgUnit,list_meaCoor_mm):
-            self.sig_capture_img.emit(meaCoor_mm, imgUnit, tiling_params)
         
-            
+        self.sig_capture_list_img.emit(list_meaCoor_mm, list_imgUnit, tiling_params)

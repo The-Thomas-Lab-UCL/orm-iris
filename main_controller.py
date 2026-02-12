@@ -46,7 +46,8 @@ from main_analyser import main_analyser
 
 from extensions.extension_intermediary import Ext_DataIntermediary
 from extensions.extension_template import Extension_MainWindow
-from extensions.optics_calibration_aid.Ext_OpticsCalibrationAid import Ext_OpticsCalibrationAid
+from extensions.optics_calibration_aid.ext_opticsCalibrationAid import Ext_OpticsCalibrationAid
+from extensions.camera_exposure_controller.ext_cameraExposureController import Ext_CameraExposureController
 
 # NOTE: controller classes and enums imported lazily inside MainWindow_Controller.__init__
 # to avoid importing hardware SDKs / creating OS handles at module import time
@@ -309,10 +310,14 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         """
         # > Optics calibration extension
         optics_calibration_extension = Ext_OpticsCalibrationAid(
-            master=self,
+            parent=self,
+            intermediary=self._extension_intermediary)
+        camera_exposure_extension = Ext_CameraExposureController(
+            parent=self,
             intermediary=self._extension_intermediary)
         
         self._list_extensions_toplevel.append(optics_calibration_extension)
+        self._list_extensions_toplevel.append(camera_exposure_extension)
         
         for ext in self._list_extensions_toplevel:
             ext:Extension_MainWindow
