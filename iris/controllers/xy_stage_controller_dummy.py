@@ -144,22 +144,25 @@ class XYController_Dummy(Class_XYController):
         target_x_mm = self._coor_x_mm + count_x*self._step_um/1000
         target_y_mm = self._coor_y_mm + count_y*self._step_um/1000
         
-        while True:
-            if self._coor_x_mm < target_x_mm:
-                self._coor_x_mm += self._step_um/1000
-            elif self._coor_x_mm > target_x_mm:
-                self._coor_x_mm -= self._step_um/1000
-            if self._coor_y_mm < target_y_mm:
-                self._coor_y_mm += self._step_um/1000
-            elif self._coor_y_mm > target_y_mm:
-                self._coor_y_mm -= self._step_um/1000
+        self._coor_x_mm = target_x_mm
+        self._coor_y_mm = target_y_mm
+        
+        # while True:
+        #     if self._coor_x_mm < target_x_mm:
+        #         self._coor_x_mm += self._step_um/1000
+        #     elif self._coor_x_mm > target_x_mm:
+        #         self._coor_x_mm -= self._step_um/1000
+        #     if self._coor_y_mm < target_y_mm:
+        #         self._coor_y_mm += self._step_um/1000
+        #     elif self._coor_y_mm > target_y_mm:
+        #         self._coor_y_mm -= self._step_um/1000
             
-            time.sleep(self._step_wait_time_sec/(self._vel/100))
+        #     time.sleep(self._step_wait_time_sec/(self._vel/100))
             
-            error = np.sqrt((self._coor_x_mm-target_x_mm)**2 + (self._coor_y_mm-target_y_mm)**2)
-            # print(coor_abs,(self._coor_x_mm,self._coor_y_mm),(target_x_mm,target_y_mm),error)
-            if error < 0.001:
-                break
+        #     error = np.sqrt((self._coor_x_mm-target_x_mm)**2 + (self._coor_y_mm-target_y_mm)**2)
+        #     # print(coor_abs,(self._coor_x_mm,self._coor_y_mm),(target_x_mm,target_y_mm),error)
+        #     if error < 0.001:
+        #         break
             
         return
         
