@@ -395,6 +395,8 @@ class Wdg_HiLvlTiling(qw.QWidget):
             qw.QMessageBox.warning(self,'Image capture',msg)
         else:
             qw.QMessageBox.warning(self,'Image capture','Unknown message: {}'.format(msg))
+            
+        self._motion_controller.reenable_overlays()
         
     def _handle_imageCapture_finished_unit(self, imgUnit:MeaImg_Unit):
         """
@@ -533,5 +535,8 @@ class Wdg_HiLvlTiling(qw.QWidget):
             cropx_mm=cropx_mm,
             cropy_mm=cropy_mm,
         )
+        
+        # Disable the crosshair and the scalebar in the image display during capture to improve performance
+        self._motion_controller.disable_overlays()
         
         self.sig_capture_list_img.emit(list_meaCoor_mm, list_imgUnit, tiling_params)

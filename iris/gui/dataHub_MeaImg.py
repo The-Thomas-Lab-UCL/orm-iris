@@ -260,8 +260,8 @@ class Image_SaverLoader_Worker(QObject):
         except Exception as e:
             self.error.emit(self.msg_error_load + str(e))
             
-    @Slot(MeaImg_Unit,str,float)
-    def save_ImageMeasurementUnit_png(self, unit:MeaImg_Unit, dirpath:str, resolution:float):
+    @Slot(MeaImg_Unit,str,float, bool)
+    def save_ImageMeasurementUnit_png(self, unit:MeaImg_Unit, dirpath:str, resolution:float, scalebar:bool):
         """
         Save the ImageMeasurement_Unit data as PNG files in the specified directory.
         
@@ -269,9 +269,10 @@ class Image_SaverLoader_Worker(QObject):
             unit (ImageMeasurement_Unit): ImageMeasurement_Unit object to save
             dirpath (str): Directory to save the PNG files
             resolution (float): Resolution percentage for the PNG files
+            scalebar (bool): Whether to include a scalebar in the saved image
         """
         try:
-            stitched_img = unit.get_image_all_stitched(low_res=False)[0]
+            stitched_img = unit.get_image_all_stitched(low_res=False, scalebar=scalebar)[0]
             stitched_img.thumbnail((int(stitched_img.width*resolution/100), int(stitched_img.height*resolution/100)))
             stitched_img.save(os.path.join(dirpath, f'{unit.get_IdName()[1]}.png'))
             self.finished.emit(f'{self.msg_save_png} {unit.get_IdName()[1]}')
@@ -285,7 +286,7 @@ class Wdg_DataHub_Image(qw.QWidget):
     """
     sig_save = Signal(MeaImg_Hub, str, str)
     sig_load = Signal(MeaImg_Hub, str)
-    sig_save_png = Signal(MeaImg_Unit, str, float)
+    sig_save_png = Signal(MeaImg_Unit, str, float, bool)
     sig_updateTree = Signal()
     
     def __init__(self, main, getter_ImageHub: Callable[[], MeaImg_Hub]|None=None, **kwargs) -> None:
@@ -505,7 +506,7 @@ class Wdg_DataHub_Image(qw.QWidget):
         for item in selections:
             unit_id = item.text(0)
             unit = self.ImageHub.get_ImageMeasurementUnit(unit_id=unit_id)
-            self.sig_save_png.emit(unit, dirpath, resolution)
+            self.sig_save_png.emit(unit, dirpath, resolution, self._widget.chk_scalebar.isChecked())
             
     def append_ImageMeasurementUnit(self, unit:MeaImg_Unit, flg_nameprompt:bool=True):
         """

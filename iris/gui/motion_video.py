@@ -912,6 +912,8 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         self._chkbox_scalebar = wdg_video.chk_scalebar
         self._chkbox_crosshair.setChecked(False)
         self._chkbox_scalebar.setChecked(True)
+        self._last_overlay_state_crosshair = self._chkbox_crosshair.isChecked()
+        self._last_overlay_state_scalebar = self._chkbox_scalebar.isChecked()
         
         btn_set_imgproc_gain = wdg_video.btn_setffgain
         btn_set_flatfield = wdg_video.btn_setff
@@ -1112,9 +1114,21 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         """
         Disables the overlays on the video feed
         """
+        self._last_overlay_state_crosshair = self._chkbox_crosshair.isChecked()
+        self._last_overlay_state_scalebar = self._chkbox_scalebar.isChecked()
+        
         self._chkbox_crosshair.setChecked(False)
         self._chkbox_scalebar.setChecked(False)
         return
+    
+    def reenable_overlays(self):
+        """
+        Re-enables the overlays on the video feed based on the last state before disabling
+        """
+        try:
+            self._chkbox_crosshair.setChecked(self._last_overlay_state_crosshair)
+            self._chkbox_scalebar.setChecked(self._last_overlay_state_scalebar)
+        except Exception as e: print(f'Failed to re-enable overlays: {e}')
         
     def _start_breathing_z(self) -> None:
         """
