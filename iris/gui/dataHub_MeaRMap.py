@@ -332,7 +332,12 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
         # Other connection setup
         self._worker.sig_saveload_done.connect(self._handle_saveload_result)
-        self._sig_req_update_tree.connect(self.update_tree)
+        
+        # Set up debounced tree update
+        self._tree_update_timer = QTimer(self)
+        self._tree_update_timer.setSingleShot(True)
+        self._tree_update_timer.timeout.connect(self.update_tree)
+        self._sig_req_update_tree.connect(self._debounced_update_tree)
         
     # > Autosave info <
         # Autosave parameters
@@ -457,6 +462,14 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         ]
         
         return list_matches_id
+    
+    @Slot()
+    def _debounced_update_tree(self):
+        """
+        Debounced version of update_tree. Limits updates to at most once per second.
+        """
+        if not self._tree_update_timer.isActive():
+            self._tree_update_timer.start(1000)  # Update at most once per second
     
     @Slot()
     def update_tree(self, keep_selection:bool=True):
