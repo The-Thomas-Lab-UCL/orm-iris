@@ -911,6 +911,10 @@ class MeaRMap_Hub():
         self._list_callbacks = []  # List of callbacks to be called when the mapping measurement is updated
         self._last_update_timestamp:int = get_timestamp_us_int()
         
+        # Cache for unit summaries to avoid recalculating on every access
+        self._cache_unit_summaries:dict[str, tuple[str, dict, int]] = {}  # {unit_id: (name, metadata, num_measurements)}
+        self._cache_valid = False  # Flag to indicate if cache is valid
+        
         self._lock = threading.RLock()  # Lock for thread safety
         
     def add_observer(self,callback:Callable) -> None:
@@ -923,6 +927,17 @@ class MeaRMap_Hub():
         assert callable(callback), 'add_callback: The input data type is not correct. Expected a callable.'
         self._list_callbacks.append(callback)
         
+    def _on_unit_changed(self, unit_id:str) -> None:
+        """
+        Called when a unit changes. Invalidates only that unit's cache entry.
+        
+        Args:
+            unit_id (str): The ID of the unit that changed
+        """
+        if unit_id in self._cache_unit_summaries:
+            del self._cache_unit_summaries[unit_id]
+        self._notify_observers()
+    
     def _notify_observers(self) -> None:
         """
         Runs all the callbacks in the list.
@@ -1018,24 +1033,38 @@ class MeaRMap_Hub():
     def get_summary_units(self) -> tuple[list[str],list[str],list[dict],list[int]]:
         """
         Returns a  summarises all the stored units and their metadata.
+        Uses caching to avoid recalculating summaries for unchanged units.
         
         Returns:
             tuple: list of unit IDs, list of unit names,
                 list of metadata dictionaries,
                 list of number of measurements in the unit
         """
-        with self._lock: list_ids = self._dict_mappingMeasurementUnits[self._unit_id_key]
-        list_names = []
-        list_metadata = []
-        list_num_measurements = []
         with self._lock:
-            for unit in self._dict_mappingMeasurementUnits['measurement_unit']:
+            list_ids = self._dict_mappingMeasurementUnits[self._unit_id_key].copy()
+            list_units = self._dict_mappingMeasurementUnits['measurement_unit']
+            
+            list_names = []
+            list_metadata = []
+            list_num_measurements = []
+            
+            for unit_id, unit in zip(list_ids, list_units):
                 unit:MeaRMap_Unit
-                list_metadata.append(unit.get_dict_measurement_metadata())
-                list_num_measurements.append(unit.get_numMeasurements())
-                list_names.append(unit.get_unit_name())
+                # Check if cached summary exists
+                if unit_id in self._cache_unit_summaries:
+                    name, metadata, num_mea = self._cache_unit_summaries[unit_id]
+                else:
+                    # Compute and cache
+                    name = unit.get_unit_name()
+                    metadata = unit.get_dict_measurement_metadata()
+                    num_mea = unit.get_numMeasurements()
+                    self._cache_unit_summaries[unit_id] = (name, metadata, num_mea)
+                
+                list_names.append(name)
+                list_metadata.append(metadata)
+                list_num_measurements.append(num_mea)
         
-        return (list_ids,list_names,list_metadata,list_num_measurements)
+        return (list_ids, list_names, list_metadata, list_num_measurements)
     
     def get_MappingUnit(self,unit_id:str|None=None, unit_name:str|None=None) -> MeaRMap_Unit:
         """
@@ -1088,8 +1117,9 @@ class MeaRMap_Hub():
             self._dict_mappingMeasurementUnits['measurement_unit'].append(mapping_unit)
             
             self._dict_mappingUnit_NameID[mapping_unit.get_unit_name()] = mapping_unit.get_unit_id()
+            self._cache_valid = False  # Invalidate cache when unit is added
         
-        mapping_unit.add_observer(self._notify_observers)
+        mapping_unit.add_observer(lambda: self._on_unit_changed(unitID))
         
         if notify: self._notify_observers()
         
@@ -1122,6 +1152,9 @@ class MeaRMap_Hub():
             unit.set_unitName(new_name)
             self._dict_mappingUnit_NameID[new_name] = unit_id
             del self._dict_mappingUnit_NameID[old_name]
+            # Invalidate cache for this unit
+            if unit_id in self._cache_unit_summaries:
+                del self._cache_unit_summaries[unit_id]
         
         self._notify_observers()
     
@@ -1156,10 +1189,13 @@ class MeaRMap_Hub():
             
             # Delete the object itself and all of its references
             unit:MeaRMap_Unit = self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx]
-            try: unit.remove_observer(self._notify_observers)
+            try: unit.remove_observer(lambda: self._on_unit_changed(unit_id))
             except Exception as e: print(f"Error in remove_mapping_unit_id: {e}")
             unit.delete_self()
             del self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx]
+            # Remove from cache
+            if unit_id in self._cache_unit_summaries:
+                del self._cache_unit_summaries[unit_id]
         
         # # Force the garbage collector to collect the deleted object
         # gc.collect()
@@ -1179,6 +1215,7 @@ class MeaRMap_Hub():
             self._dict_mappingMeasurementUnits[self._unit_id_key].clear()
             self._dict_mappingMeasurementUnits['measurement_unit'].clear()
             self._dict_mappingUnit_NameID.clear()
+            self._cache_unit_summaries.clear()  # Clear cache
         self._notify_observers()
 
     def shift_xycoordinate_timestamp(self, unit_id:str, timeshift_us:int) -> str:
