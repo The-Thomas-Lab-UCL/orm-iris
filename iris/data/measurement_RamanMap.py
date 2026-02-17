@@ -129,7 +129,6 @@ class MeaRMap_Unit():
             'mapping_measurement_unit: The measurement keys are not the same as the measurement types.'
         
         # Observer setup
-        self._batch_notifications = False
         self._list_observers = []
         
     def get_laser_params(self) -> tuple[float,float]:
@@ -820,34 +819,9 @@ class MeaRMap_Unit():
         """
         Notifies all observers of a change.
         """
-        if self._batch_notifications:
-            self._pending_notification = True
-            return
-            
         for observer in self._list_observers:
             try: observer()
             except Exception as e: print(f"Error notifying observer: {e}")
-    
-    def start_batch_mode(self) -> None:
-        """
-        Start batching observer notifications. Notifications will be deferred until end_batch_mode() is called.
-        """
-        self._batch_notifications = True
-        self._pending_notification = False
-    
-    def end_batch_mode(self, notify:bool=True) -> None:
-        """
-        End batching observer notifications and optionally send a single notification.
-        
-        Args:
-            notify (bool): Whether to send a notification if any were pending. Defaults to True.
-        """
-        self._batch_notifications = False
-        if notify and self._pending_notification:
-            self._pending_notification = False
-            for observer in self._list_observers:
-                try: observer()
-                except Exception as e: print(f"Error notifying observer: {e}")
     
     def copy(self, flg_newID:bool=True) -> Self: # type: ignore
         """

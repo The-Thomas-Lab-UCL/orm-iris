@@ -108,8 +108,6 @@ class Hilvl_MeasurementStorer_Worker(QObject):
         Starts the measurement autosaver
         """
         self._isrunning = True
-        # Enable batch mode to reduce observer notifications during measurement
-        self._mapping_unit.start_batch_mode()
         self._schedule_next_autosave()
         
     @Slot()
@@ -118,8 +116,6 @@ class Hilvl_MeasurementStorer_Worker(QObject):
         Stops the measurement autosaver
         """
         self._isrunning = False
-        # End batch mode and send final notification
-        self._mapping_unit.end_batch_mode(notify=True)
     
     @Slot()
     def _schedule_next_autosave(self):
