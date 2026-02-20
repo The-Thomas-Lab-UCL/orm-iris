@@ -208,14 +208,15 @@ class DataStreamer_StageCam(mp.Process):
             try:
                 while True:
                     with self._lock: idx = bisect.bisect_left(self._list_timestamp,timestamp)
-                    if idx + 2 >= len(self._list_timestamp):
+                    if idx >= len(self._list_timestamp)-1:
                         self.wait_coordinate()
+                    elif idx == 0: return self._list_timestamp[idx]  # If the requested timestamp is before the first recorded timestamp, return the first recorded coordinate
                     else: break
                     
                 with self._lock:
                     idx = bisect.bisect_left(self._list_timestamp,timestamp)
-                    ts1,coor1 = self._list_timestamp[idx],self._list_coordinates[idx]
-                    ts2,coor2 = self._list_timestamp[idx+1],self._list_coordinates[idx+1]
+                    ts1,coor1 = self._list_timestamp[idx-1],self._list_coordinates[idx-1]
+                    ts2,coor2 = self._list_timestamp[idx],self._list_coordinates[idx]
                     
                 # Interpolate the coordinates
                 coor1 = np.array(coor1)
