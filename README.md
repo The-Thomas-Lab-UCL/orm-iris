@@ -1,5 +1,5 @@
 # ORM-IRIS
-Open Raman Microscopy - Integrated Raman Imaging Software (ORM-IRIS or IRIS) is a complementary controller software of the modular [Open Raman Microscopy (ORM) system](www.openramanmicroscopy.org). IRIS is a **GUI-based app** to easily control a motorised Raman microscope (XY-stage, Z-stage, brightfield camera, and a spectrometer) for Raman imaging, offering full instrument controls, automatic Raman imaging, brightfield imaging and tiling, data management, basic data analyses, and more. It supports instruments from various manufacturers and is designed to be **completely modular**, including Ocean Optics, Andor, Princeton Instruments, Thorlabs, Physik Instrumente, Zaber, and more, such that controllers can be easily swapped within seconds by simply changing the chosen instruments in the config file.
+**Please note this work is under review and installation is not recommended currently** Open Raman Microscopy - Integrated Raman Imaging Software (ORM-IRIS or IRIS) is a complementary controller software of the modular [Open Raman Microscopy (ORM) system](www.openramanmicroscopy.org). IRIS is a **GUI-based app** to easily control a motorised Raman microscope (XY-stage, Z-stage, brightfield camera, and a spectrometer) for Raman imaging, offering full instrument controls, automatic Raman imaging, brightfield imaging and tiling, data management, basic data analyses, and more. It supports instruments from various manufacturers and is designed to be **completely modular**, including Ocean Optics, Andor, Princeton Instruments, Thorlabs, Physik Instrumente, Zaber, and more, such that controllers can be easily swapped within seconds by simply changing the chosen instruments in the config file.
 
 ## GUI example
 <img width="452" height="239" alt="image" src="https://github.com/user-attachments/assets/a31565e7-f03e-4eca-aaa8-e7f5365b04cd" />
@@ -169,3 +169,6 @@ For Thorlabs Kinesis stages, simply install the Kinesis software without changin
 
 ### Princeton Instruments spectrometers
 1. Install the PICam in the folder 'C:\Program Files\Princeton Instruments\PICam' (which should be the default folder)
+
+### Safety
+1. Users should follow local laws and instituitonal regulations regarding any aspects of ORM and OMR-IRIS implementation. In particular laser safety, fire and electrical hazards, and mechanical hazards should be carefully considered. We recommend ORM systems are maintained within interlocked optical enclosures at a minimum.  
