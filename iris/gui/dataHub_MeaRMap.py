@@ -292,7 +292,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         wdg.btn_refresh.clicked.connect(self.update_tree)
         wdg.btn_rename.clicked.connect(self.rename_unit)
         wdg.btn_delete.clicked.connect(self.delete_unit)
-        self._btn_save_ext = wdg.btn_save_ext
+        self._btn_save_ext = wdg.btn_save_ext 
         self._btn_save_db = wdg.btn_save_db
         self._btn_load_db = wdg.btn_load_db
         
@@ -446,12 +446,12 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
         # Perform fuzzy matching on the unit names
         list_matches = process.extract(
-            search_query, dict_unit_IdNames.values(), scorer=fuzz.partial_token_set_ratio, limit=None)
+            search_query, dict_unit_IdNames.values(), scorer=fuzz.partial_token_set_ratio, limit=None) # pyright: ignore[reportArgumentType]; fuzzywuzzy expects a list of strings for the choices, but dict_unit_IdNames.values() returns a dict_values object which is iterable but not a list
         list_matches = sorted(list_matches, key=lambda x: x[1], reverse=True)
         
         list_matches_id = [
             unit_id
-            for name, _ in list_matches
+            for name, _ in list_matches # pyright: ignore[reportAssignmentType]; fuzzywuzzy returns a list of tuples (name, score)
             for unit_id, unit_name in dict_unit_IdNames.items()
             if unit_name == name
         ]
@@ -615,7 +615,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         list_ids = [unit.get_unit_id() for unit in list_units]
         
         if len(list_ids) != 1:
-            qw.QErrorMessage().showMessage("Please select only one unit to save")
+            qw.QMessageBox.warning(None, "Save error", "Please select only one unit to save")
             self._reset_reenable_saveload_buttons()
             return
         
@@ -626,6 +626,10 @@ class Wdg_DataHub_Mapping(qw.QWidget):
             "",
             ";;".join([f"{value.upper()} files (*.{key})" for key,value in dict_ext_options.items()]),
         )
+        if save_path == "":
+            self._reset_reenable_saveload_buttons()
+            return
+        
         save_ext = save_ext.split('(')[1].split('*.')[1].split(')')[0]
         
         self.sig_save_ext.emit(list_ids[0], save_path, save_ext)
