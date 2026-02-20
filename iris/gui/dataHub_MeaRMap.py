@@ -156,6 +156,7 @@ class DataHub_Worker(QObject):
             if os.path.exists(dirpath): 
                 if os.path.isdir(dirpath):
                     shutil.rmtree(dirpath)
+                    os.remove(dirpath)
                 else:
                     os.remove(dirpath)
         except Exception as e: self.sig_autoOffload_done.emit(self.offload_error + str(e))
@@ -336,9 +337,9 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
     # > Autosave info <
         # Autosave parameters
-        self._autosave_dirpath = os.path.abspath(SaveParamsEnum.AUTOSAVE_DIRPATH_MEA.value)
-        self._autosave_dirpath = os.path.join(self._autosave_dirpath, f"{get_timestamp_sec()}")
-        if not os.path.exists(self._autosave_dirpath): os.makedirs(self._autosave_dirpath)
+        config_autosave_dirpath = os.path.abspath(SaveParamsEnum.AUTOSAVE_DIRPATH_MEA.value)
+        self._autosave_dirpath = os.path.join(config_autosave_dirpath, f"{get_timestamp_sec()}")
+        self._autooffload_dirpath = os.path.join(config_autosave_dirpath, f"{get_timestamp_sec()}_offload")
         
         # Autosave widgets
         self._flg_autosave = SaveParamsEnum.AUTOSAVE_ENABLED.value and autosave
@@ -387,7 +388,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
                 "Low system memory",
                 "System memory is low (<1GB available). Autosaving and offloading data to free up memory."
             )
-            self.sig_autoOffload_db.emit(self._autosave_dirpath, f"{self._sessionid}.db")
+            self.sig_autoOffload_db.emit(self._autooffload_dirpath, f"{self._sessionid}.db")
             self._flg_issaving_db = True
         
     @Slot()
@@ -1236,13 +1237,15 @@ def test_dataHub():
     
     btn_offload = qw.QPushButton("Offload Mapping Hub database")
     btn_offload.clicked.connect(lambda: datahub.sig_autoOffload_db.emit(
-        datahub._autosave_dirpath,
+        datahub._autooffload_dirpath,
         f"{datahub._sessionid}.db"))
     layout.addWidget(btn_offload)
     
     window.show()
     mappinghub.test_generate_dummy(3)
     datahub.update_tree()
+    
+    datahub._flg_issaved_db = False
     
     sys.exit(app.exec())
     
