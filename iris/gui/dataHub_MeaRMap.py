@@ -759,13 +759,13 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._flg_issaved_db = False
         self._sig_req_update_tree.emit()
         
-    def append_RamanMeasurement_multi(self, measurement:MeaRaman, coor:tuple=(0,0,0)):
+    def append_RamanMeasurement_multi(self, measurement:MeaRaman, coor_mm:tuple=(0,0,0)):
         """
         Append a RamanMeasurement to the MappingMeasurement_Hub by assigning it to a unit.
         
         Args:
             measurement (RamanMeasurement): The RamanMeasurement to append
-            coor (tuple, optional): The coordinates of the measurement. Defaults to (0,0,0).
+            coor_mm (tuple, optional): The coordinates of the measurement in mm. Defaults to (0,0,0).
         """
         # Mapping ID request and check
         unit_name = None
@@ -774,14 +774,14 @@ class Wdg_DataHub_Mapping(qw.QWidget):
                 parent=self,
                 title= "Unit ID",
                 message="Enter the ID for the added Raman measurement:",
-                default=f"Single point measurement at {coor}: ",
+                default=f"Single point measurement at ({coor_mm[0]*1e3:.1f}, {coor_mm[1]*1e3:.1f}, {coor_mm[2]*1e3:.1f}) micron: ",
                 )
             if isinstance(unit_name,str) and not unit_name == '': break
         
         unit = MeaRMap_Unit(unit_name=unit_name)
         
         timestamp = measurement.get_latest_timestamp()
-        unit.append_ramanmeasurement_data(timestamp=timestamp, coor=coor, measurement=measurement)
+        unit.append_ramanmeasurement_data(timestamp=timestamp, coor=coor_mm, measurement=measurement)
         
         self.append_MappingUnit(unit)
         
