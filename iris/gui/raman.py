@@ -543,6 +543,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         ramanHub:DataStreamer_Raman,
         dataHub:Wdg_DataHub_Mapping|None,
         getter_objective_info:Callable[[], str]|None=None,
+        getter_coordinate_mm:Callable[[], tuple[float|None,float|None,float|None]]|None=None,
         main:bool=False
         ) -> None:
         """
@@ -555,6 +556,7 @@ class Wdg_SpectrometerController(qw.QWidget):
             ramanHub (RamanMeasurementHub): The Raman measurement hub to retrieve measurements from
             dataHub (Frm_DataHub): The data hub for the measurements
             getter_objective_info (Callable[[], str], optional): A callable to get objective information. Defaults to None.
+            getter_coordinate_mm (Callable[[], tuple[float|None,float|None,float|None]], optional): A callable to get the current stage coordinates in mm. Defaults to None.
             main (bool, optional): If true, initialises the spectrometer and analyser. Defaults to False.
         
         Note:
@@ -567,6 +569,7 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._ramanHub = ramanHub       # Raman measurement hub
         self._dataHub = dataHub         # Data hub for the measurements
         self._getter_objective_info = getter_objective_info if getter_objective_info is not None else (lambda: "N/A")
+        self._getter_coordinate = getter_coordinate_mm if getter_coordinate_mm is not None else (lambda: (None, None, None))
         
 # >>> Threading and worker setups <<<
     # >> Communciation with the controller <<
@@ -699,8 +702,10 @@ class Wdg_SpectrometerController(qw.QWidget):
         self._btn_saveto_datahub = widget.btn_savetomanager
         @Slot()
         def save_to_datahub_callback():
-            if self._dataHub is None: qw.QErrorMessage(self).showMessage('DataHub is not available!'); return
-            self._dataHub.append_RamanMeasurement_multi(self._sngl_measurement)
+            if self._dataHub is None: qw.QMessageBox.warning(self, 'DataHub not available', 'DataHub is not available! Cannot save measurement.'); return
+            coor = self._getter_coordinate()
+            coor = tuple(c if c is not None else 'N/A' for c in coor)
+            self._dataHub.append_RamanMeasurement_multi(self._sngl_measurement, coor)
         if isinstance(self._dataHub,Wdg_DataHub_Mapping):
             self._btn_saveto_datahub.clicked.connect(save_to_datahub_callback)
         else: self._btn_saveto_datahub.setEnabled(False)

@@ -113,7 +113,8 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
             controller=raman_controller,
             ramanHub=raman_hub,
             dataHub=self._dataHub_map,
-            getter_objective_info=self._dataHub_imgcal.get_selected_calibration_id
+            getter_objective_info=self._dataHub_imgcal.get_selected_calibration_id,
+            getter_coordinate_mm=self._motion.get_coordinates_closest_mm
             )
         self.lytRaman.addWidget(self._raman)
         
