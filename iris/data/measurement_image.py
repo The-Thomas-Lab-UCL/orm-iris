@@ -28,7 +28,7 @@ if __name__ == '__main__':
 import PySide6.QtWidgets as qw
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 import threading
 
 import sqlite3 as sql
@@ -276,12 +276,66 @@ class MeaImg_Unit():
             coor_pixel_arr = self._mat_ori2stitch @ np.array(coor_pixel).reshape(2,1)
             return coor_pixel_arr.flatten().astype(int).tolist() # pyright: ignore[reportReturnType]
         
-    def get_image_all_stitched(self, low_res:bool=False) -> tuple[Image.Image,tuple[float,float],tuple[float,float]]:
+    def _draw_scalebar(self, img:Image.Image, scale:float=1.0) -> Image.Image:
+        """
+        Adds an extra 5% height at the bottom of the image with a scalebar 50% of the image width.
+        The conversion is done using the calibration parameters (mm/pixel) and the scalebar is drawn using the PIL ImageDraw module.
+
+        Args:
+            img (Image.Image): Image to be added a scalebar
+            scale (float): Resolution scale of the image, used to adjust the scalebar length accordingly. Default is 1.0 (original resolution, lower is lower resolution)
+
+        Returns:
+            Image.Image: Image with the added scalebar
+        """
+        if not self.check_calibration_exist(): raise ValueError('Calibration parameters are not set')
+        if not isinstance(self._calibration, ImgMea_Cal): raise ValueError('Calibration is not set')
+        if not isinstance(img, Image.Image): raise ValueError('Image must be a PIL Image')
+        if not isinstance(scale, (int,float)): raise ValueError('Scale must be a number')
+        
+        cal = self._calibration
+        
+        # Calculate the scalebar length in mm based on the calibration parameters
+        scalebar_length_pixel = int(img.size[0]*0.5)
+        scalebar_length_mm = scalebar_length_pixel / cal.scale_x_pixelPerMm
+        
+        scalebar_length_mm = scalebar_length_mm * scale
+        
+        # Create a new image with extra height for the scalebar
+        new_height = int(img.size[1])
+        font_size = int(img.size[1]*0.02)
+        white_gap = int(img.size[1]*0.02)
+        line_stroke = int(img.size[1]*0.005)
+        new_height += font_size//2 + 2*white_gap + line_stroke//2
+        
+        img_with_scalebar = Image.new('RGB',(img.size[0],new_height),(255,255,255))
+        img_with_scalebar.paste(img,(0,0))
+        draw = ImageDraw.Draw(img_with_scalebar)
+        scalebar_y = int(img.size[1]) + white_gap
+        
+        x_start = white_gap
+        x_end = img.size[0]*0.5 + white_gap
+        y_line = scalebar_y + line_stroke//2
+        y_start = y_line - line_stroke
+        y_end = y_line + line_stroke
+        draw.line([(x_start, y_line), (x_end, y_line)], fill='black', width=line_stroke)
+        
+        # draw vertical lines at the ends of the scalebar
+        draw.line([(x_start, y_start), (x_start, y_end)], fill='black', width=line_stroke//2)
+        draw.line([(x_end, y_start), (x_end, y_end)], fill='black', width=line_stroke//2)
+        
+        text = f'{abs(scalebar_length_mm)*1e3:.1f} micron - {self._unitName} - ORM IRIS'
+        draw.text((img.size[0]*0.5 + white_gap*2, scalebar_y - font_size//2), text, fill='black')
+        
+        return img_with_scalebar
+        
+    def get_image_all_stitched(self, low_res:bool=False, scalebar:bool=False) -> tuple[Image.Image,tuple[float,float],tuple[float,float]]:
         """
         Stitches all the images taken
         
         Args:
             low_res (bool): Flag to use the low resolution images. Default is False
+            scalebar (bool): Flag to add a scalebar to the stitched image. Default is False
         
         Returns:
             tuple[Image.Image,tuple[float,float],tuple[float,float]]:
@@ -413,6 +467,8 @@ class MeaImg_Unit():
                                                        low_res=low_res)
         img_limit_coor_max_mm = self.convert_imgpt2stg(frame_coor_mm=img_limit_coor_min_mm,coor_pixel=(img_wid,img_hei),
                                                        correct_rot=True,low_res=low_res)
+        
+        if scalebar: img_stitched = self._draw_scalebar(img_stitched, scale=self._lres_scale if low_res else 1.0)
         
         return img_stitched, img_limit_coor_min_mm, img_limit_coor_max_mm
         
@@ -685,7 +741,7 @@ class MeaImg_Unit():
             y_coor = float(np.random.uniform(0,1))
             z_coor = float(0)
             colour = (np.random.randint(0,256),np.random.randint(0,256),np.random.randint(0,256))
-            image = Image.new('RGB',(100,100),color=colour)
+            image = Image.new('RGB',(500,500),color=colour)
             
             self.add_measurement(timestamp, x_coor, y_coor, z_coor, image)
         return

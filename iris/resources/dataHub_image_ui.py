@@ -15,9 +15,10 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QGroupBox, QHBoxLayout,
-    QHeaderView, QPushButton, QSizePolicy, QTreeWidget,
-    QTreeWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QFrame,
+    QGroupBox, QHBoxLayout, QHeaderView, QPushButton,
+    QSizePolicy, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+    QWidget)
 
 class Ui_dataHub_image(object):
     def setupUi(self, dataHub_image):
@@ -60,10 +61,23 @@ class Ui_dataHub_image(object):
 
         self.horizontalLayout_2.addWidget(self.btn_remove)
 
+        self.line = QFrame(self.groupBox)
+        self.line.setObjectName(u"line")
+        self.line.setFrameShape(QFrame.Shape.VLine)
+        self.line.setFrameShadow(QFrame.Shadow.Sunken)
+
+        self.horizontalLayout_2.addWidget(self.line)
+
         self.btn_save_png = QPushButton(self.groupBox)
         self.btn_save_png.setObjectName(u"btn_save_png")
 
         self.horizontalLayout_2.addWidget(self.btn_save_png)
+
+        self.chk_scalebar = QCheckBox(self.groupBox)
+        self.chk_scalebar.setObjectName(u"chk_scalebar")
+        self.chk_scalebar.setChecked(True)
+
+        self.horizontalLayout_2.addWidget(self.chk_scalebar)
 
 
         self.verticalLayout.addLayout(self.horizontalLayout_2)
@@ -90,5 +104,6 @@ class Ui_dataHub_image(object):
         self.btn_load.setText(QCoreApplication.translate("dataHub_image", u"Load (.db)", None))
         self.btn_remove.setText(QCoreApplication.translate("dataHub_image", u"Remove selected", None))
         self.btn_save_png.setText(QCoreApplication.translate("dataHub_image", u"Save selected units (.png)", None))
+        self.chk_scalebar.setText(QCoreApplication.translate("dataHub_image", u"Include a scalebar", None))
     # retranslateUi
 
