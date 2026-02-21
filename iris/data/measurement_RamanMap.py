@@ -1710,8 +1710,9 @@ class MeaRMap_Handler():
         """
         assert isinstance(mappingHub, MeaRMap_Hub), 'save_mapping_measurement: The input data type is not correct. Expected mapping_measurement_new object.'
         assert mappingHub.check_measurement_exist(), 'save_mapping_measurement: The measurement data does not exist.'
-        assert os.path.exists(savedirpath) and os.path.isdir(savedirpath), 'save_mapping_measurement: The input savedirpath is not correct. Expected a valid directory path.'
         assert isinstance(savename,str) and savename != '', 'save_mapping_measurement: The input savename is not correct. Expected a valid filename.'
+        
+        if not os.path.exists(savedirpath) or not os.path.isdir(savedirpath): os.makedirs(savedirpath)
         
         if savename[-3:] != '.db': savename += '.db'
         savepath = os.path.join(savedirpath,savename)
