@@ -67,7 +67,7 @@ class main_analyser(Ui_main_analyser,qw.QMainWindow):
     def _init_signals(self):
         # Heatmap plot
         self._dataHub_local.sig_tree_selection_str.connect(self._heatmapPlotter.set_combobox_name)
-        self._dataHub_local.sig_tree_selection_str.connect(self._heatmapPlotter.sig_request_update_plot.emit)
+        self._dataHub_local.sig_tree_selection.connect(self._heatmapPlotter.sig_request_update_plot.emit)
         self._heatmapPlotter.sig_mappingUnit_changed.connect(self._dataHub_local.set_selection_unitName)
         
         # 1D plot
