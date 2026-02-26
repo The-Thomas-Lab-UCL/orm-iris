@@ -350,7 +350,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 points_done = i + 1
                 time_elapsed = time.time() - time_start
                 time_remaining_str = self._calculate_time_remaining(points_done, total_points, time_elapsed)
-                progress_msg = f'Measured {points_done}/{total_points} points. Remaining: {time_remaining_str}. Elapsed: {self._convert_time_to_hms(time_elapsed)}.'
+                progress_msg = f'Measured {points_done}/{total_points} points. Remaining est.: {time_remaining_str}. Elapsed: {self._convert_time_to_hms(time_elapsed)}. Total est.: {self._convert_time_to_hms(time_elapsed + (time_elapsed/points_done)*(total_points-points_done))}.'
                 self.sig_progress_update_str.emit(progress_msg)
         
         self._event_isacquiring.clear()
@@ -416,7 +416,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 points_done = i + 1
                 time_elapsed = time.time() - time_start
                 time_remaining_str = self._calculate_time_remaining(points_done, total_points, time_elapsed)
-                progress_msg = f'Measured {points_done}/{total_points} lines. Estimated time remaining: {time_remaining_str}. Elapsed time: {self._convert_time_to_hms(time_elapsed)}.'
+                progress_msg = f'Measured {points_done}/{total_points} lines. Remaning est.: {time_remaining_str}. Elapsed: {self._convert_time_to_hms(time_elapsed)}. Total est.: {self._convert_time_to_hms(time_elapsed + (time_elapsed/points_done)*(total_points-points_done))}.'
                 self.sig_progress_update_str.emit(progress_msg)
         
         # Stop raman frame's continuous measurement and store the final measurements
@@ -899,7 +899,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.destroyed.connect(self._worker_autoMeaStorer.deleteLater)
         self.destroyed.connect(self._thread_autoMeaStorer.deleteLater)
         
-        self._thread_autoMeaStorer.start(QThread.Priority.HighestPriority)
+        self._thread_autoMeaStorer.start(QThread.Priority.HighPriority)
         
     def _init_autoMeaStorer_worker(self, mapping_unit:MeaRMap_Unit) -> queue.Queue:
         q_storage = queue.Queue()
