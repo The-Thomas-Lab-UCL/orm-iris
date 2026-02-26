@@ -899,7 +899,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.destroyed.connect(self._worker_autoMeaStorer.deleteLater)
         self.destroyed.connect(self._thread_autoMeaStorer.deleteLater)
         
-        self._thread_autoMeaStorer.start(QThread.Priority.HighestPriority)
+        self._thread_autoMeaStorer.start(QThread.Priority.HighPriority)
         
     def _init_autoMeaStorer_worker(self, mapping_unit:MeaRMap_Unit) -> queue.Queue:
         q_storage = queue.Queue()
