@@ -28,7 +28,7 @@ if __name__ == '__main__':
 import PySide6.QtWidgets as qw
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 import threading
 
 import sqlite3 as sql
@@ -40,8 +40,8 @@ from iris.utils.general import get_timestamp_us_str, thread_assign
 
 from typing import Callable
 
+from iris.controllers import ControllerConfigEnum
 from iris.data.calibration_objective import ImgMea_Cal, ImgMea_Cal_Hub
-
 from iris.data import SaveParamsEnum, ImageProcessingParamsEnum
 
 class MeaImg_Unit():
@@ -324,8 +324,9 @@ class MeaImg_Unit():
         draw.line([(x_start, y_start), (x_start, y_end)], fill='black', width=line_stroke//2)
         draw.line([(x_end, y_start), (x_end, y_end)], fill='black', width=line_stroke//2)
         
+        font = ControllerConfigEnum.SCALEBAR_FONT.value
         text = f'{abs(scalebar_length_mm)*1e3:.1f} micron - {self._unitName} - ORM IRIS'
-        draw.text((img.size[0]*0.5 + white_gap*2, scalebar_y - font_size//2), text, fill='black')
+        draw.text((img.size[0]*0.5 + white_gap*2, scalebar_y - font_size//2), text, fill='black', font=ImageFont.truetype(font, font_size))
         
         return img_with_scalebar
         
@@ -731,7 +732,7 @@ class MeaImg_Unit():
         self.refresh_metadata()
         return
     
-    def test_generate_dummy(self):
+    def test_generate_dummy(self, resolution:tuple[int,int]=(500,500)):
         """
         Generates dummy measurements for testing purposes
         """
@@ -741,7 +742,7 @@ class MeaImg_Unit():
             y_coor = float(np.random.uniform(0,1))
             z_coor = float(0)
             colour = (np.random.randint(0,256),np.random.randint(0,256),np.random.randint(0,256))
-            image = Image.new('RGB',(500,500),color=colour)
+            image = Image.new('RGB',(3000,3000),color=colour)
             
             self.add_measurement(timestamp, x_coor, y_coor, z_coor, image)
         return
