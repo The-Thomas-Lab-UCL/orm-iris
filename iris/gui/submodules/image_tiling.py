@@ -164,8 +164,6 @@ class ImageProcessor_Worker(QObject):
         self.flg_stop.clear()
         self.sig_statbar_update.emit('Taking images: {} of {}'.format(1,totalcoor))
         
-        exposure_time_ms = self._motion_ctrl.get_exposure_time_ms()
-        sleep_time_sec = exposure_time_ms / 1000 if isinstance(exposure_time_ms, (int, float)) else ControllerConfigEnum.STAGE_TILING_WAITTIME_SEC.value
         
         self._motion_ctrl.pause_video()
         ts_before = self._motion_ctrl.get_latest_image_with_timestamp()[1]
@@ -185,7 +183,7 @@ class ImageProcessor_Worker(QObject):
                 img,ts = self._motion_ctrl.get_latest_image_with_timestamp()
                 if ts == ts_before:
                     # print(f'{time.time()}: No new image received yet for coordinate {coor}, still waiting...')
-                    time.sleep(sleep_time_sec)  # Allow time for stage to settle
+                    time.sleep(ControllerConfigEnum.STAGE_TILING_WAITTIME_SEC.value)  # Allow time for stage to settle
                 else:
                     ts_before = ts
                     # print(f'{time.time()}: New image received for coordinate {coor}, proceeding with processing...')

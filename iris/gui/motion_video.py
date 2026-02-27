@@ -1592,19 +1592,6 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         """
         return self._currentImage
     
-    def get_exposure_time_ms(self) -> float|None:
-        """
-        Returns the current camera exposure time in milliseconds
-
-        Returns:
-            float|None: The current camera exposure time in milliseconds, or None if the camera does not support this feature
-        """
-        if hasattr(self._camera_ctrl,'get_exposure_time_us'):
-            exposure_time_us = self._camera_ctrl.get_exposure_time_us()
-            if exposure_time_us is not None:
-                return exposure_time_us/1e3
-        return None
-    
     def get_latest_image_with_timestamp(self) -> tuple[Image.Image|None,float]:
         """
         Returns the latest captured image along with its timestamp
