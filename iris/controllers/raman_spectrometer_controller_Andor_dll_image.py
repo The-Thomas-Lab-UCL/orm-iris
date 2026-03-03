@@ -116,19 +116,6 @@ GetVSSpeed = andorDLL.GetVSSpeed
 GetVSSpeed.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_float)] # [index to get, speed]
 GetVSSpeed.restype = ctypes.c_uint
 
-SetVSSpeed = andorDLL.SetVSSpeed
-SetVSSpeed.argtypes = [ctypes.c_int] # [index of the speed to set]
-SetVSSpeed.restype = ctypes.c_uint  # DRV_SUCCESS: Vertical speed set., DRV_NOT_INITIALIZED: System not initialized., DRV_NOT_AVAILABLE: Your system does not support this feature., DRV_ACQUIRING: Acquisition in progress., DRV_P1INVALID: Invalid speed index parameter.
-
-SetVSAmplitude = andorDLL.SetVSAmplitude
-SetVSAmplitude.argtypes = [ctypes.c_int] # [state of the amplitude: 0. Low, 1. High]
-SetVSAmplitude.restype = ctypes.c_uint  # DRV_SUCCESS: Amplitude set., DRV_NOT_INITIALIZED: System not initialized., DRV_NOT_AVAILABLE: Your system does not support this feature., DRV_ACQUIRING: Acquisition in progress., DRV_P1INVALID: Invalid amplitude parameter.
-
-# unsigned int WINAPI SetShutterEx(int typ, int mode, int closingtime, int openingtime, int extmode)
-SetShutterEx = andorDLL.SetShutterEx
-SetShutterEx.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int] # [type, mode, closing time in ms, opening time in ms, external mode]
-SetShutterEx.restype = ctypes.c_uint # DRV_SUCCESS: Shutter set., DRV_NOT_INITIALIZED: System not initialized., DRV_ACQUIRING: Acquisition in progress., DRV_ERROR_ACK: Unable to communicate with card., DRV_NOT_SUPPORTED: Camera does not support shutter control., DRV_P1INVALID: Invalid TTL type., DRV_P2INVALID: Invalid internal mode., DRV_P3INVALID: Invalid time to close., DRV_P4INVALID: Invalid time to open., DRV_P5INVALID: Invalid external mode.
-
 # >>> Temperature
 GetTemperatureRange = andorDLL.GetTemperatureRange
 GetTemperatureRange.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)] # Min and max temp
@@ -182,11 +169,6 @@ AbortAcquisition = andorDLL.AbortAcquisition # Aborts acquisition for the RunTil
 AbortAcquisition.argtypes = []
 AbortAcquisition.restype = ctypes.c_uint
 
-# unsigned int WINAPI WaitForAcquisition(void)
-WaitForAcquisition = andorDLL.WaitForAcquisition # Blocks the calling thread until acquisition is complete
-WaitForAcquisition.argtypes = []
-WaitForAcquisition.restype = ctypes.c_uint # DRV_SUCCESS: Acquisition complete., DRV_NOT_INITIALIZED: System not initialized., DRV_NO_NEW_DATA: Non-Acquisition Event occurred.(e.g. CancelWait () called)
-
 WaitForAcquisitionTimeOut  = andorDLL.WaitForAcquisitionTimeOut  # Blocks the calling thread until acquisition is complete
 WaitForAcquisitionTimeOut.argtypes = [ctypes.c_int] # [timeout in milliseconds]
 WaitForAcquisitionTimeOut.restype = ctypes.c_uint
@@ -238,11 +220,6 @@ SetNumberAccumulations.restype = ctypes.c_uint # DRV_SUCCESS: Number of accumula
 GetMostRecentImage = andorDLL.GetMostRecentImage
 GetMostRecentImage.argtypes = [ctypes.POINTER(ctypes.c_long),ctypes.c_ulong] # [array to store the image, sized to the sensor, number of pixels]
 GetMostRecentImage.restype = ctypes.c_uint # DRV_SUCCESS: Image has been copied into array., DRV_NOT_INITIALIZED: System not initialized., DRV_ERROR_ACK: Unable to communicate with card., DRV_P1INVALID: Invalid pointer (i.e. NULL)., DRV_P2INVALID: Array size is incorrect., DRV_NO_NEW_DATA: There is no new data yet.
-
-# unsigned int WINAPI GetAcquiredData(at_32* arr, unsigned long size)
-GetAcquiredData = andorDLL.GetAcquiredData
-GetAcquiredData.argtypes = [ctypes.POINTER(ctypes.c_int32),ctypes.c_ulong] # [array to store the data, sized to the sensor, number of pixels]
-GetAcquiredData.restype = ctypes.c_uint # DRV_SUCCESS: Data has been copied into array., DRV_NOT_INITIALIZED: System not initialized., DRV_ERROR_ACK: Unable to communicate with card., DRV_P1INVALID: Invalid pointer (i.e. NULL)., DRV_P2INVALID: Array size is incorrect., DRV_NO_NEW_DATA: There is no new data yet.
 
 #>>> Save settings <<<
 SaveAsSif = andorDLL.SaveAsSif
@@ -405,104 +382,6 @@ def getDetector() -> tuple[int,int]:
     if msg: raise RuntimeError(f"Failed to get detector: {msg}")
     return x_pixel.value, y_pixel.value
 
-def getFastestRecommendedVSSpeed() -> tuple[int, float]:
-    """
-    Get the list of the fastest recommended vertical shift speeds.
-
-    Returns:
-        tuple[int, float]: The index and the fastest recommended vertical shift speed in microseconds.
-    """
-    speed = ctypes.c_float()
-    index = ctypes.c_int()
-    ret = GetFastestRecommendedVSSpeed(ctypes.byref(index), ctypes.byref(speed))
-    msg = read_return_message(ret)
-    if msg: raise RuntimeError(f"Failed to get fastest recommended vertical shift speed: {msg}")
-    
-    return index.value, speed.value
-
-def getNumberVSSpeeds() -> int:
-    """
-    Get the number of available vertical shift speeds.
-
-    Returns:
-        int: The number of available vertical shift speeds.
-    """
-    num_speeds = ctypes.c_int()
-    ret = GetNumberVSSpeeds(ctypes.byref(num_speeds))
-    msg = read_return_message(ret)
-    if msg: raise RuntimeError(f"Failed to get number of vertical shift speeds: {msg}")
-    return num_speeds.value
-
-def getVSSpeed(index: int) -> float:
-    """
-    Get the current vertical shift speed in microseconds per pixel shift for the given index.
-    
-    Args:
-        index (int): The index of the vertical shift speed to get.
-    
-    Returns:
-        float: The current vertical shift speed in microseconds.
-    """
-    speed = ctypes.c_float()
-    ret = GetVSSpeed(ctypes.c_int(index), ctypes.byref(speed))
-    msg = read_return_message(ret)
-    if msg: raise RuntimeError(f"Failed to get vertical shift speed: {msg}")
-    return speed.value
-
-def setVSSpeed(index: int) -> None:
-    """
-    Set the vertical shift speed.
-
-    Args:
-        index (int): The index of the vertical shift speed to set. Refer to getFastestRecommendedVSSpeed() for the list of available speeds and their corresponding indices.
-    """
-    ret = SetVSSpeed(ctypes.c_int(index))
-    msg = read_return_message(ret)
-    if msg: raise RuntimeError(f"Failed to set vertical shift speed: {msg}")
-    
-def setVSAmplitude(level: int) -> None:
-    """
-    Set the vertical shift amplitude. (0 to 4 for +0 to +4 respectively, with 0 for normal amplitude)
-    
-    NOTE: Exercise caution when increasing the amplitude of the vertical clock voltage, since higher
-    clocking voltages may result in increased clock-induced charge (noise) in your signal. In
-    general, only the very highest vertical clocking speeds are likely to benefit from an
-    increased vertical clock voltage amplitude.
-    
-    Args:
-        level (int): The level of the vertical shift amplitude to set.
-    """
-    ret = SetVSAmplitude(ctypes.c_int(level))
-    msg = read_return_message(ret)
-    if msg: raise RuntimeError(f"Failed to set vertical shift amplitude: {msg}")
-
-def setShutterEx(type: int, mode: int, closing_time: int, opening_time: int, ext_mode: int) -> None:
-    """
-    Set the shutter parameters.
-
-    Args:
-        type (int): TTL signal type to control the shutter (
-            0: Output TTL low signal to open shutter,
-            1: Output TTL high signal to open shutter).
-        mode (int): Shutter mode (
-            0: Fully Auto,
-            1: Permanently Open,
-            2: Permanently Closed,
-            4: Open for FVB series,
-            5: Open for any series).
-        closing_time (int): Time shutter takes to close in milliseconds.
-        opening_time (int): Time shutter takes to open in milliseconds.
-        ext_mode (int): External mode (
-            0: Fully Auto,
-            1: Permanently Open,
-            2: Permanently Closed,
-            4: Open for FVB series,
-            5: Open for any series).
-    """
-    ret = SetShutterEx(ctypes.c_int(type), ctypes.c_int(mode), ctypes.c_int(closing_time), ctypes.c_int(opening_time), ctypes.c_int(ext_mode))
-    msg = read_return_message(ret)
-    if msg: raise RuntimeError(f"Failed to set shutter parameters: {msg}")
-
 def getTemperatureRange() -> tuple[float, float]:
     """
     Get the temperature range of the Andor SDK.
@@ -631,18 +510,6 @@ def abortAcquisition() -> None:
     ret = AbortAcquisition()
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to abort acquisition: {msg}")
-
-def waitForAcquisition() -> bool:
-    """
-    Wait for the acquisition to complete.
-
-    Returns:
-        bool: True if the acquisition completed successfully, False if a non-acquisition event occurred (e.g. CancelWait called).
-    """
-    ret = WaitForAcquisition()
-    if ret == ErrorCodes.DRV_SUCCESS.value: return True
-    elif ret == ErrorCodes.DRV_NO_NEW_DATA.value: return False
-    else: raise RuntimeError(f"Failed to wait for acquisition: {read_return_message(ret)}")
 
 def waitForAcquisitionTimeOut(timeout_ms:int|float) -> bool:
     """
@@ -832,37 +699,6 @@ def getMostRecentImage(xpixel:int,ypixel:int,total_pixels:int) -> np.ndarray:
     elif ret == ErrorCodes.DRV_NO_NEW_DATA.value: raise BufferError("There is no new data yet")
     
     return np.ctypeslib.as_array(image_array).reshape((ypixel, xpixel))
-
-def getAcquiredData(total_pixels:int) -> np.ndarray:
-    """
-    Get the acquired data from the instrument.
-    
-    Args:
-        total_pixels (int): The total number of pixels
-    
-    Raises:
-        RuntimeError("Library is not initialised")
-        RuntimeError("Acquisition in progress")
-        RuntimeError("Unable to communicate with card")
-        SyntaxError("Invalid pointer (i.e. NULL).")
-        ValueError("Array size is incorrect.")
-        BufferError("There is no new data yet")
-    
-    Returns:
-        np.ndarray: The acquired data
-    """
-    data_array = (ctypes.c_int32 * total_pixels)()
-    total_pixels_long = ctypes.c_ulong(total_pixels)
-    
-    ret = GetAcquiredData(data_array, total_pixels_long)
-    if ret == ErrorCodes.DRV_NOT_INITIALIZED.value: raise RuntimeError("Library is not initialised")
-    elif ret == ErrorCodes.DRV_ACQUIRING.value: raise RuntimeError("Acquisition in progress")
-    elif ret == ErrorCodes.DRV_ERROR_ACK.value: raise RuntimeError("Unable to communicate with card")
-    elif ret == ErrorCodes.DRV_P1INVALID.value: raise SyntaxError("Invalid pointer (i.e. NULL).")
-    elif ret == ErrorCodes.DRV_P2INVALID.value: raise ValueError("Array size is incorrect.")
-    elif ret == ErrorCodes.DRV_NO_NEW_DATA.value: raise BufferError("There is no new data yet")
-    
-    return np.ctypeslib.as_array(data_array)
 
 def saveAsSif(path: str) -> None:
     """
@@ -1113,7 +949,7 @@ def continuous_acquisition_test(integration_time_ms:float=30.0) -> None:
     pixelx,pixely = getDetector()
     print(f"Detector size (X, Y): {pixelx}, {pixely}")
     
-    setReadMode(mode='0. Full Vertical Binning')
+    setReadMode(mode='4. Image')
     start_pixel, height_pixel = 0, 255
     setImage(hbin=1,vbin=height_pixel,hstart=1,hend=pixelx,vstart=start_pixel+1,vend=start_pixel+height_pixel)
     setKineticCycleTime(0)
@@ -1175,16 +1011,17 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         self._set_ROI_parameters()
         
         # Acquisition initialisation
-        setReadMode(mode='0. Full Vertical Binning')
-        setAcquisitionMode(mode='1. Single')
+        setReadMode(mode='4. Image')
+        setAcquisitionMode(mode='5. RunTillAbort')
         setKineticCycleTime(0.0)
-        # setTriggerMode('10. Software Trigger')
+        setTriggerMode('10. Software Trigger')
         
-        # if not isTriggerModeAvailable(mode='10. Software Trigger'):
-        #     raise SyntaxError('Trigger mode not available either due to hardware limitations or incorrect settings.'\
-        #         '(e.g., Read mode has to be set to 4. Image, and Acquisition mode to 5. RunTillAbort)')
+        if not isTriggerModeAvailable(mode='10. Software Trigger'):
+            raise SyntaxError('Trigger mode not available either due to hardware limitations or incorrect settings.'\
+                '(e.g., Read mode has to be set to 4. Image, and Acquisition mode to 5. RunTillAbort)')
         
         # Acquisition parameters
+        self._flg_isacquiring = threading.Event()
         self._integration_time_us:int = 0
         self._theoretical_wait_time_sec:float = 0.0
         
@@ -1211,31 +1048,15 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         
         self._initialise_cooler()
         self._integration_time_us = self.get_integration_time_us()
+        self._start_acquisition()
         
     def terminate(self):
         """
         Terminates the spectrometer controller according to the manufacturer's protocol
         """
         self._cooler_shutdown_protocol()
-        
-    def _open_ex_shutter(self):
-        """
-        Open the external shutter if available.
-        """
-        try:
-            setShutterEx(1,1,100,100,1)
-        except Exception as e:
-            print(f"Failed to open external shutter: {e}")
-            
-    def _close_ex_shutter(self):
-        """
-        Close the external shutter if available.
-        """
-        try:
-            setShutterEx(1,1,100,100,2)
-        except Exception as e:
-            print(f"Failed to close external shutter: {e}")
-        
+        self._stop_acquisition()
+
     def _initialise_cooler(self):
         self._lock.acquire()
         coolerON()
@@ -1315,6 +1136,16 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         self._total_pixel = int(self._x_pixel * self._y_pixel)
 
         print(f"Binning parameters: xstart={xstart}, xend={xend}, xbin={xbin}, ystart={ystart}, yend={yend}, ybin={ybin}")
+        
+    def _start_acquisition(self):
+        with self._lock:
+            startAcquisition()
+            self._flg_isacquiring.set()
+
+    def _stop_acquisition(self):
+        with self._lock:
+            abortAcquisition()
+            self._flg_isacquiring.clear()
             
     def get_integration_time_us(self) -> int:
         """
@@ -1369,19 +1200,16 @@ class SpectrometerController_Andor(Class_SpectrometerController):
                 - int: The integration time used for the measurement in microseconds.
         """
         with self._lock:
-            t1 = time.time()
             timestamp = get_timestamp_us_int()
-            startAcquisition()
-            # waitForAcquisitionTimeOut(int((self._theoretical_wait_time_sec * 1e3 + self._integration_time_us * 1e-3) * 1.5))
-            waitForAcquisition()
-            intensity = getAcquiredData(self._x_pixel)
-            t2 = time.time()
-            print(f"Time taken for acquisition: {t2-t1:.3f} sec")
-            # print(f'Intesity: {intensity[:10]}...') # print the first 10 values of the intensity for debugging
+            sendSoftwareTrigger()
+            waitForAcquisitionTimeOut(int(self._theoretical_wait_time_sec * 1e3 * 1.5))
+            intensity = getMostRecentImage(self._x_pixel,self._y_pixel,self._total_pixel)
         
-        wavelength = np.arange(1,self._x_pixel+1).astype(float).tolist()
+        intensity = np.sum(intensity, axis=0).reshape(-1).tolist()
+        wavelength = np.arange(1,self._x_pixel+1).tolist()
         
-        intensity = intensity.astype(float).tolist()
+        intensity = [float(i) for i in intensity]
+        wavelength = [float(i) for i in wavelength]
         
         spectra = pd.DataFrame({
             DataAnalysisConfigEnum.WAVELENGTH_LABEL.value: wavelength,
@@ -1429,49 +1257,21 @@ if __name__ == "__main__":
     # try: shutdown()
     # except Exception as e: print(f"Shutdown failed: {e}")
     
-    
-    # fig, ax = plt.subplots()
-    # fig.show()
-    
     controller = SpectrometerController_Andor()
-    controller._open_ex_shutter()
+    t1 = time.time()
+    for i in range(20):
+        controller.measure_spectrum()
+    t2 = time.time()
     
-    int_time_us = int(100e3)
-    controller.set_integration_time_us(int_time_us)
-    
-    
-    print(f"Integration time set to {controller.get_integration_time_us()/1e3} ms")
-    
-    print(f'Recommended fastest VSSpeed: {getFastestRecommendedVSSpeed()}')
-    print(f'Number of VSSpeeds: {getNumberVSSpeeds()}')
-    
-    setVSSpeed(2)
-    
-    for i in range(getNumberVSSpeeds()):
-        print(f'VSSpeed {i}: {getVSSpeed(i)} microsec/pixel shift')
-    
-    # t1 = time.time()
-    # count = 10
-    # for i in range(count):
-    #     controller.measure_spectrum()
-    #     # mea,_,_ = controller.measure_spectrum()
-    # t2 = time.time()
-    # print(f"Time taken for {count} measurements: {t2 - t1} seconds, time per measurement: {(t2 - t1) / count} seconds")
-    
-    
-    fig, ax = plt.subplots()
-    while True:
-        mea,_,_ = controller.measure_spectrum()
-        ax.clear()
-        ax.plot(mea[DataAnalysisConfigEnum.WAVELENGTH_LABEL.value], mea[DataAnalysisConfigEnum.INTENSITY_LABEL.value])
-        
-        fig.canvas.draw()
-        fig.canvas.flush_events()
-        
-        if fig.waitforbuttonpress(10e-3): break
+    t1 = time.time()
+    for i in range(100):
+        controller.measure_spectrum()
+    t2 = time.time()
+    print(f"Time taken for 100 measurements: {t2 - t1} seconds, time per measurement: {(t2 - t1) / 100} seconds")
     
     # Save the last measurement as a .sif file
     try:
+        controller._stop_acquisition()
         controller._test_save_last_measurement_as_sif("test_measurement.sif")
         print(f'Saved last measurement as test_measurement.sif')
     except Exception as e:
