@@ -28,7 +28,6 @@ import matplotlib
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 from matplotlib.colorbar import Colorbar
-import matplotlib.pyplot as plt
 # matplotlib.use('Agg')
 
 if __name__ == '__main__':
@@ -2115,7 +2114,8 @@ class MeaRMap_Plotter:
     Class to plot the mapping measurement data from the MappingMeasurement_Unit object
     """
     def __init__(self):
-        self._fig, self._ax = plt.subplots()
+        self._fig = Figure()
+        self._ax = self._fig.add_subplot(111)
         self._cbar:Colorbar|None = None
         
     def get_figure_axes(self) -> tuple[Figure,Axes]:

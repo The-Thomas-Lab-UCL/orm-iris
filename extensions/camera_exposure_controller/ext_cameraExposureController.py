@@ -62,7 +62,7 @@ class Ext_CameraExposureController(Ui_camera_exposure_controller, Extension_Main
         
     def _init_signals(self):
         self.slider_relative.sliderReleased.connect(self._set_current_spin_time)
-        self.spin_curr_ms.returnPressed.connect(self._set_current_slider_time)
+        self.spin_curr_ms.editingFinished.connect(self._set_current_slider_time)
         
         self.btn_preset1.clicked.connect(self._set_preset1_time)
         self.btn_preset2.clicked.connect(self._set_preset2_time)

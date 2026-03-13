@@ -22,7 +22,7 @@ import threading
 import queue
 import time
 
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 import pandas as pd
@@ -114,7 +114,8 @@ class Ext_OpticsCalibrationAid(Extension_MainWindow):
         wdg = self._wdg
         
     # > Initialise the plot
-        self._fig, self._ax = plt.subplots()
+        self._fig = Figure()
+        self._ax = self._fig.add_subplot(111)
         self._canvas = FigureCanvas(figure=self._fig)
         self._wdg.lyt_plot.addWidget(self._canvas)
         self._canvas.draw_idle()
