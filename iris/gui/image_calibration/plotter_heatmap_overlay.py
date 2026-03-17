@@ -198,7 +198,6 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
         self._combo_ImageUnits.currentTextChanged.connect(self.plot_heatmap)
         self._chk_lres.stateChanged.connect(self.plot_heatmap)
         self._chk_overlay.stateChanged.connect(self.plot_heatmap)
-        self._chk_laser_corr.stateChanged.connect(self.plot_heatmap)
         self._combo_plot_mappingUnitName.currentTextChanged.connect(self.plot_heatmap)
         self._combo_plot_SpectralPosition.currentTextChanged.connect(self.plot_heatmap)
         self._entry_plot_clim_min.editingFinished.connect(self.plot_heatmap)
@@ -379,7 +378,6 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
         if wavelength is None: return
 
         mapping_unit_corr = mapping_hub.copy_mapping_unit(mappingUnit_id,mappingUnit_name+'_LaserCoorCorrected',appendToHub=False)
-        # if self._chk_laser_corr.isChecked():
         mapping_unit_corr = correct_MappingMeasurementCoordinates(
             mapping_unit=mapping_unit_corr,
             measurement_img=img_unit
