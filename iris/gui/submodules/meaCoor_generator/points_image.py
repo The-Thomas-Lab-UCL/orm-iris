@@ -198,8 +198,9 @@ class Points_Image(Ui_Point_Image, qw.QWidget):
             correct_rot=True,
             low_res=self.chk_lres.isChecked()
         )
-        
-        self._list_clickMeaCoor_mm.append(coor_stage_mm[:2])   # Only store x,y coordinates
+
+        coor_drive_mm = imgUnit.convert_mea2stg(coor_stage_mm[:2])
+        self._list_clickMeaCoor_mm.append(coor_drive_mm[:2])   # Only store x,y coordinates
     
     @Slot()
     def _store_current_coorz(self):

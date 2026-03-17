@@ -15,6 +15,8 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Usage: usage.md
+  - Developer Guide:
+    - Coordinate Frames of Reference: developer/coordinate_frames.md
   - API Reference: reference/
 
 extra_css:
