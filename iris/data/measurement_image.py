@@ -382,10 +382,10 @@ class MeaImg_Unit():
         
         if rot_deg > 0:
             crop_coor = (0,cropy_pixel,sizex-cropx_pixel,sizey)
-            coor_shift_pixel = (cropx_pixel,0)
+            coor_shift_pixel = (0,cropy_pixel)
         elif rot_deg < 0:
             crop_coor = (cropx_pixel,0,sizex,sizey-cropy_pixel)
-            coor_shift_pixel = (0,cropy_pixel)
+            coor_shift_pixel = (cropx_pixel,0)
         else:
             crop_coor = (0,0,sizex,sizey)
             coor_shift_pixel = (0,0)
