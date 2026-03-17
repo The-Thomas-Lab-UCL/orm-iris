@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 
 import matplotlib
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 matplotlib.use('Agg')
@@ -203,7 +203,8 @@ class Wdg_SpectrometerCalibrationGenerator(Ui_spectrometerCalibrator, qw.QWidget
         
     # >> Wavelength calibration parameters and widgets <<
         # Canvas to show the wavelength calibration transfer function
-        self._fig_wv, self._ax_wv = plt.subplots(1,1,figsize=figsize_in)
+        self._fig_wv = Figure(figsize=figsize_in)
+        self._ax_wv = self._fig_wv.add_subplot(111)
         self._canvas_wv = FigureCanvas(figure=self._fig_wv)
         self.lytPixelmapCanvas.addWidget(self._canvas_wv)
         self._canvas_wv.draw_idle()
@@ -219,8 +220,9 @@ class Wdg_SpectrometerCalibrationGenerator(Ui_spectrometerCalibrator, qw.QWidget
     # >> Intensity calibration parameters and widgets<<
         # Canvas to show the intensity calibration transfer function
         figsize_in_int = (figsize_in[0]*2,figsize_in[1])
-        self._fig_int, axes = plt.subplots(1,2,figsize=figsize_in_int)
-        self._ax_int_raw, self._ax_int_cal = axes
+        self._fig_int = Figure(figsize=figsize_in_int)
+        self._ax_int_raw = self._fig_int.add_subplot(121)
+        self._ax_int_cal = self._fig_int.add_subplot(122)
         self._canvas_int = FigureCanvas(figure=self._fig_int)
         self.lytIntensityCanvas.addWidget(self._canvas_int)
         self._canvas_int.draw_idle()

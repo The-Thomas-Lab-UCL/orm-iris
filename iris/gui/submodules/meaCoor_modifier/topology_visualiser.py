@@ -5,7 +5,6 @@ import PySide6.QtWidgets as qw
 from PySide6.QtCore import Signal, Slot, QObject, QThread
 
 
-import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 from matplotlib.colorbar import Colorbar
@@ -108,10 +107,12 @@ class TopologyVisualiser(Ui_topology_visualiser, qw.QWidget):
         ))
         
     # >>> Plotting parameters and widget <<<
+        self._fig = Figure()
+        self._dpi = self._fig.get_dpi()
         self._figsize_pxl = AppPlotEnum.PLT_MAP_SIZE_PIXEL.value
-        self._dpi = plt.rcParams['figure.dpi']
         self._figsize_in = (self._figsize_pxl[1]/self._dpi,self._figsize_pxl[0]/self._dpi)
-        self._fig, self._ax = plt.subplots(figsize=self._figsize_in)
+        self._fig.set_size_inches(self._figsize_in)
+        self._ax = self._fig.add_subplot(111)
         
         self._plt_canvas = FigureCanvas(figure=self._fig)
         self.lyt_plot.addWidget(self._plt_canvas)
