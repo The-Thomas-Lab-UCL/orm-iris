@@ -47,6 +47,12 @@ class Ui_heatmapPlotterOverlay(object):
 
         self.verticalLayout_6.addWidget(self.chk_lres)
 
+        self.chk_overlay = QCheckBox(heatmapPlotterOverlay)
+        self.chk_overlay.setObjectName(u"chk_overlay")
+        self.chk_overlay.setChecked(True)
+
+        self.verticalLayout_6.addWidget(self.chk_overlay)
+
 
         self.gridLayout.addLayout(self.verticalLayout_6, 1, 0, 1, 1)
 
@@ -70,5 +76,6 @@ class Ui_heatmapPlotterOverlay(object):
     def retranslateUi(self, heatmapPlotterOverlay):
         heatmapPlotterOverlay.setWindowTitle(QCoreApplication.translate("heatmapPlotterOverlay", u"Form", None))
         self.chk_lres.setText(QCoreApplication.translate("heatmapPlotterOverlay", u"Show low-resolution image (faster processing)", None))
+        self.chk_overlay.setText(QCoreApplication.translate("heatmapPlotterOverlay", u"Enable image overlay", None))
     # retranslateUi
 

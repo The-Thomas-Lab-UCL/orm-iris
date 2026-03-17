@@ -36,6 +36,16 @@
            </property>
           </widget>
          </item>
+         <item>
+          <widget class="QCheckBox" name="chk_overlay">
+           <property name="text">
+            <string>Enable image overlay</string>
+           </property>
+           <property name="checked">
+            <bool>true</bool>
+           </property>
+          </widget>
+         </item>
         </layout>
        </item>
        <item row="0" column="1" rowspan="2">

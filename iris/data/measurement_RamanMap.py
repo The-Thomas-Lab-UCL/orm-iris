@@ -872,8 +872,8 @@ class MeaRMap_Unit():
         Generates dummy data for testing purposes
         """
         for i in range(10):
-            x = float(np.random.rand(1)[0])
-            y = float(np.random.rand(1)[0])
+            x = float(np.random.uniform(0,100))
+            y = float(np.random.uniform(0,100))
             z = float(0)
             timestamp = get_timestamp_us_int() + i
             mea = MeaRaman(reconstruct=True)
@@ -1127,7 +1127,7 @@ class MeaRMap_Hub():
     def remove_mapping_unit_name(self,unit_name:str) -> None:
         """
         Removes a mapping_measurement_unit object from the mapping_measurements dictionary.
-
+        
         Args:
             unit_name (str): MappingMeasurement_Unit name to be removed
         """
@@ -1135,8 +1135,6 @@ class MeaRMap_Hub():
             assert unit_name in self._dict_mappingUnit_NameID, 'remove_mapping_measurement_unit: The measurement name does not exist.'
             unit_id = self._dict_mappingUnit_NameID[unit_name]
             self.remove_mapping_unit_id(unit_id)
-        
-        self._notify_observers()
     
     def remove_mapping_unit_id(self,unit_id:str) -> None:
         """
@@ -2185,8 +2183,10 @@ class MeaRMap_Plotter:
         y_min = min(y_val)
         y_max = max(y_val)
         
-        if isinstance(self._cbar,Colorbar):
-            self._cbar.remove()
+        try:
+            if isinstance(self._cbar,Colorbar):
+                self._cbar.remove()
+        except Exception as e: print(f'Error in plot_heatmap_empty while removing cbar: {e}')
         self._ax.clear()
         
         self._ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)

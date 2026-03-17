@@ -466,20 +466,20 @@ class ImgMea_Cal:
         self.flip_y = -1
         
         S_inv = np.array(
-            [[self.scale_x_pixelPerMm, 0],
-             [0, self.scale_y_pixelPerMm]]
+            [[1/self.scale_x_pixelPerMm, 0],
+             [0, 1/self.scale_y_pixelPerMm]]
         )
-        
+
         F_inv = np.array(
             [[1, 0],
              [0, self.flip_y]]
         )
-        
+
         R_inv = np.array(
             [[np.cos(self.rotation_rad), -np.sin(self.rotation_rad)],
              [np.sin(self.rotation_rad), np.cos(self.rotation_rad)]]
         )
-        
+
         self.mat_M_inv_img2stg = S_inv @ F_inv @ R_inv
         self.mat_M_stg2img = np.linalg.inv(self.mat_M_inv_img2stg)
     

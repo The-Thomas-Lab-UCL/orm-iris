@@ -15,9 +15,6 @@ import matplotlib
 from matplotlib.axes import Axes
 matplotlib.use('Agg')   # Force matplotlib to use the backend to prevent memory leak
 
-# Import general functions and global parameters
-from iris.utils.general import convert_wavelength_to_ramanshift
-
 
 # Import image processors
 import multiprocessing.pool as mpp
@@ -29,7 +26,8 @@ from iris.gui.dataHub_MeaImg import Wdg_DataHub_ImgCal
 # Import measurements
 from iris.data.measurement_image import MeaImg_Unit, MeaImg_Hub, MeaImg_Handler
 from iris.data.calibration_objective import ImgMea_Cal
-from iris.data.measurement_RamanMap import MeaRMap_Hub,MeaRMap_Unit,MeaRMap_Plotter
+from iris.data.measurement_RamanMap import MeaRMap_Hub,MeaRMap_Unit,MeaRMap_Plotter,PlotterOptions,PlotterParams,PlotterExtraParamsBase
+from iris.gui.submodules.heatmap_plotter_MeaRMap import XYLimits
 
 # Import processors
 from iris.gui.submodules.heatmap_plotter_MeaRMap import Wdg_MappingMeasurement_Plotter
@@ -173,9 +171,13 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
         # Parameters to control the plots
         self._alpha = 0.5
         
-        # Plotter
+        # Plotter — must share the same fig/ax that the FigureCanvas was built from
         self._plotter = MappingPlotter_ImageOverlay()
-        
+        self._plotter._ax = self._ax   # self._ax / self._fig are set by super().__init__()
+        self._plotter._fig = self._fig
+        self._pending_overlay: tuple[MeaImg_Unit, bool] | None = None
+        self._init_worker()
+
     # >>> Calibration fine-tuning widgets <<<
         self._frm_calAdjust = Wdg_Calibration_Finetuning(
             parent=self,
@@ -191,9 +193,11 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
     # >>> Control widgets <<<
         self._combo_ImageUnits = wdg_ovl.combo_imgUnit
         self._chk_lres = wdg_ovl.chk_lres
-        
+        self._chk_overlay = wdg_ovl.chk_overlay
+
         self._combo_ImageUnits.currentTextChanged.connect(self.plot_heatmap)
         self._chk_lres.stateChanged.connect(self.plot_heatmap)
+        self._chk_overlay.stateChanged.connect(self.plot_heatmap)
         self._combo_plot_mappingUnitName.currentTextChanged.connect(self.plot_heatmap)
         self._combo_plot_SpectralPosition.currentTextChanged.connect(self.plot_heatmap)
         self._entry_plot_clim_min.editingFinished.connect(self.plot_heatmap)
@@ -327,9 +331,6 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
     def plot_heatmap(self) -> None:
         """
         Plot the heatmap with the image overlay.
-        
-        Args:
-            measurement_img (image_measurement): Image measurement object. If none, the getter function will be used
         """
         def correct_MappingMeasurementCoordinates(mapping_unit:MeaRMap_Unit,
                 measurement_img:MeaImg_Unit) -> MeaRMap_Unit:
@@ -337,85 +338,154 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
             coordinates."""
             label_x,label_y,_,_,_ = mapping_unit.get_labels()
             dict_measurement = mapping_unit.get_dict_measurements(copy=True)
-            
+
             list_coorx:list = dict_measurement[label_x]
             list_coory:list = dict_measurement[label_y]
-            
+
             list_coor = [(coorx,coory) for coorx,coory in zip(list_coorx,list_coory)]
             list_coor_corr = [measurement_img.convert_stg2mea(coor) for coor in list_coor]
-            
+
             list_coorx_corr = [coor[0] for coor in list_coor_corr]
             list_coory_corr = [coor[1] for coor in list_coor_corr]
-            
+
             # Update the values in the list, which are referenced by the mapping unit measurement dict
             list_coorx.clear()
             list_coorx.extend(list_coorx_corr)
             list_coory.clear()
             list_coory.extend(list_coory_corr)
-            
+
             return mapping_unit
-        
+
         if self._isplotting: return
-        self._isplotting = True
-        
+
         mapping_hub = self._mappingHub
         img_unit = self._get_ImageUnit()
-        
+
         if not isinstance(mapping_hub,MeaRMap_Hub): return
         if not isinstance(img_unit,MeaImg_Unit): return
-        
-        try:    # Get the stitched image, its limit, and rotation
+
+        try:
             flg_lowResImg = self._chk_lres.isChecked()
         except Exception as e:
             print('plot_heatmap:\n',e)
-            return None
-        
+            return
+
         mappingUnit_name = self._combo_plot_mappingUnitName.currentText()
         dict_nameToID = mapping_hub.get_dict_nameToID()
         if not mappingUnit_name in dict_nameToID: return
         mappingUnit_id = dict_nameToID[mappingUnit_name]
         wavelength = self.get_current_wavelength()
         if wavelength is None: return
-        
+
         mapping_unit_corr = mapping_hub.copy_mapping_unit(mappingUnit_id,mappingUnit_name+'_LaserCoorCorrected',appendToHub=False)
-        
         mapping_unit_corr = correct_MappingMeasurementCoordinates(
             mapping_unit=mapping_unit_corr,
             measurement_img=img_unit
         )
-        
-        _,laser_wavelength = mapping_unit_corr.get_laser_params()
-        
+
         try: clim_min = float(self._entry_plot_clim_min.text())
         except: clim_min = None
         try: clim_max = float(self._entry_plot_clim_max.text())
         except: clim_max = None
         clim = (clim_min,clim_max)
         if self._chk_auto_clim.isChecked(): clim = (None,None)
-        
-        try:
-            title = mapping_unit_corr.get_unit_name()+'\n{:.0f}cm^-1 [{:.1f}nm]'.format(convert_wavelength_to_ramanshift(float(wavelength),laser_wavelength),
-                float(wavelength))
-            kwargs = self._get_plotter_kwargs()
-            self._func_current_plotter(
-                mapping_unit=mapping_unit_corr,
-                wavelength=wavelength,
-                clim=clim,
-                title=title,
-                **kwargs
-            )
-        except Exception as e:
-            print('plot_heatmap:\n',e)
-            return None
-        
-        self._plotter._ax.set_alpha(self._alpha)
-        self._set_plot_xylim()
-        
-        self.sig_overlay_stitched_image.emit(img_unit, flg_lowResImg)
-        
+
+        self._isplotting = True
+        self._pending_overlay = (img_unit, flg_lowResImg) if self._chk_overlay.isChecked() else None
+
+        options = self._get_plotter_option()
+        params = PlotterParams(mapping_unit=mapping_unit_corr, wavelength=wavelength, clim=clim)
+        params_extra = self._get_plotter_extra_params()
+        limits_xy = self._get_plot_xylim()
+
+        self._sig_udpate_plot.emit(options, params, params_extra, limits_xy)
+
+    @Slot()
+    def on_plotter_worker_plotready(self) -> None:
+        """After the heatmap is drawn, start the image overlay in the worker thread."""
+        if self._pending_overlay is not None:
+            img_unit, low_res = self._pending_overlay
+            self._pending_overlay = None
+            self.sig_overlay_stitched_image.emit(img_unit, low_res)
+        else:
+            self._canvas_widget.draw_idle()
+            self._isplotting = False
+
+    @Slot()
+    def on_plotter_worker_finished(self) -> None:
+        """Keep _isplotting True until the overlay is also done."""
+        pass  # _isplotting is reset in handle_plot_overlay_finished
+
+    @Slot()
     def handle_plot_overlay_finished(self) -> None:
-        """
-        Handle the plot overlay finished signal
-        """
+        """Handle the plot overlay finished signal."""
         self._canvas_widget.draw_idle()
         self._isplotting = False
+
+
+def test_heatmap_overlay():
+    """
+    Test the Wdg_HeatmapOverlay widget with dummy Raman map and image data.
+
+    Both the Raman map and image measurements use random coordinates in [0, 1] mm,
+    so they will naturally overlap. The image calibration applies a small scale
+    (~19-24 px/mm), rotation (~0.02 rad) and laser offset (~0.03 mm), which keeps
+    the transformed coordinates in a similar range.
+
+    Run directly:
+        python -m iris.gui.image_calibration.plotter_heatmap_overlay
+    """
+    import sys
+    import multiprocessing.pool as mpp
+    from iris.data.calibration_objective import ImgMea_Cal_Hub
+
+    # --- Data hubs ---
+    mappinghub = MeaRMap_Hub()
+    imghub = MeaImg_Hub()
+
+    # --- Qt application and main window ---
+    app = qw.QApplication(sys.argv)
+    window = qw.QMainWindow()
+    window.setWindowTitle('Heatmap Overlay Test')
+    window.show()
+
+    main_wdg = qw.QWidget()
+    window.setCentralWidget(main_wdg)
+    lyt = qw.QHBoxLayout(main_wdg)
+
+    # --- Processor (used by calibration fine-tuning sub-widget) ---
+    processor = mpp.Pool(processes=1)
+
+    # --- Image calibration data hub ---
+    cal_hub = ImgMea_Cal_Hub()
+    dataHub_imgcal = Wdg_DataHub_ImgCal(main=window, getter_ImageCalHub=lambda: cal_hub)
+
+    # --- Overlay plotter widget ---
+    wdg_overlay = Wdg_HeatmapOverlay(
+        parent=main_wdg,
+        processor=processor,
+        mappingHub=mappinghub,
+        imghub_getter=lambda: imghub,
+        dataHub_imgcal=dataHub_imgcal,
+    )
+    lyt.addWidget(wdg_overlay)
+    lyt.addWidget(dataHub_imgcal)
+
+    # --- Generate dummy data after the event loop is runnikng ---
+    # Both hubs use random coords in [0, 1] mm — they will overlap on the plot.
+    # The image unit's calibration (generate_dummy_params) applies scale ~19-24 px/mm
+    # and laser offset ~0.03 mm, keeping transformed coords in the same range.
+    def generate_data():
+        mappinghub.test_generate_dummy(3)
+        imghub.test_generate_dummy()
+
+    from PySide6.QtCore import QTimer
+    QTimer.singleShot(500, generate_data)
+
+    sys.exit(app.exec())
+
+
+if __name__ == '__main__':
+    SCRIPT_DIR = os.path.abspath(r'.\iris')
+    sys.path.insert(0, os.path.dirname(SCRIPT_DIR))
+    test_heatmap_overlay()
