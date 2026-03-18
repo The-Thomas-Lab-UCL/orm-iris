@@ -82,9 +82,9 @@ class CanvasUpdater_Worker(QObject):
         if len(list_rect_meaCoors_mm) == 2:
             # Convert the measurement coor back to stage coor
             try:
-                coor_pxl_min = imgUnit.convert_stg2imgpt(coor_stage_mm=stage_coor_mm,\
+                coor_pxl_min = imgUnit.convert_phy2imgpt(coor_img_origin_mm=stage_coor_mm,\
                     coor_point_mm=list_rect_meaCoors_mm[0],correct_rot=True,low_res=low_resolution)
-                coor_pxl_max = imgUnit.convert_stg2imgpt(coor_stage_mm=stage_coor_mm,\
+                coor_pxl_max = imgUnit.convert_phy2imgpt(coor_img_origin_mm=stage_coor_mm,\
                     coor_point_mm=list_rect_meaCoors_mm[1],correct_rot=True,low_res=low_resolution)
                 
                 # print(f'Annotating rectangle at pixel coords: {coor_pxl_min} to {coor_pxl_max}')
@@ -320,8 +320,8 @@ class Rect_Image(Ui_Rect_Image, qw.QWidget):
             return
         
         list_clickCoor_mm = [
-            imgUnit.convert_imgpt2stg(
-                frame_coor_mm=stage_coor_mm,
+            imgUnit.convert_imgpt2phy(
+                coor_img_origin_mm=stage_coor_mm,
                 coor_pixel=coor_pxl,
                 correct_rot=True,
                 low_res=self.chk_lres.isChecked()

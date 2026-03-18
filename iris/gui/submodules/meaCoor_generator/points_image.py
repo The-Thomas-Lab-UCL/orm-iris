@@ -192,8 +192,8 @@ class Points_Image(Ui_Point_Image, qw.QWidget):
             print('Invalid stage coordinates')
             return
         
-        coor_stage_mm = imgUnit.convert_imgpt2stg(
-            frame_coor_mm=stage_coor_mm,
+        coor_stage_mm = imgUnit.convert_imgpt2phy(
+            coor_img_origin_mm=stage_coor_mm,
             coor_pixel=coor_pixel,
             correct_rot=True,
             low_res=self.chk_lres.isChecked()

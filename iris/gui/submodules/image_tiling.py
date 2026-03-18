@@ -477,9 +477,9 @@ class Wdg_HiLvlTiling(qw.QWidget):
         lasery = cal.laser_coor_y_mm
         cropx_pixel = int(shape[0]*cropx_ratio_red)//2  # Cropped pixel x-distance from the edge (one of the two sides!!)
         cropy_pixel = int(shape[1]*cropy_ratio_red)//2  # Cropped pixel y-distance from the edge (one of the two sides!!)
-        cropx_mm,cropy_mm = cal.convert_imgpt2stg(
+        cropx_mm,cropy_mm = cal.convert_imgpt2phy(
             coor_img_pixel=np.array((cropx_pixel,cropy_pixel)),
-            coor_stage_mm=np.array((0,0)))
+            coor_img_origin_mm=np.array((0,0)))
         
         laserx -= cropx_mm
         lasery -= cropy_mm

@@ -117,35 +117,40 @@ class ImgMea_Cal:
         ret = coor_mea - laser_coor
         return ret.reshape([-1])
     
-    def convert_stg2imgpt(self,coor_stg_mm:arr,coor_point_mm:arr) -> arr:
+    def convert_phy2imgpt(self,coor_img_origin_mm:arr,coor_point_mm:arr) -> arr:
         """
-        Converts the stage coordinate to the coordinate in the camera frame of reference
+        Converts the physical (measurement or stage frame of reference) coordinate
+        to the coordinate in the camera frame of reference.
         
         Args:
-            coor_stg(np.ndarray): Stage coordinate
-            coor_point_mm(np.ndarray): Point coordinate in the stage frame of reference
+            coor_img_origin_mm(np.ndarray): Image origin coordinate in the physical frame of reference (e.g., stage coordinate of the image origin)
+            coor_point_mm(np.ndarray): Point coordinate in the physical frame of reference
         
         Returns:
             np.ndarray: Image coordinate (flattened 1D array (x,y))
         """
         assert self.check_calibration_set(exclude_laser=True), 'Calibration parameters are not set'
-        assert isinstance(coor_stg_mm, arr), 'Stage coordinate must be a numpy array'
-        coor_stg_mm = self._check_reshape(coor_stg_mm)
+        assert isinstance(coor_img_origin_mm, arr), 'Image origin coordinate must be a numpy array'
+        coor_img_origin_mm = self._check_reshape(coor_img_origin_mm)
         assert isinstance(coor_point_mm, arr), 'Point coordinate must be a numpy array'
         coor_point_mm = self._check_reshape(coor_point_mm)
         
-        ret = self.mat_M_stg2img @ (coor_point_mm - coor_stg_mm)
+        ret = self.mat_M_stg2img @ (coor_point_mm - coor_img_origin_mm)
         
         return ret.reshape([-1])
     
-    def convert_imgpt2stg(self,coor_img_pixel:arr,coor_stage_mm:arr) -> arr:
+    def convert_imgpt2phy(self,coor_img_pixel:arr,coor_img_origin_mm:arr) -> arr:
         """
         Converts coordinate of a point in the camera frame of refernece
         to the coordinate in the stage frame of reference
         
+        NOTE: The resulting coordinate will be in the frame of reference of the image origin (physical frame of reference)
+        For instance, if the image origin given is in the measurement frame of reference, the resulting coordinate will be in the measurement frame of reference.
+        And if the image origin given is in the stage frame of reference, the resulting coordinate will be in the stage frame of reference.
+        
         Args:
             coor_img_pixel(np.ndarray): Image coordinate
-            coor_stage_mm(np.ndarray): Stage coordinate
+            coor_img_origin_mm(np.ndarray): Image origin coordinate in the physical frame of reference (e.g., stage coordinate of the image origin)
         
         Returns:
             np.ndarray: Stage coordinate (flattened 1D array (x,y))
@@ -153,10 +158,10 @@ class ImgMea_Cal:
         assert self.check_calibration_set(exclude_laser=True), 'Calibration parameters are not set'
         assert isinstance(coor_img_pixel, arr), 'Image coordinate must be a numpy array'
         coor_img_pixel = self._check_reshape(coor_img_pixel)
-        assert isinstance(coor_stage_mm, arr), 'Stage coordinate must be a numpy array'
-        coor_stage_mm = self._check_reshape(coor_stage_mm)
+        assert isinstance(coor_img_origin_mm, arr), 'Stage coordinate must be a numpy array'
+        coor_img_origin_mm = self._check_reshape(coor_img_origin_mm)
         
-        ret = self.mat_M_inv_img2stg @ coor_img_pixel + coor_stage_mm
+        ret = self.mat_M_inv_img2stg @ coor_img_pixel + coor_img_origin_mm
         
         return ret.reshape([-1])
     
@@ -294,7 +299,7 @@ class ImgMea_Cal:
         assert isinstance(coor_laser_pixel, arr), 'Laser coordinate must be a numpy array'
         coor_laser_pixel = self._check_reshape(coor_laser_pixel)
         
-        coor_laser_stage = self.convert_imgpt2stg(coor_laser_pixel,np.array([0,0]))
+        coor_laser_stage = self.convert_imgpt2phy(coor_laser_pixel,np.array([0,0]))
                 
         self.laser_coor_x_mm = coor_laser_stage[0]
         self.laser_coor_y_mm = coor_laser_stage[1]
@@ -661,8 +666,8 @@ def test_calibration_conversions():
     coor_point = np.array([[19],[0.05]])
     
     coor_mea = cal.convert_stg2mea(coor_stg)
-    coor_img = cal.convert_stg2imgpt(coor_stg,coor_point)
-    coor_stg2 = cal.convert_imgpt2stg(coor_img,coor_stg)
+    coor_img = cal.convert_phy2imgpt(coor_stg,coor_point)
+    coor_stg2 = cal.convert_imgpt2phy(coor_img,coor_stg)
     
     print(coor_mea)
     print(coor_img)

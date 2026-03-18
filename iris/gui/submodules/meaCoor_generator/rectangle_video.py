@@ -301,8 +301,8 @@ class Rect_Video(Ui_Rect_Video, qw.QWidget):
             qw.QMessageBox.warning(self, 'Error', 'No image unit selected')
             return
         
-        clickCoor_mm = self._imgUnit.convert_imgpt2stg(
-                            frame_coor_mm=stage_coor_mm, # pyright: ignore[reportArgumentType] ; Checked above
+        clickCoor_mm = self._imgUnit.convert_imgpt2phy(
+                            coor_img_origin_mm=stage_coor_mm, # pyright: ignore[reportArgumentType] ; Checked above
                             coor_pixel=coor_pixel,
                             correct_rot=False,
                             low_res=False
@@ -403,8 +403,8 @@ class Rect_Video(Ui_Rect_Video, qw.QWidget):
         self._last_stagecoor_mm = stagecoor_mm
         
         if self._flg_mode == 'point':
-            list_clickCoor_pixel = [self._imgUnit.convert_stg2imgpt(
-                coor_stage_mm=stagecoor_mm, # pyright: ignore[reportArgumentType] ; Checked above
+            list_clickCoor_pixel = [self._imgUnit.convert_phy2imgpt(
+                coor_img_origin_mm=stagecoor_mm, # pyright: ignore[reportArgumentType] ; Checked above
                 coor_point_mm=coor_mm,
                 correct_rot=False,
                 low_res=False
@@ -414,8 +414,8 @@ class Rect_Video(Ui_Rect_Video, qw.QWidget):
             self.sig_updateCanvasImage.emit(list_clickCoor_pixel)
             
         elif self._flg_mode == 'rectangle':
-            list_clickCoor_pixel = [self._imgUnit.convert_stg2imgpt(
-                coor_stage_mm=stagecoor_mm, # pyright: ignore[reportArgumentType] ; Checked above
+            list_clickCoor_pixel = [self._imgUnit.convert_phy2imgpt(
+                coor_img_origin_mm=stagecoor_mm, # pyright: ignore[reportArgumentType] ; Checked above
                 coor_point_mm=coor_mm,
                 correct_rot=False,
                 low_res=False

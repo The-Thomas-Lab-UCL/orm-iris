@@ -244,8 +244,8 @@ class Calibration_Worker(QObject):
             
             # Add the initial tracked features to the list, adjusted for the real coordinates by 
             # adding the initial stage coordinates
-            list_tracking_coors_mm = [cal.convert_imgpt2stg(coor_img_pixel=np.array(coor_img),\
-                coor_stage_mm=v1s_track) for coor_img in list_coor_pixel_v1]
+            list_tracking_coors_mm = [cal.convert_imgpt2phy(coor_img_pixel=np.array(coor_img),\
+                coor_img_origin_mm=v1s_track) for coor_img in list_coor_pixel_v1]
             self.sig_set_imgUnit.emit(img_unit)
             self.sig_set_record_clicks_mm.emit(list_tracking_coors_mm)
             self.sig_resume_vid_anno.emit()
@@ -591,7 +591,7 @@ class Wdg_Calibration(qw.QWidget):
             
             assert all([isinstance(c,float) for c in stage_coor]), 'Stage coordinates are not valid'
             
-            list_coor_pixel = [self._meaImgUnit.convert_stg2imgpt(coor_stage_mm=stage_coor,coor_point_mm=coor, # pyright: ignore[reportArgumentType]
+            list_coor_pixel = [self._meaImgUnit.convert_phy2imgpt(coor_img_origin_mm=stage_coor,coor_point_mm=coor, # pyright: ignore[reportArgumentType]
                 correct_rot=False,low_res=low_res) for coor in coor_list_mm]
             list_coor_pixel = [(float(coor[0]),float(coor[1])) for coor in list_coor_pixel]
             
@@ -670,7 +670,7 @@ class Wdg_Calibration(qw.QWidget):
             list_coors_pixel (list[tuple[float, float]]): List of pixel coordinates of the selected features
         """
         try:
-            list_coors_mm = [meaImg.convert_imgpt2stg(stage_coor,coor,False,low_res=self._chk_lowres.isChecked()) for coor in list_coors_pixel]
+            list_coors_mm = [meaImg.convert_imgpt2phy(stage_coor,coor,False,low_res=self._chk_lowres.isChecked()) for coor in list_coors_pixel]
             self._canvas_img.stop_recordClicks()
             
             self._statbar.setStyleSheet("QStatusBar{background-color: %s;}" % 'yellow')

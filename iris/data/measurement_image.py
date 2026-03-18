@@ -390,7 +390,7 @@ class MeaImg_Unit():
             crop_coor = (0,0,sizex,sizey)
             coor_shift_pixel = (0,0)
         
-        coor_shift_stage = self.convert_imgpt2stg(frame_coor_mm=(0,0),\
+        coor_shift_stage = self.convert_imgpt2phy(coor_img_origin_mm=(0,0),\
             coor_pixel=coor_shift_pixel,correct_rot=True,low_res=low_res)
         
         list_coorx_mm = [coor+coor_shift_stage[0] for coor in list_coorx_mm]
@@ -424,7 +424,7 @@ class MeaImg_Unit():
         y_flip = -1
         assert x_flip !=0 and y_flip != 0, 'CHECK ERROR: Flip parameters cannot be 0, there must be something unaccounted for'
         
-        list_coor_min_pixel = [self.convert_stg2imgpt(coor_stage_mm=coor,coor_point_mm=(0,0),correct_rot=True,low_res=low_res)\
+        list_coor_min_pixel = [self.convert_phy2imgpt(coor_img_origin_mm=coor,coor_point_mm=(0,0),correct_rot=True,low_res=low_res)\
             for coor in list_coor_mm]
         list_coor_min_pixel = [(coor[0]*x_flip,coor[1]*y_flip) for coor in list_coor_min_pixel]
         
@@ -464,9 +464,9 @@ class MeaImg_Unit():
         mea_coor = list_coor_min_mm[0]
         mea_coor_pixel = list_coor_pixel_rel[0]
         neg = (-mea_coor_pixel[0],-mea_coor_pixel[1])
-        img_limit_coor_min_mm = self.convert_imgpt2stg(frame_coor_mm=mea_coor,coor_pixel=neg,correct_rot=True,
+        img_limit_coor_min_mm = self.convert_imgpt2phy(coor_img_origin_mm=mea_coor,coor_pixel=neg,correct_rot=True,
                                                        low_res=low_res)
-        img_limit_coor_max_mm = self.convert_imgpt2stg(frame_coor_mm=img_limit_coor_min_mm,coor_pixel=(img_wid,img_hei),
+        img_limit_coor_max_mm = self.convert_imgpt2phy(coor_img_origin_mm=img_limit_coor_min_mm,coor_pixel=(img_wid,img_hei),
                                                        correct_rot=True,low_res=low_res)
         
         if scalebar: img_stitched = self._draw_scalebar(img_stitched, scale=self._lres_scale if low_res else 1.0)
@@ -573,15 +573,20 @@ class MeaImg_Unit():
         if not isinstance(self._calibration, ImgMea_Cal): return False
         return self._calibration.check_calibration_set()
         
-    def convert_imgpt2stg(self, frame_coor_mm:tuple[float,float]|tuple[float,float,float],
+    def convert_imgpt2phy(self, coor_img_origin_mm:tuple[float,float]|tuple[float,float,float],
                           coor_pixel:tuple[int,int]|tuple[float,float],
                           correct_rot:bool, low_res:bool)\
         -> tuple[float,float]:
         """
         Converts the coordinates from pixels to mm based on the stored calibration parameters
         
+        NOTE: The resulting coordinates will be in the same frame of reference as the image origin coordinates
+        (i.e., the stage frame of reference if the image origin coordinates are in mm in the stage frame of reference
+        and the measurement frame of reference if the image origin coordinates are in mm in the measurement frame of reference)
+        
         Args:
-            frame_coor_mm (tuple[float,float]): X, Y, Z coordinates or X, Y coordinates in mm of the image frame
+            coor_img_origin_mm (tuple[float,float]): image origin coordinates in mm (X,Y) or (X,Y,Z) of the physical frame of reference
+            (stage or measurement frame of reference). Can be either in  X, Y, Z coordinates or in X, Y coordinates in mm
             coor_pixel (tuple[int,int]): X, Y coordinates in pixels
             correct_rot (bool): Correct for the rotation angle if the shown stitched image is rotated corrected
             low_res (bool): Set to True if the image being processed is a low resolution (i.e., downsampled) image of the original image.
@@ -597,22 +602,27 @@ class MeaImg_Unit():
             coor_pixel = (int(coor_pixel[0]),int(coor_pixel[1]))
             coor_pixel = self._correctRotationFlip(coor_pixel,stitch2ori=True)
         
-        coor_stg_mm = self._calibration.convert_imgpt2stg(
+        coor_stg_mm = self._calibration.convert_imgpt2phy(
             coor_img_pixel=np.array(coor_pixel[:2]),
-            coor_stage_mm=np.array(frame_coor_mm[:2])
+            coor_img_origin_mm=np.array(coor_img_origin_mm[:2])
         )
         
         x_mm,y_mm = coor_stg_mm.tolist()
         return x_mm, y_mm
         
-    def convert_stg2imgpt(self, coor_stage_mm:tuple[float,float,float]|tuple[float,float],
+    def convert_phy2imgpt(self, coor_img_origin_mm:tuple[float,float,float]|tuple[float,float],
             coor_point_mm:tuple[float,float,float]|tuple[float,float],correct_rot:bool,low_res:bool) -> tuple[int,int]:
         """
         Converts the coordinates from mm to pixels based on the stored calibration parameters
         
+        NOTE: The input coordinates must be in the same frame of reference as the image origin coordinates
+        (i.e., the stage frame of reference if the image origin coordinates are in mm in the stage frame of reference
+        and the measurement frame of reference if the image origin coordinates are in mm in the measurement frame of reference)
+        
         Args:
-            stage_coor_mm (tuple[float,float,float]): X, Y, Z coordinates or X, Y coordinates in mm of the image frame
-            coor_mm (tuple[float,float,float]): X, Y, Z coordinates or X, Y coordinates in mm
+            coor_img_origin_mm (tuple[float,float,float]): image origin coordinates in mm (X,Y) or (X,Y,Z) of the physical frame of reference
+            (stage or measurement frame of reference).
+            coor_point_mm (tuple[float,float,float]): X, Y, Z coordinates or X, Y coordinates in mm
             rot_rad (float): Rotation angle in radians to correct for. Default is 0.0
             correct_rot (bool): Correct for the rotation angle if the shown stitched image is rotated corrected
             low_res (bool): Set to True if the image being processed is a low resolution (i.e., downsampled) image of the original image.
@@ -627,9 +637,9 @@ class MeaImg_Unit():
         """
         if not isinstance(self._calibration, ImgMea_Cal): raise ValueError('Calibration is not set')
         
-        coor_pixel = self._calibration.convert_stg2imgpt(
+        coor_pixel = self._calibration.convert_phy2imgpt(
             coor_point_mm=np.array(coor_point_mm[:2]),
-            coor_stg_mm=np.array(coor_stage_mm[:2])
+            coor_img_origin_mm=np.array(coor_img_origin_mm[:2])
         )
         
         if correct_rot:

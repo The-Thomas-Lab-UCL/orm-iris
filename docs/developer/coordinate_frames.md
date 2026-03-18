@@ -53,23 +53,53 @@ ORM-IRIS operates in three distinct coordinate systems. Mixing them up silently 
 | `mat_M_stg2img` | `np.ndarray (2×2)` | Composite transformation matrix: stage → image pixels |
 | `mat_M_inv_img2stg` | `np.ndarray (2×2)` | Inverse matrix: image pixels → stage mm |
 
-### The Transformation Matrix
+### The Transformation Matrix: Stage to Image FoR and vice versa
 
-`mat_M_stg2img` is the product of three elementary matrices applied in this order:
+To convert coordinates between the stage and image FoR, it needs three operations:
+1. Scaling: Converts distance in pixels to millimeters
+2. Flip: Takes into account mirror movements
+3. Rotation: Takes into axes direction mismatches between the stage and image FoR, e.g., if the camera axis is $5\degree$ rotated compared to the stage movement axis.
 
-```
-mat_M_stg2img = mat_R  @  mat_F  @  mat_S
-```
+Note that the flip is essential as the rotation alone cannot take into account mirrors. Additionally, only `flip_y` is required here as the additional transformation of `flip_x` can be done using the rotation. Think about it.
 
-```
-mat_S (scale, units: pixel/mm):     mat_F (flip, dimensionless):     mat_R (rotation, dimensionless):
- ┌ sx   0  ┐                         ┌ 1   0  ┐                        ┌  cos θ  -sin θ ┐
- └  0  sy  ┘                         └ 0   f  ┘  (f = ±1)              └  sin θ   cos θ ┘
-```
+The transformations (conversion between FoRs) are done using a matrix multiplication, via `mat_M_stg2img` that is the product of three elementary matrices of R, F, and S for rotation, flip, and scale respectively:
 
-Order matters: **scale first → flip second → rotate last.**
+$$
+\mathbf{M}_{\text{stg} \to \text{img}} = \mathbf{R} \cdot \mathbf{F} \cdot \mathbf{S}
+$$
 
-The inverse `mat_M_inv_img2stg = inv(mat_M_stg2img)` is pre-computed and stored alongside the forward matrix to avoid repeated matrix inversions at runtime.
+$$
+\mathbf{S} = \begin{pmatrix} s_x & 0 \\ 0 & s_y \end{pmatrix} \;\text{(pixel/mm)},
+\qquad
+\mathbf{F} = \begin{pmatrix} 1 & 0 \\ 0 & f \end{pmatrix} \;\text{($f = \pm 1$)},
+\qquad
+\mathbf{R} = \begin{pmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{pmatrix}
+$$
+
+As with typical matrix operations, order matters: **scale → flip → rotate**
+
+The inverse $\mathbf{M}_{\text{img} \to \text{stg}} = \mathbf{M}_{\text{stg} \to \text{img}}^{-1}$ is pre-computed and stored alongside the forward matrix to avoid repeated matrix inversions at runtime.
+
+#### Vectors definition
+
+The vectors have to be accurately defined so that the move between FoRs can work. For this, it is important that we know where is the origin of each FoR is.
+
+For the stage FoR, the origin is at the instrument's reported origin. In other words, the $(0.0,0.0)$ location reported by the instrument.
+
+For the image FoR, the origin is at the pixel coordinate $(0,0)$, which is at the topmost-leftmost pixel of the image. This is the typical convention as images are nothing but arrays of numbers (intensity values), accessed by row and column indices (0 to n), with 0 column starting at the left, and 0 row starting at the top. Think of it like a table in excel. Data goes from left-to-right and top-to-bottom.
+
+### The Transformation Matrix: Stage to Measurement FoR and vice versa
+
+In addition to the image and stage FoR, there is also the measurement FoR as mentioned above. The conversion between the stage FoR to the measurement FoR is very simple, done by adding the laser coordinate offset to the stage coordinate.
+
+Note that the laser coordinate offset (relative to the stage coordinate) itself can only be measured via the camera's image. Meaning that the laser offset is stored in the image FoR, and has to be converted to the stage FoR (done using the transformation matrix above) before it can be used in the stage FoR, to take into account of any rotation/flip/scaling.
+
+#### Vector definition
+
+Since the measurement FoR is essentially just a translated stage FoR, its origin really is the same as the stage FoR's plus the shift (i.e., the laser offset).
+
+The important points to highlight here are:
+1. 
 
 ### Setting Up the Calibration
 
@@ -91,10 +121,16 @@ All four conversion methods are available on both `ImgMea_Cal` (the low-level ca
 
 The measurement FoR is simply the stage FoR shifted by the laser offset:
 
-```
-coor_mea = coor_stg + laser_offset      # convert_stg2mea
-coor_stg = coor_mea - laser_offset      # convert_mea2stg
-```
+$$
+\mathbf{p}_\text{mea} = \mathbf{p}_\text{stg} + \mathbf{l}
+\qquad \texttt{(convert\_stg2mea)}
+$$
+$$
+\mathbf{p}_\text{stg} = \mathbf{p}_\text{mea} - \mathbf{l}
+\qquad \texttt{(convert\_mea2stg)}
+$$
+
+where $\mathbf{l} = [\texttt{laser\_coor\_x\_mm},\ \texttt{laser\_coor\_y\_mm}]^\top$.
 
 Both methods accept and return a flat NumPy array `[x, y]` in mm.
 
@@ -106,47 +142,53 @@ coor_stg = np.array([10.5, 3.2])
 coor_mea = cal.convert_stg2mea(coor_stg)   # → [10.5 + lx, 3.2 + ly]
 ```
 
-### Stage ↔ Image Pixel
+### Physical ↔ Image Pixel
 
-These conversions use the transformation matrix and require a **reference stage coordinate** — the stage position that corresponds to the image origin (pixel `(0, 0)`). This is the stage position *at the time the image was captured*.
+These conversions use the transformation matrix and require a **reference coordinate** (`coor_img_origin_mm`) — the physical position corresponding to the image origin (pixel `(0, 0)`). This is the position *at the time the image was captured*.
 
-```
-pixel  = mat_M_stg2img @ (point_stage_mm - ref_stage_mm)    # convert_stg2imgpt
-stage  = mat_M_inv_img2stg @ pixel + ref_stage_mm           # convert_imgpt2stg
-```
+$$
+\mathbf{p}_\text{img} = \mathbf{M}_{\text{stg} \to \text{img}} \cdot (\mathbf{p}_\text{phy} - \mathbf{p}_\text{ref})
+\qquad \texttt{(convert\_phy2imgpt)}
+$$
+$$
+\mathbf{p}_\text{phy} = \mathbf{M}_{\text{img} \to \text{stg}} \cdot \mathbf{p}_\text{img} + \mathbf{p}_\text{ref}
+\qquad \texttt{(convert\_imgpt2phy)}
+$$
+
+> **FoR caveat:** these methods are FoR-agnostic — the output is in whatever FoR you supply as `coor_img_origin_mm`. If you pass a stage coordinate as the reference, the output is a stage coordinate; if you pass a measurement coordinate, the output is a measurement coordinate. Always be deliberate about which you are providing.
 
 **Example:**
 
 ```python
-ref_stage_mm = np.array([10.0, 3.0])      # stage position when image was taken
-point_mm     = np.array([10.05, 3.02])    # some feature position in stage FoR
+ref_mm   = np.array([10.0, 3.0])       # reference coord (stage or mea FoR) when image was taken
+point_mm = np.array([10.05, 3.02])     # a feature position in the same FoR as ref_mm
 
-pixel = cal.convert_stg2imgpt(coor_stg_mm=ref_stage_mm, coor_point_mm=point_mm)
+pixel = cal.convert_phy2imgpt(coor_img_origin_mm=ref_mm, coor_point_mm=point_mm)
 # pixel is now the location of that feature in the image, in pixels
 
-stage_back = cal.convert_imgpt2stg(coor_img_pixel=pixel, coor_stage_mm=ref_stage_mm)
-# stage_back == point_mm (within floating-point tolerance)
+point_back = cal.convert_imgpt2phy(coor_img_pixel=pixel, coor_img_origin_mm=ref_mm)
+# point_back == point_mm (within floating-point tolerance)
 ```
 
-The key insight is that the transformation only encodes the *relative* displacement in mm, then converts it to pixels. The absolute stage position `ref_stage_mm` acts as the anchor.
+The transformation only encodes the *relative* displacement in mm, then converts it to pixels. The reference coordinate `coor_img_origin_mm` acts as the anchor, and its FoR propagates through to the output.
 
 ### Image Pixel → Measurement (full chain)
 
 To go all the way from a pixel in a captured image to a measurement coordinate (the most common operation in the coordinate generators):
 
 ```python
-# 1. Pixel → stage
-coor_stg = cal.convert_imgpt2stg(pixel, ref_stage_mm)
+# 1. Pixel → physical (passing stage ref → output is in stage FoR)
+coor_phy = cal.convert_imgpt2phy(pixel, ref_stage_mm)
 
 # 2. Stage → measurement
-coor_mea = cal.convert_stg2mea(coor_stg)
+coor_mea = cal.convert_stg2mea(coor_phy)
 ```
 
 ---
 
 ## The `MeaImg_Unit` Wrapper
 
-`MeaImg_Unit` (in `iris/data/measurement_image.py`) stores a series of images with their corresponding stage coordinates and delegates coordinate conversions to its embedded `ImgMea_Cal`. Its conversion methods (`convert_imgpt2stg`, `convert_stg2imgpt`, `convert_stg2mea`, `convert_mea2stg`) are thin wrappers that add two extra concerns:
+`MeaImg_Unit` (in `iris/data/measurement_image.py`) stores a series of images with their corresponding stage coordinates and delegates coordinate conversions to its embedded `ImgMea_Cal`. Its conversion methods (`convert_imgpt2phy`, `convert_phy2imgpt`, `convert_stg2mea`, `convert_mea2stg`) are thin wrappers that add two extra concerns:
 
 1. **Low-resolution scaling** — when `low_res=True`, pixel coordinates are rescaled by `_lres_scale` before/after the calibration conversion so that the caller does not need to know the resolution of the displayed image.
 
@@ -162,15 +204,19 @@ This means the stitched image lives in a *corrected* FoR that has been de-rotate
 
 Two rotation matrices handle this:
 
-```
-_mat_ori2stitch = R(-θ)   # raw pixel → stitched pixel   (counter-clockwise by θ)
-_mat_stitch2ori = R(+θ)   # stitched pixel → raw pixel   (clockwise by θ)
-```
+$$
+\mathbf{R}_{\text{ori} \to \text{stitch}} = \mathbf{R}(-\theta)
+\qquad \text{(raw pixel} \to \text{stitched pixel, counter-clockwise by } \theta\text{)}
+$$
+$$
+\mathbf{R}_{\text{stitch} \to \text{ori}} = \mathbf{R}(+\theta)
+\qquad \text{(stitched pixel} \to \text{raw pixel, clockwise by } \theta\text{)}
+$$
 
 The flag `correct_rot=True` triggers `_correctRotationFlip()`, which selects the appropriate matrix:
 
-- **`convert_imgpt2stg(correct_rot=True)`** — applies `_mat_stitch2ori` to convert the stitched pixel back to a raw-camera pixel *before* the calibration transform.
-- **`convert_stg2imgpt(correct_rot=True)`** — applies `_mat_ori2stitch` to convert the calibration-output pixel *into* the stitched image space *after* the calibration transform.
+- **`convert_imgpt2phy(correct_rot=True)`** — applies `_mat_stitch2ori` to convert the stitched pixel back to a raw-camera pixel *before* the calibration transform.
+- **`convert_phy2imgpt(correct_rot=True)`** — applies `_mat_ori2stitch` to convert the calibration-output pixel *into* the stitched image space *after* the calibration transform.
 
 > **Rule of thumb:** pass `correct_rot=True` whenever the pixel coordinates belong to a stitched image returned by `get_image_all_stitched()`. Pass `correct_rot=False` when working with individual raw frames (e.g., live video or single-frame captures).
 
@@ -185,7 +231,7 @@ These live under `iris/gui/submodules/meaCoor_generator/`.
 1. A stored (or stitched) image is displayed on the canvas.
 2. The user clicks a point (or two corners of a rectangle).
 3. The canvas emits the pixel coordinates in **original image scale** (the internal scene coordinates are scaled back up to match the stored image resolution).
-4. `convert_imgpt2stg()` converts the pixel to stage FoR, using `_img_coor_stage_mm` as the reference stage coordinate.
+4. `convert_imgpt2phy()` converts the pixel to physical coordinates, using `_img_coor_stage_mm` as the reference coordinate (stage FoR in this case, so the output is in stage FoR).
 5. `convert_stg2mea()` shifts to measurement FoR.
 
 When the displayed image is a stitched image, the canvas internally handles the coordinate scaling. If `correct_rot=True` is required (i.e., the image was de-rotated during stitching), the rotation correction must be applied as described above.
@@ -197,7 +243,7 @@ The live video path is conceptually simpler:
 1. A timer fires at ~25 Hz, refreshing the canvas from the live camera feed.
 2. At each refresh the current stage position is queried from the motion controller.
 3. When the user clicks, the clicked pixel and the *current stage position* are used as the pixel coordinate and reference stage coordinate respectively.
-4. The same `convert_imgpt2stg` → `convert_stg2mea` chain produces the measurement coordinate.
+4. The same `convert_imgpt2phy` → `convert_stg2mea` chain produces the measurement coordinate.
 
 Because each frame is a fresh raw image (no stitching, no de-rotation), `correct_rot=False` is appropriate here.
 
@@ -226,18 +272,18 @@ The rendering sequence is:
 ```
 ┌──────────────────────────────────────────────────────┐
 │  Stage FoR  ←──(+ laser offset)──►  Measurement FoR  │
-│   (mm)                                    (mm)        │
-│     │                                                 │
-│  mat_M_stg2img                                        │
-│  (R @ F @ S)                                          │
-│     │                                                 │
-│     ▼                                                 │
-│  Image FoR (pixels)                                   │
-│     │                                                 │
-│  [optional: rotation correction for stitched images]  │
-│     │                                                 │
-│     ▼                                                 │
-│  Stitched Image FoR (pixels, de-rotated)              │
+│   (mm)                                    (mm)       │
+│     │                                                │
+│  mat_M_stg2img                                       │
+│  (R @ F @ S)                                         │
+│     │                                                │
+│     ▼                                                │
+│  Image FoR (pixels)                                  │
+│     │                                                │
+│  [optional: rotation correction for stitched images] │
+│     │                                                │
+│     ▼                                                │
+│  Stitched Image FoR (pixels, de-rotated)             │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -245,7 +291,7 @@ The rendering sequence is:
 |---|---|---|---|
 | Stage → Measurement | `convert_stg2mea` | `ImgMea_Cal`, `MeaImg_Unit` | Simple offset addition |
 | Measurement → Stage | `convert_mea2stg` | `ImgMea_Cal`, `MeaImg_Unit` | Simple offset subtraction |
-| Stage → Image pixel | `convert_stg2imgpt` | `ImgMea_Cal`, `MeaImg_Unit` | Needs reference stage coord |
-| Image pixel → Stage | `convert_imgpt2stg` | `ImgMea_Cal`, `MeaImg_Unit` | Needs reference stage coord |
-| Stitched pixel → Stage | `convert_imgpt2stg(..., correct_rot=True)` | `MeaImg_Unit` | Undoes de-rotation first |
-| Stage → Stitched pixel | `convert_stg2imgpt(..., correct_rot=True)` | `MeaImg_Unit` | Applies de-rotation after |
+| Physical → Image pixel | `convert_phy2imgpt` | `ImgMea_Cal`, `MeaImg_Unit` | Output FoR matches input ref FoR |
+| Image pixel → Physical | `convert_imgpt2phy` | `ImgMea_Cal`, `MeaImg_Unit` | Output FoR matches input ref FoR |
+| Stitched pixel → Physical | `convert_imgpt2phy(..., correct_rot=True)` | `MeaImg_Unit` | Undoes de-rotation first |
+| Physical → Stitched pixel | `convert_phy2imgpt(..., correct_rot=True)` | `MeaImg_Unit` | Applies de-rotation after |
