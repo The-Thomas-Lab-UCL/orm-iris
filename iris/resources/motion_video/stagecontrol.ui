@@ -495,6 +495,13 @@ buttons to move in steps</string>
             </widget>
            </item>
            <item>
+            <widget class="QPushButton" name="btn_memory_goto">
+             <property name="text">
+              <string>Go to selected coordinate</string>
+             </property>
+            </widget>
+           </item>
+           <item>
             <widget class="QPushButton" name="btn_memory_save">
              <property name="text">
               <string>Store current coordinate</string>
@@ -502,9 +509,23 @@ buttons to move in steps</string>
             </widget>
            </item>
            <item>
-            <widget class="QPushButton" name="btn_memory_goto">
+            <widget class="QPushButton" name="btn_memory_save_beamdump">
              <property name="text">
-              <string>Go to selected coordinate</string>
+              <string>Store current coordinate (beam-dump)</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="lbl_beamdump">
+             <property name="text">
+              <string>Beam-dump location: (NA, NA, NA)</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btn_memory_delete">
+             <property name="text">
+              <string>Delete selected coordinates</string>
              </property>
             </widget>
            </item>

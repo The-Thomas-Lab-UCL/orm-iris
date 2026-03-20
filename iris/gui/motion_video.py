@@ -10,6 +10,8 @@ import PySide6.QtCore as qc
 from PySide6.QtCore import Qt as qt, Signal, Slot, QObject, QThread, QTimer
 from PySide6.QtGui import QPixmap
 
+import csv
+import os
 import threading
 import queue
 
@@ -313,7 +315,7 @@ class Motion_GoToCoor_Worker(QObject):
                     last_change_time = time.time()  # Reset settle timer once threads finish
 
             if time.time() - timeout_start > timeout:
-                event_finished.set()
+                if event_finished is not None: event_finished.set()
                 self.sig_mvmt_finished.emit(self.msg_target_timeout)
                 break
 
@@ -329,7 +331,7 @@ class Motion_GoToCoor_Worker(QObject):
             coor = coor_new
 
             if threads_done and (time.time() - last_change_time) >= settle_sec:
-                event_finished.set()
+                if event_finished is not None: event_finished.set()
                 self.sig_mvmt_finished.emit(self.msg_target_reached)
                 break
 
@@ -787,14 +789,15 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         self._init_autofocus_worker()
         self._init_autofocus_widgets()
         
-    # >>> Coordinate memory setup <<<
-        self._init_coor_memory_widgets()
-        
     # >>> Status update <<<
         self.sig_statbar_message.connect(self.status_update)
         self.sig_statbar_message.emit('Initialising the motion controllers','yellow')
         self._motion_controller_initialisation()
         self._init_workers()
+
+    # >>> Coordinate memory setup (must be after _init_workers so _worker_gotocoor exists) <<<
+        self._init_coor_memory_widgets()
+
         QTimer.singleShot(10, self.resume_video)
 
     def _init_stageparam_widgets(self):
@@ -1856,10 +1859,236 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
     
     def _init_coor_memory_widgets(self):
         """
-        Initialises the coordinate memory widgets and layouts
+        Initialises the coordinate memory widgets and layouts.
+
+        Expects the following widgets from the UI:
+            tree_memory               - QTreeWidget (2 columns: Name | Coordinate µm)
+            btn_memory_save           - QPushButton "Store current coordinate"
+            btn_memory_goto           - QPushButton "Go to selected coordinate" (toggles to Stop during motion)
+            btn_memory_delete         - QPushButton "Delete selected"
+            btn_memory_save_beamdump  - QPushButton "Set as beam dump coordinate"
+            lbl_beamdump              - QLabel showing the current beam dump coordinate
+
+        All coordinates (including the beam dump) are persisted to the same CSV.
+        The beam dump entry uses the reserved name '__beamdump__' and is never shown in the tree.
+        self.beamdump_coor is None when no beam dump coordinate has been saved.
         """
-        pass
-    
+        MEMORY_CSV_PATH  = os.path.join(r'./autosave/coor - memory/', 'coor_memory.csv')
+        _BEAMDUMP_KEY    = '__beamdump__'
+        _LABEL_GOTO      = 'Go to selected coordinate'
+        _LABEL_STOP      = 'Stop'
+        _COL_NAME        = 0
+        _ROLE_DATA       = qt.ItemDataRole.UserRole
+
+        # Public attribute: None until a beam dump coordinate is stored
+        self.beamdump_coor: tuple[float, float, float] | None = None
+
+        # ── Tree widget setup ──────────────────────────────────────────────
+        self.tree_memory.setColumnCount(2)
+        self.tree_memory.setHeaderLabels(['Name', 'Coordinate (µm)'])
+        self.tree_memory.header().setStretchLastSection(True)
+        self.tree_memory.setSelectionMode(qw.QAbstractItemView.SelectionMode.SingleSelection)
+
+        # ── Beam dump label helper ────────────────────────────────────────
+        def _update_beamdump_label():
+            if self.beamdump_coor is None:
+                self.lbl_beamdump.setText('Beam dump: not set')
+            else:
+                x_um, y_um, z_um = self.beamdump_coor
+                self.lbl_beamdump.setText(
+                    'Beam dump: X:{:.1f} Y:{:.1f} Z:{:.1f} µm'.format(x_um, y_um, z_um))
+
+        # ── CSV helpers ───────────────────────────────────────────────────
+        def _load_csv():
+            self.tree_memory.clear()
+            self.beamdump_coor = None
+            if not os.path.exists(MEMORY_CSV_PATH):
+                _update_beamdump_label()
+                return
+            try:
+                with open(MEMORY_CSV_PATH, newline='', encoding='utf-8') as f:
+                    for row in csv.DictReader(f):
+                        x_um = float(row['x_um'])
+                        y_um = float(row['y_um'])
+                        z_um = float(row['z_um'])
+                        if row['name'] == _BEAMDUMP_KEY:
+                            self.beamdump_coor = (x_um, y_um, z_um)
+                            continue  # not shown in the tree
+                        coor_str = 'X:{:.1f} Y:{:.1f} Z:{:.1f}'.format(x_um, y_um, z_um)
+                        item = qw.QTreeWidgetItem([row['name'], coor_str])
+                        item.setData(_COL_NAME, _ROLE_DATA, (x_um, y_um, z_um))
+                        self.tree_memory.addTopLevelItem(item)
+            except Exception as e:
+                print(f'coor_memory: failed to load CSV: {e}')
+            _update_beamdump_label()
+
+        def _save_csv():
+            try:
+                os.makedirs(os.path.dirname(MEMORY_CSV_PATH), exist_ok=True)
+                with open(MEMORY_CSV_PATH, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=['name', 'x_um', 'y_um', 'z_um'])
+                    writer.writeheader()
+                    for i in range(self.tree_memory.topLevelItemCount()):
+                        item = self.tree_memory.topLevelItem(i)
+                        if item is None: continue
+                        x_um, y_um, z_um = item.data(_COL_NAME, _ROLE_DATA)
+                        writer.writerow({'name': item.text(_COL_NAME),
+                                         'x_um': x_um, 'y_um': y_um, 'z_um': z_um})
+                    # Beam dump entry — always written last with its reserved name
+                    if self.beamdump_coor is not None:
+                        x_um, y_um, z_um = self.beamdump_coor
+                        writer.writerow({'name': _BEAMDUMP_KEY,
+                                         'x_um': x_um, 'y_um': y_um, 'z_um': z_um})
+            except Exception as e:
+                print(f'coor_memory: failed to save CSV: {e}')
+
+        # ── Store current coordinate ──────────────────────────────────────
+        def _store_current_coor():
+            coor = self.get_coordinates_closest_mm()
+            if any(c is None for c in coor):
+                qw.QMessageBox.warning(self, 'Store coordinate',
+                                       'Could not read current stage coordinates.')
+                return
+            x_mm, y_mm, z_mm = coor
+            assert x_mm is not None and y_mm is not None and z_mm is not None
+            x_um, y_um, z_um = x_mm * 1e3, y_mm * 1e3, z_mm * 1e3
+
+            name, ok = qw.QInputDialog.getText(self, 'Store coordinate',
+                                               'Enter a name for this coordinate:')
+            if not ok or not name.strip():
+                return
+            name = name.strip()
+
+            coor_str = 'X:{:.1f} Y:{:.1f} Z:{:.1f}'.format(x_um, y_um, z_um)
+            item = qw.QTreeWidgetItem([name, coor_str])
+            item.setData(_COL_NAME, _ROLE_DATA, (x_um, y_um, z_um))
+            self.tree_memory.addTopLevelItem(item)
+            _save_csv()
+
+        # ── Delete selected coordinate ────────────────────────────────────
+        def _delete_selected():
+            selected = self.tree_memory.selectedItems()
+            if not selected:
+                return
+            idx = self.tree_memory.indexOfTopLevelItem(selected[0])
+            self.tree_memory.takeTopLevelItem(idx)
+            _save_csv()
+
+        # ── Go to / Stop button logic ─────────────────────────────────────
+        self._flg_memory_goto_active = False  # True only while a memory-goto is in flight
+
+        def _set_btn_stop():
+            self.btn_memory_goto.setText(_LABEL_STOP)
+
+        def _set_btn_goto():
+            self.btn_memory_goto.setText(_LABEL_GOTO)
+
+        def _stop_motion():
+            self.ctrl_xy.stop_move()
+            self.ctrl_z.stop_move()
+
+        @Slot(str)
+        def _on_mvmt_started(_: str):
+            if self._flg_memory_goto_active:
+                _set_btn_stop()
+                try:
+                    self.btn_memory_goto.clicked.disconnect()
+                except RuntimeError:
+                    pass
+                self.btn_memory_goto.clicked.connect(_stop_motion)
+
+        @Slot(str)
+        def _on_mvmt_finished(_: str):
+            if self._flg_memory_goto_active:
+                self._flg_memory_goto_active = False
+                _set_btn_goto()
+                try:
+                    self.btn_memory_goto.clicked.disconnect()
+                except RuntimeError:
+                    pass
+                self.btn_memory_goto.clicked.connect(_goto_selected)
+
+        def _goto_selected():
+            selected = self.tree_memory.selectedItems()
+            if not selected:
+                qw.QMessageBox.warning(self, 'Go to coordinate', 'No coordinate selected.')
+                return
+
+            item = selected[0]
+            x_um, y_um, z_um = item.data(_COL_NAME, _ROLE_DATA)
+            name = item.text(_COL_NAME)
+
+            reply = qw.QMessageBox.warning(
+                self,
+                'Go to coordinate — WARNING',
+                (f'You are about to move the stage to:\n\n'
+                 f'  {name}\n'
+                 f'  X: {x_um:.1f}  Y: {y_um:.1f}  Z: {z_um:.1f} µm\n\n'
+                 'WARNING: Moving the stage to a memorised coordinate may crash the '
+                 'objective into the sample if the position is no longer safe.\n\n'
+                 'Make sure the path is clear before proceeding.\n\n'
+                 'Are you sure you want to continue?'),
+                qw.QMessageBox.StandardButton.Yes | qw.QMessageBox.StandardButton.No,
+                qw.QMessageBox.StandardButton.No,
+            )
+            if reply != qw.QMessageBox.StandardButton.Yes:
+                return
+
+            self._flg_memory_goto_active = True
+            self.go_to_coordinates((x_um / 1e3, y_um / 1e3, z_um / 1e3), override_controls=True)
+
+        # ── Store beam dump coordinate ────────────────────────────────────
+        def _store_beamdump():
+            coor = self.get_coordinates_closest_mm()
+            if any(c is None for c in coor):
+                qw.QMessageBox.warning(self, 'Store beam dump coordinate',
+                                       'Could not read current stage coordinates.')
+                return
+            x_mm, y_mm, z_mm = coor
+            assert x_mm is not None and y_mm is not None and z_mm is not None
+            self.beamdump_coor = (x_mm * 1e3, y_mm * 1e3, z_mm * 1e3)
+            _update_beamdump_label()
+            _save_csv()
+
+        # ── Wire up signals ───────────────────────────────────────────────
+        self._worker_gotocoor.sig_mvmt_started.connect(_on_mvmt_started)
+        self._worker_gotocoor.sig_mvmt_finished.connect(_on_mvmt_finished)
+
+        self.btn_memory_save.clicked.connect(_store_current_coor)
+        self.btn_memory_goto.clicked.connect(_goto_selected)
+        if hasattr(self, 'btn_memory_delete'):
+            self.btn_memory_delete.clicked.connect(_delete_selected)
+        if hasattr(self, 'btn_memory_save_beamdump'):
+            self.btn_memory_save_beamdump.clicked.connect(_store_beamdump)
+
+        # Expose helpers for external callers
+        self.store_coor_memory  = _store_current_coor
+        self.store_beamdump_coor = _store_beamdump
+
+        # ── Load persisted coordinates on startup ─────────────────────────
+        _load_csv()
+
+    def go_to_beamdump(self, event_finish: threading.Event | None = None) -> bool:
+        """
+        Moves the stage to the memorised beam dump coordinate (asynchronous).
+
+        Args:
+            event_finish: Optional threading.Event that will be set when motion completes.
+
+        Returns:
+            True  — motion was requested.
+            False — no beam dump coordinate has been stored; stage is not moved.
+        """
+        if self.beamdump_coor is None:
+            return False
+        x_um, y_um, z_um = self.beamdump_coor
+        self.go_to_coordinates(
+            (x_um / 1e3, y_um / 1e3, z_um / 1e3),
+            override_controls=True,
+            event_finish=event_finish,
+        )
+        return True
+
     @Slot(str,str)
     def status_update(self,message=None,bg_colour=None):
         """

@@ -398,15 +398,30 @@ class Ui_stagecontrol(object):
 
         self.verticalLayout_5.addWidget(self.tree_memory)
 
+        self.btn_memory_goto = QPushButton(self.tab_memory)
+        self.btn_memory_goto.setObjectName(u"btn_memory_goto")
+
+        self.verticalLayout_5.addWidget(self.btn_memory_goto)
+
         self.btn_memory_save = QPushButton(self.tab_memory)
         self.btn_memory_save.setObjectName(u"btn_memory_save")
 
         self.verticalLayout_5.addWidget(self.btn_memory_save)
 
-        self.btn_memory_goto = QPushButton(self.tab_memory)
-        self.btn_memory_goto.setObjectName(u"btn_memory_goto")
+        self.btn_memory_save_beamdump = QPushButton(self.tab_memory)
+        self.btn_memory_save_beamdump.setObjectName(u"btn_memory_save_beamdump")
 
-        self.verticalLayout_5.addWidget(self.btn_memory_goto)
+        self.verticalLayout_5.addWidget(self.btn_memory_save_beamdump)
+
+        self.lbl_beamdump = QLabel(self.tab_memory)
+        self.lbl_beamdump.setObjectName(u"lbl_beamdump")
+
+        self.verticalLayout_5.addWidget(self.lbl_beamdump)
+
+        self.btn_memory_delete = QPushButton(self.tab_memory)
+        self.btn_memory_delete.setObjectName(u"btn_memory_delete")
+
+        self.verticalLayout_5.addWidget(self.btn_memory_delete)
 
 
         self.verticalLayout_7.addLayout(self.verticalLayout_5)
@@ -484,8 +499,11 @@ class Ui_stagecontrol(object):
         self.btn_end_currcoor_autofocus.setText(QCoreApplication.translate("stagecontrol", u"Insert current coordinate", None))
         self.label_20.setText(QCoreApplication.translate("stagecontrol", u"Kernel (pixel):", None))
         self.tab_controls.setTabText(self.tab_controls.indexOf(self.tab_autofocus), QCoreApplication.translate("stagecontrol", u"Auto-focus", None))
-        self.btn_memory_save.setText(QCoreApplication.translate("stagecontrol", u"Store current coordinate", None))
         self.btn_memory_goto.setText(QCoreApplication.translate("stagecontrol", u"Go to selected coordinate", None))
+        self.btn_memory_save.setText(QCoreApplication.translate("stagecontrol", u"Store current coordinate", None))
+        self.btn_memory_save_beamdump.setText(QCoreApplication.translate("stagecontrol", u"Store current coordinate (beam-dump)", None))
+        self.lbl_beamdump.setText(QCoreApplication.translate("stagecontrol", u"Beam-dump location: (NA, NA, NA)", None))
+        self.btn_memory_delete.setText(QCoreApplication.translate("stagecontrol", u"Delete selected coordinates", None))
         self.tab_controls.setTabText(self.tab_controls.indexOf(self.tab_memory), QCoreApplication.translate("stagecontrol", u"Memory", None))
     # retranslateUi
 
