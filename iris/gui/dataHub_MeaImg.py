@@ -22,12 +22,24 @@ from iris.data.calibration_objective import ImgMea_Cal, ImgMea_Cal_Hub
 
 from iris.resources.dataHub_image_ui import Ui_dataHub_image
 from iris.resources.objectives_ui import Ui_wdg_objectives
+from iris.resources.dialog_save_img_ui import Ui_dialog_save_imghub
 
 class DataHub_Image_Design(Ui_dataHub_image,qw.QWidget):
     def __init__(self,parent):
         super().__init__(parent)
         self.setupUi(self)
         self.setLayout(self.main_layout)
+
+class SaveImgHubDialog(Ui_dialog_save_imghub, qw.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setupUi(self)
+        self.chk_scalebar.setEnabled(self.chk_stitched.isChecked())
+        self.chk_stitched.toggled.connect(self.chk_scalebar.setEnabled)
+
+    def get_options(self) -> tuple[float, bool, bool]:
+        """Returns (scale 0-1, stitched, scalebar)."""
+        return self.spin_resolution.value() / 100.0, self.chk_stitched.isChecked(), self.chk_scalebar.isChecked()
 
 class Wdg_DataHub_ImgCal(Ui_wdg_objectives,qw.QWidget):
     """
@@ -262,6 +274,19 @@ class Image_SaverLoader_Worker(QObject):
         except Exception as e:
             self.error.emit(self.msg_error_save + str(e))
             
+    @Slot(MeaImg_Hub,str,str,float,bool,bool)
+    def save_ImageMeasurementHub_with_options(self, hub:MeaImg_Hub, initdir:str, savename:str,
+                                              scale:float, stitched:bool, scalebar:bool):
+        try:
+            handler = MeaImg_Handler()
+            thread = handler.save_ImageMeasurementHub_database_with_options(
+                hub=hub, initdir=initdir, savename=savename,
+                scale=scale, stitched=stitched, scalebar=scalebar)
+            thread.join()
+            self.finished.emit(self.msg_save_db)
+        except Exception as e:
+            self.error.emit(self.msg_error_save + str(e))
+
     @Slot(MeaImg_Hub,str)
     def load_ImageMeasurementHub(self, hub:MeaImg_Hub, file_path:str):
         """
@@ -305,6 +330,7 @@ class Wdg_DataHub_Image(qw.QWidget):
     """
     sig_save = Signal(MeaImg_Hub, str, str)
     sig_save_at_scale = Signal(MeaImg_Hub, str, str, float)
+    sig_save_with_options = Signal(MeaImg_Hub, str, str, float, bool, bool)
     sig_load = Signal(MeaImg_Hub, str)
     sig_save_png = Signal(MeaImg_Unit, str, float, bool)
     sig_updateTree = Signal()
@@ -378,6 +404,7 @@ class Wdg_DataHub_Image(qw.QWidget):
         
         self.sig_save.connect(self._worker.save_ImageMeasurementHub)
         self.sig_save_at_scale.connect(self._worker.save_ImageMeasurementHub_at_scale)
+        self.sig_save_with_options.connect(self._worker.save_ImageMeasurementHub_with_options)
         self.sig_load.connect(self._worker.load_ImageMeasurementHub)
         self.sig_save_png.connect(self._worker.save_ImageMeasurementUnit_png)
         
@@ -479,19 +506,17 @@ class Wdg_DataHub_Image(qw.QWidget):
     def save_ImageMeasurementHub(self) -> None:
         """
         Save the ImageMeasurement_Hub data to a database file.
-        Prompts the user for a resolution percentage before saving.
+        Prompts the user for save options (resolution, stitched, scalebar) before saving.
         """
         self.disable_buttons('save')
         self._btn_save.setText('Saving to .db ...')
 
-        res = qw.QInputDialog.getDouble(
-            self, 'Save Resolution', 'Enter the resolution (percentage) to save the images at:', 100, 0.1, 100, 1
-        )
-        if not res[1]:
+        dialog = SaveImgHubDialog(self)
+        if dialog.exec() != qw.QDialog.DialogCode.Accepted:
             self.reset_buttons('save')
             return
 
-        scale = res[0] / 100.0
+        scale, stitched, scalebar = dialog.get_options()
 
         file_path = qw.QFileDialog.getSaveFileName(
             self, 'Save Image Measurement Hub',
@@ -506,10 +531,7 @@ class Wdg_DataHub_Image(qw.QWidget):
         initdir = os.path.dirname(file_path)
         savename = os.path.basename(file_path)
 
-        if scale < 1.0:
-            self.sig_save_at_scale.emit(self.ImageHub, initdir, savename, scale)
-        else:
-            self.sig_save.emit(self.ImageHub, initdir, savename)
+        self.sig_save_with_options.emit(self.ImageHub, initdir, savename, scale, stitched, scalebar)
         
     @Slot()
     def export_selected_as_png(self):
@@ -580,7 +602,6 @@ class Wdg_DataHub_Image(qw.QWidget):
             if retry == qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes exists
                 self.append_ImageMeasurementUnit(unit, True)
         
-    @Slot()
     @Slot()
     def rename_selected_ImageMeasurementUnit(self):
         """

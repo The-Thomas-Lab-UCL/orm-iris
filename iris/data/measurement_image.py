@@ -274,6 +274,51 @@ class MeaImg_Unit():
 
         return scaled_unit
 
+    def get_stitched_copy(self, scalebar:bool=False) -> 'MeaImg_Unit':
+        """
+        Returns a copy of this unit with all images stitched into a single image.
+
+        The new unit retains the same ID, name, and calibration. The measurement
+        dictionary is collapsed to a single entry:
+            - image:   the full stitched image (rotation-corrected)
+            - coor_x/y: the stage coordinate of pixel (0,0) of the stitched image,
+                        as returned by get_image_all_stitched
+            - coor_z:  the mean of all stored z coordinates
+            - timestamp: the first stored timestamp
+
+        Args:
+            scalebar (bool): Whether to add a scalebar to the stitched image. Default is False
+            
+        Returns:
+            MeaImg_Unit: New unit with a single stitched image entry
+        """
+        assert self.check_readyForProcessing(), 'Unit is not ready for processing'
+
+        img_stitched, coor_min_mm, _ = self.get_image_all_stitched(low_res=False, scalebar=scalebar)
+
+        timestamp = self._dict_measurements['timestamp'][0]
+        coor_z = float(np.mean(self._dict_measurements['coor_z']))
+
+        unit_id, unit_name = self.get_IdName()
+        assert isinstance(self._calibration, ImgMea_Cal)
+        new_unit = MeaImg_Unit(reconstruct=True)
+        new_unit.set_metadata_fromfile({
+            'id': unit_id,
+            'name': unit_name,
+            'calibration_id': self._calibration.id,
+            'calibration_dict': self._calibration.get_calibration_asdict(),
+        })
+        
+        new_unit.set_dict_measurement_fromfile({
+            'timestamp': [timestamp],
+            'coor_x': [float(coor_min_mm[0])],
+            'coor_y': [float(coor_min_mm[1])],
+            'coor_z': [coor_z],
+            'image': [img_stitched],
+        })
+
+        return new_unit
+
     def _calculate_RotationCorrectionMatrix(self) -> None:
         """
         Calculates the rotation correction matrix for the image stitching
@@ -320,7 +365,7 @@ class MeaImg_Unit():
         
     def _draw_scalebar(self, img:Image.Image, scale:float=1.0) -> Image.Image:
         """
-        Adds an extra 5% height at the bottom of the image with a scalebar 50% of the image width.
+        Adds an extra 5% height at the bottom of the image with a scalebar 25% of the image width.
         The conversion is done using the calibration parameters (mm/pixel) and the scalebar is drawn using the PIL ImageDraw module.
 
         Args:
@@ -338,37 +383,36 @@ class MeaImg_Unit():
         cal = self._calibration
         
         # Calculate the scalebar length in mm based on the calibration parameters
-        scalebar_length_pixel = int(img.size[0]*0.5)
-        scalebar_length_mm = scalebar_length_pixel / cal.scale_x_pixelPerMm
-        
-        scalebar_length_mm = scalebar_length_mm * scale
-        
+        scalebar_length_pixel = int(img.size[0]*0.25)
+        scalebar_length_mm = scalebar_length_pixel / (cal.scale_x_pixelPerMm * scale)
+        mm_per_pixel = 1.0 / (cal.scale_x_pixelPerMm * scale)
+
         # Create a new image with extra height for the scalebar
         new_height = int(img.size[1])
         font_size = int(img.size[1]*0.02)
         white_gap = int(img.size[1]*0.02)
         line_stroke = int(img.size[1]*0.005)
         new_height += font_size//2 + 2*white_gap + line_stroke//2
-        
+
         img_with_scalebar = Image.new('RGB',(img.size[0],new_height),(255,255,255))
         img_with_scalebar.paste(img,(0,0))
         draw = ImageDraw.Draw(img_with_scalebar)
         scalebar_y = int(img.size[1]) + white_gap
-        
+
         x_start = white_gap
-        x_end = img.size[0]*0.5 + white_gap
+        x_end = img.size[0]*0.25 + white_gap
         y_line = scalebar_y + line_stroke//2
         y_start = y_line - line_stroke
         y_end = y_line + line_stroke
         draw.line([(x_start, y_line), (x_end, y_line)], fill='black', width=line_stroke)
-        
+
         # draw vertical lines at the ends of the scalebar
         draw.line([(x_start, y_start), (x_start, y_end)], fill='black', width=line_stroke//2)
         draw.line([(x_end, y_start), (x_end, y_end)], fill='black', width=line_stroke//2)
-        
+
         font = ControllerConfigEnum.SCALEBAR_FONT.value
-        text = f'{abs(scalebar_length_mm)*1e3:.1f} micron - {self._unitName} - ORM IRIS'
-        draw.text((img.size[0]*0.5 + white_gap*2, scalebar_y - font_size//2), text, fill='black', font=ImageFont.truetype(font, font_size))
+        text = f'{abs(scalebar_length_mm)*1e3:.1f} \u00b5m ({mm_per_pixel*1e3:.4f} \u00b5m/px) - {self._unitName} - ORM IRIS'
+        draw.text((x_end + white_gap*2, scalebar_y - font_size//2), text, fill='black', font=ImageFont.truetype(font, font_size))
         
         return img_with_scalebar
         
@@ -1246,6 +1290,46 @@ class MeaImg_Handler():
             unit = hub.get_ImageMeasurementUnit(unit_id=unit_id)
             scaled_unit = unit.get_scaled_copy(scale)
             self.save_ImageMeasurementUnit_database(scaled_unit, conn, savepath)
+
+        conn.close()
+
+    @thread_assign
+    def save_ImageMeasurementHub_database_with_options(
+            self, hub:MeaImg_Hub, initdir:str, savename:str,
+            scale:float, stitched:bool, scalebar:bool) -> threading.Thread: # pyright: ignore[reportReturnType]
+        """
+        Saves the hub to a database with optional stitching and resolution scaling.
+
+        Args:
+            hub (MeaImg_Hub): Image measurement hub to save
+            initdir (str): Path to the directory
+            savename (str): Name of the database file
+            scale (float): Resolution scale factor (0 < scale <= 1)
+            stitched (bool): If True, each unit's images are stitched before saving
+            scalebar (bool): If True, a scalebar is drawn on the stitched image.
+                             Ignored when stitched is False.
+
+        Returns:
+            threading.Thread: Thread of the saving process
+        """
+        assert isinstance(hub, MeaImg_Hub), 'Hub must be an image measurement hub object'
+        assert os.path.exists(initdir), 'Initial directory path does not exist'
+        assert os.path.isdir(initdir), 'Initial directory path is not a directory'
+        assert savename != '', 'Save name is empty'
+        assert 0 < scale <= 1, 'Scale must be between 0 (exclusive) and 1 (inclusive)'
+
+        if savename[-3:] != '.db': savename += '.db'
+        savepath = os.path.join(initdir, savename)
+
+        conn = sql.connect(savepath)
+
+        for unit_id in hub.get_list_ImageUnit_ids():
+            unit = hub.get_ImageMeasurementUnit(unit_id=unit_id)
+            if scale < 1.0:
+                unit = unit.get_scaled_copy(scale)
+            if stitched:
+                unit = unit.get_stitched_copy(scalebar=scalebar)
+            self.save_ImageMeasurementUnit_database(unit, conn, savepath)
 
         conn.close()
 
