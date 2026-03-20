@@ -697,6 +697,8 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
     _sig_go_to_coordinates = Signal(tuple,threading.Event)
     _sig_req_img = Signal(Enum_CamCorrectionType,bool,bool)
     _sig_req_fresh_img = Signal(Enum_CamCorrectionType,bool,bool)
+    _sig_pause_video_ui = Signal()
+    _sig_resume_video_ui = Signal()
     
     _sig_req_auto_focus = Signal(float,float,float,int)
     
@@ -1015,6 +1017,8 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
             ctrl_z=self.ctrl_z)
         self._worker_gotocoor.sig_mvmt_started.connect(self._statbar.showMessage)
         self._sig_go_to_coordinates.connect(self._worker_gotocoor.work)
+        self._sig_pause_video_ui.connect(self._pause_video_ui)
+        self._sig_resume_video_ui.connect(self._resume_video_ui)
         
         self._thread_gotocoor = QThread(self)
         self._worker_gotocoor.moveToThread(self._thread_gotocoor)
@@ -1696,22 +1700,31 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         return self._worker_img_capture
     
     def pause_video(self):
+        # Set flag immediately (thread-safe) so video_update() stops on the next cycle
         self._flg_pause_video.set()
-        
-        # Turn the button back into a camera on button
+        # UI updates must run on the main thread — queue regardless of caller thread
+        self._sig_pause_video_ui.emit()
+
+    @Slot()
+    def _pause_video_ui(self):
         self._btn_videotoggle.released.disconnect()
         self._btn_videotoggle.setText('Resume video feed')
         self._btn_videotoggle.released.connect(lambda: self.resume_video())
         self._btn_videotoggle.setStyleSheet('background-color: yellow; color: black')
-    
+
     def resume_video(self):
+        # Clear flag immediately (thread-safe) so video_update() resumes
         self._flg_pause_video.clear()
-        
-        # Turn the button into a video stop button
+        # UI updates and timer must run on the main thread
+        self._sig_resume_video_ui.emit()
+
+    @Slot()
+    def _resume_video_ui(self):
         self._btn_videotoggle.released.disconnect()
         self._btn_videotoggle.setText('Pause video feed')
         self._btn_videotoggle.released.connect(lambda: self.pause_video())
         self._btn_videotoggle.setStyleSheet('background-color: red')
+        QTimer.singleShot(0, self.video_update)
     
     def _init_video(self):
         if not self._camera_ctrl.get_initialisation_status(): self._camera_ctrl.__init__()
