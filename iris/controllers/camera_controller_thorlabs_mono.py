@@ -190,10 +190,46 @@ class CameraController_ThorlabsMono(Class_CameraController):
     def img_capture(self) -> Image.Image:
         frm = self.frame_capture()
         if frm is None: return None
-        # frm_normalised = cv2.normalize(frm, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U) 
+        # frm_normalised = cv2.normalize(frm, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
         frm_normalised = frm*self._intensity_mod
         self.img = Image.fromarray(frm_normalised)
         self.img = self.img.convert('RGB')
+        return self.img
+
+    def set_single_frame_trigger_mode(self, enabled: bool) -> None:
+        """Switch between single-frame software trigger (True) and continuous (False) mode."""
+        with self._lock:
+            self.camera.disarm()
+            self.camera.frames_per_trigger_zero_for_unlimited = 1 if enabled else 0
+            self.camera.arm(2)
+            if not enabled:
+                self.camera.issue_software_trigger()  # restart continuous stream
+
+    def img_capture_fresh(self) -> Image.Image | None:
+        """
+        Flush buffered frames, issue a software trigger, and wait for the fresh frame.
+        Camera must already be in single-frame trigger mode — call
+        set_single_frame_trigger_mode(True) once before the tiling loop.
+        """
+        with self._lock:
+            # Flush any stale buffered frames non-blocking
+            old_timeout = self.camera.image_poll_timeout_ms
+            self.camera.image_poll_timeout_ms = 0
+            while self.camera.get_pending_frame_or_null() is not None:
+                pass
+            # Issue trigger → fresh exposure starts now (stage is already stationary)
+            self.camera.issue_software_trigger()
+            # Wait for the frame: exposure_time + a fixed margin (no artificial floor)
+            self.camera.image_poll_timeout_ms = int(self.camera.exposure_time_us // 1000) + 500
+            frame = self.camera.get_pending_frame_or_null()
+            self.camera.image_poll_timeout_ms = old_timeout
+
+        if frame is None:
+            return None
+        image_array = frame.image_buffer.reshape(self.camera.image_height_pixels, self.camera.image_width_pixels)
+        if self._mirrorx: image_array = cv2.flip(image_array, 0)
+        if self._mirrory: image_array = cv2.flip(image_array, 1)
+        self.img = Image.fromarray(image_array * self._intensity_mod).convert('RGB')
         return self.img
     
     def vidcapture_show(self):
