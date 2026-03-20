@@ -610,7 +610,7 @@ class StageComm_Worker(QObject):
             current_speed = self._controller.get_VelocityParameters()
             if maxspeed:
                 event_finish_speed = threading.Event()
-                self.sig_setspeed.emit(100.0, 100.0, event_finish_speed) # Set to max speed (example values, adjust as needed)
+                self.sig_setspeed.emit(100.0, -1.0, event_finish_speed) # Set to max speed (example values, adjust as needed)
                 event_finish_speed.wait()
             
             event_finish = threading.Event()
