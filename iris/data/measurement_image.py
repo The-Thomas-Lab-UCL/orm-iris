@@ -231,7 +231,49 @@ class MeaImg_Unit():
         """
         if not isinstance(self._calibration, ImgMea_Cal): raise ValueError('Calibration is not set')
         return self._calibration
-        
+
+    def get_scaled_copy(self, scale:float) -> 'MeaImg_Unit':
+        """
+        Returns a copy of this unit with all images downscaled by `scale` and the
+        calibration adjusted so that coordinate conversions remain correct.
+
+        The unit ID and name are preserved. See ImgMea_Cal.get_scaled_copy for details
+        on how the calibration is modified.
+
+        Args:
+            scale (float): Resolution scale factor (0 < scale <= 1)
+
+        Returns:
+            MeaImg_Unit: New unit with scaled images and updated calibration
+        """
+        assert self.check_measurement_exist(), 'Unit does not contain any measurements'
+        assert self.check_calibration_exist(), 'Unit does not contain any calibration parameters'
+        assert 0 < scale <= 1, 'Scale must be between 0 (exclusive) and 1 (inclusive)'
+
+        cal_scaled = self.get_ImageMeasurement_Calibration().get_scaled_copy(scale)
+
+        unit_id, unit_name = self.get_IdName()
+        scaled_unit = MeaImg_Unit(reconstruct=True)
+        scaled_unit.set_metadata_fromfile({
+            'id': unit_id,
+            'name': unit_name,
+            'calibration_id': cal_scaled.id,
+            'calibration_dict': cal_scaled.get_calibration_asdict(),
+        })
+
+        dict_mea_orig = self.get_dict_measurement()
+        dict_mea_scaled = {key: list(val) for key, val in dict_mea_orig.items()}
+        dict_mea_scaled['image'] = [
+            img.resize(
+                (max(1, int(img.width * scale)), max(1, int(img.height * scale))),
+                Image.Resampling.LANCZOS,
+            )
+            for img in dict_mea_orig['image']
+        ]
+        scaled_unit.set_dict_measurement_fromfile(dict_mea_scaled)
+
+        return scaled_unit
+
     def _calculate_RotationCorrectionMatrix(self) -> None:
         """
         Calculates the rotation correction matrix for the image stitching
@@ -1136,7 +1178,52 @@ class MeaImg_Handler():
             self.save_ImageMeasurementUnit_database(unit,conn,savepath)
             
         conn.close()
-        
+
+    def _get_scaled_unit(self, unit:MeaImg_Unit, scale:float) -> MeaImg_Unit:
+        return unit.get_scaled_copy(scale)
+
+    @thread_assign
+    def save_ImageMeasurementHub_database_at_scale(
+            self, hub:MeaImg_Hub, initdir:str, savename:str, scale:float) -> threading.Thread:
+        """
+        Saves the hub to a database with all images downscaled by `scale`.
+
+        Each unit is saved with its images resized to `scale` of their original dimensions
+        and with the calibration's pixel-per-mm factors adjusted by the same factor, so
+        that coordinate conversions remain correct on the saved data.
+
+        Args:
+            hub (MeaImg_Hub): Image measurement hub to save
+            initdir (str): Path to the directory
+            savename (str): Name of the database file
+            scale (float): Resolution scale factor (0 < scale <= 1)
+
+        Returns:
+            threading.Thread: Thread of the saving process
+
+        Raises:
+            AssertionError: initdir does not exist or is not a directory
+            AssertionError: savename is empty
+            AssertionError: scale is not in (0, 1]
+        """
+        assert isinstance(hub, MeaImg_Hub), 'Hub must be a MeaImg_Hub object'
+        assert os.path.exists(initdir), 'Initial directory path does not exist'
+        assert os.path.isdir(initdir), 'Initial directory path is not a directory'
+        assert savename != '', 'Save name is empty'
+        assert 0 < scale <= 1, 'Scale must be between 0 (exclusive) and 1 (inclusive)'
+
+        if savename[-3:] != '.db': savename += '.db'
+        savepath = os.path.join(initdir, savename)
+
+        conn = sql.connect(savepath)
+
+        for unit_id in hub.get_list_ImageUnit_ids():
+            unit = hub.get_ImageMeasurementUnit(unit_id=unit_id)
+            scaled_unit = self._get_scaled_unit(unit, scale)
+            self.save_ImageMeasurementUnit_database(scaled_unit, conn, savepath)
+
+        conn.close() # pyright: ignore[reportReturnType]
+
     def save_ImageMeasurementUnit_database(\
         self,unit:MeaImg_Unit,conn:sql.Connection,conn_path:str):
         """
