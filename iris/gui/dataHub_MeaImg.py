@@ -229,7 +229,7 @@ class Image_SaverLoader_Worker(QObject):
     def save_ImageMeasurementHub(self, hub:MeaImg_Hub, initdir:str, savename:str):
         """
         Save the ImageMeasurement_Hub data to a database file.
-        
+
         Args:
             hub (ImageMeasurement_Hub): ImageMeasurement_Hub object to save
             initdir (str): Directory to save the database file
@@ -238,6 +238,25 @@ class Image_SaverLoader_Worker(QObject):
         try:
             handler = MeaImg_Handler()
             thread = handler.save_ImageMeasurementHub_database(hub=hub,initdir=initdir,savename=savename)
+            thread.join()
+            self.finished.emit(self.msg_save_db)
+        except Exception as e:
+            self.error.emit(self.msg_error_save + str(e))
+
+    @Slot(MeaImg_Hub,str,str,float)
+    def save_ImageMeasurementHub_at_scale(self, hub:MeaImg_Hub, initdir:str, savename:str, scale:float):
+        """
+        Save the ImageMeasurement_Hub data to a database file with images downscaled.
+
+        Args:
+            hub (MeaImg_Hub): ImageMeasurement_Hub object to save
+            initdir (str): Directory to save the database file
+            savename (str): Name of the database file
+            scale (float): Resolution scale factor (0 < scale <= 1)
+        """
+        try:
+            handler = MeaImg_Handler()
+            thread = handler.save_ImageMeasurementHub_database_at_scale(hub=hub,initdir=initdir,savename=savename,scale=scale)
             thread.join()
             self.finished.emit(self.msg_save_db)
         except Exception as e:
@@ -285,6 +304,7 @@ class Wdg_DataHub_Image(qw.QWidget):
     Modeled after the Frm_DataHub_Mapping class.
     """
     sig_save = Signal(MeaImg_Hub, str, str)
+    sig_save_at_scale = Signal(MeaImg_Hub, str, str, float)
     sig_load = Signal(MeaImg_Hub, str)
     sig_save_png = Signal(MeaImg_Unit, str, float, bool)
     sig_updateTree = Signal()
@@ -330,11 +350,13 @@ class Wdg_DataHub_Image(qw.QWidget):
         # Widgets to manipulate the entries
         self._btn_save = wdg.btn_save
         self._btn_load = wdg.btn_load
+        self._btn_rename = wdg.btn_rename
         self._btn_remove = wdg.btn_remove
         self._btn_save_png = wdg.btn_save_png
-        
+
         self._btn_save.clicked.connect(self.save_ImageMeasurementHub)
         self._btn_load.clicked.connect(self.load_ImageMeasurementHub)
+        self._btn_rename.clicked.connect(self.rename_selected_ImageMeasurementUnit)
         self._btn_remove.clicked.connect(self.remove_selected_ImageMeasurementUnit)
         self._btn_save_png.clicked.connect(self.export_selected_as_png)
         
@@ -355,6 +377,7 @@ class Wdg_DataHub_Image(qw.QWidget):
         self._worker.moveToThread(self._thread)
         
         self.sig_save.connect(self._worker.save_ImageMeasurementHub)
+        self.sig_save_at_scale.connect(self._worker.save_ImageMeasurementHub_at_scale)
         self.sig_load.connect(self._worker.load_ImageMeasurementHub)
         self.sig_save_png.connect(self._worker.save_ImageMeasurementUnit_png)
         
@@ -456,23 +479,37 @@ class Wdg_DataHub_Image(qw.QWidget):
     def save_ImageMeasurementHub(self) -> None:
         """
         Save the ImageMeasurement_Hub data to a database file.
+        Prompts the user for a resolution percentage before saving.
         """
         self.disable_buttons('save')
         self._btn_save.setText('Saving to .db ...')
+
+        res = qw.QInputDialog.getDouble(
+            self, 'Save Resolution', 'Enter the resolution (percentage) to save the images at:', 100, 0.1, 100, 1
+        )
+        if not res[1]:
+            self.reset_buttons('save')
+            return
+
+        scale = res[0] / 100.0
+
         file_path = qw.QFileDialog.getSaveFileName(
             self, 'Save Image Measurement Hub',
             filter='Database files (*.db)'
         )[0]
-        
+
         if not file_path:
             qw.QMessageBox.warning(self, 'Error', 'No file selected.')
             self.reset_buttons('save')
             return
-        
+
         initdir = os.path.dirname(file_path)
         savename = os.path.basename(file_path)
-        
-        self.sig_save.emit(self.ImageHub, initdir, savename)
+
+        if scale < 1.0:
+            self.sig_save_at_scale.emit(self.ImageHub, initdir, savename, scale)
+        else:
+            self.sig_save.emit(self.ImageHub, initdir, savename)
         
     @Slot()
     def export_selected_as_png(self):
@@ -543,6 +580,36 @@ class Wdg_DataHub_Image(qw.QWidget):
             if retry == qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes exists
                 self.append_ImageMeasurementUnit(unit, True)
         
+    @Slot()
+    @Slot()
+    def rename_selected_ImageMeasurementUnit(self):
+        """
+        Rename the selected ImageMeasurementUnit in the ImageMeasurement_Hub.
+        """
+        selections = self._tree.selectedItems()
+
+        if len(selections) == 0:
+            qw.QMessageBox.warning(self, 'Error', 'No entry selected.'); return
+        if len(selections) > 1:
+            qw.QMessageBox.warning(self, 'Error', 'Please select only one unit to rename.'); return
+
+        unit_id = selections[0].text(0)
+        current_name = self.ImageHub.get_ImageMeasurementUnit(unit_id=unit_id).get_IdName()[1]
+
+        new_name, ok = qw.QInputDialog.getText(
+            self, 'Rename', 'Enter the new name:', text=current_name
+        )
+        if not ok: return
+
+        if not new_name:
+            qw.QMessageBox.warning(self, 'Error', 'Name cannot be empty.'); return
+
+        try:
+            self.ImageHub.rename_ImageMeasurementUnit(unit_id, new_name)
+            self._flg_issaved = False
+        except AssertionError as e:
+            qw.QMessageBox.warning(self, 'Error', str(e))
+
     @Slot()
     def remove_selected_ImageMeasurementUnit(self):
         """

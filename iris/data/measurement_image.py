@@ -919,6 +919,34 @@ class MeaImg_Hub():
         
         self.notify_observers()
         
+    def rename_ImageMeasurementUnit(self, unit_id:str, new_name:str) -> None:
+        """
+        Renames an ImageMeasurement_Unit in the hub, keeping all lookup dictionaries in sync.
+
+        Args:
+            unit_id (str): ID of the unit to rename
+            new_name (str): New name for the unit
+
+        Raises:
+            AssertionError: unit_id does not exist
+            AssertionError: new_name already exists in the hub
+        """
+        assert unit_id in self._dict_unit_IDName, 'Unit ID does not exist'
+        assert new_name not in self._dict_unit_NameID, 'Unit name already exists'
+
+        old_name = self._dict_unit_IDName[unit_id]
+
+        # Update hub lookup dicts
+        del self._dict_unit_NameID[old_name]
+        self._dict_unit_NameID[new_name] = unit_id
+        self._dict_unit_IDName[unit_id] = new_name
+
+        # Update the unit itself
+        unit = self.get_ImageMeasurementUnit(unit_id=unit_id)
+        unit.set_name(new_name)
+
+        self.notify_observers()
+
     def get_ImageMeasurementUnit(self,*,unit_id:str|None=None,unit_name:str|None=None) -> MeaImg_Unit:
         """
         Returns an ImageMeasurement_Unit from the hub
@@ -1179,11 +1207,8 @@ class MeaImg_Handler():
             
         conn.close()
 
-    def _get_scaled_unit(self, unit:MeaImg_Unit, scale:float) -> MeaImg_Unit:
-        return unit.get_scaled_copy(scale)
-
     @thread_assign
-    def save_ImageMeasurementHub_database_at_scale(
+    def save_ImageMeasurementHub_database_at_scale( # pyright: ignore[reportReturnType]
             self, hub:MeaImg_Hub, initdir:str, savename:str, scale:float) -> threading.Thread:
         """
         Saves the hub to a database with all images downscaled by `scale`.
@@ -1219,10 +1244,10 @@ class MeaImg_Handler():
 
         for unit_id in hub.get_list_ImageUnit_ids():
             unit = hub.get_ImageMeasurementUnit(unit_id=unit_id)
-            scaled_unit = self._get_scaled_unit(unit, scale)
+            scaled_unit = unit.get_scaled_copy(scale)
             self.save_ImageMeasurementUnit_database(scaled_unit, conn, savepath)
 
-        conn.close() # pyright: ignore[reportReturnType]
+        conn.close()
 
     def save_ImageMeasurementUnit_database(\
         self,unit:MeaImg_Unit,conn:sql.Connection,conn_path:str):

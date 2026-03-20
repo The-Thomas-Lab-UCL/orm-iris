@@ -39,6 +39,24 @@
           <item>
            <layout class="QHBoxLayout" name="horizontalLayout_2">
             <item>
+             <widget class="QPushButton" name="btn_rename">
+              <property name="text">
+               <string>Rename selected</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btn_remove">
+              <property name="text">
+               <string>Remove selected</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout_3">
+            <item>
              <widget class="QPushButton" name="btn_save">
               <property name="text">
                <string>Save all (.db)</string>
@@ -49,13 +67,6 @@
              <widget class="QPushButton" name="btn_load">
               <property name="text">
                <string>Load (.db)</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="btn_remove">
-              <property name="text">
-               <string>Remove selected</string>
               </property>
              </widget>
             </item>
