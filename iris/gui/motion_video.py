@@ -286,40 +286,54 @@ class Motion_GoToCoor_Worker(QObject):
     def _notify_finish(self, thread_xy:threading.Thread, thread_z:threading.Thread,
                        event_finished:threading.Event):
         """
-        Waits for the target to be reached, the coordinate doesn't update within the timeout, raises a TimeoutError
-        
+        Waits for the target to be reached and for the stage to be stationary for a minimum
+        settle time before signalling completion. Raises a TimeoutError if the total timeout
+        (reset while stage is still moving) is exceeded.
+
         Args:
             thread_xy (threading.Thread): The thread moving the XY stage
             thread_z (threading.Thread): The thread moving the Z stage
-            timeout (float): Timeout in seconds
-                        
-        Raises:
-            TimeoutError: If the target is not reached within the timeout
+            event_finished (threading.Event): Event to signal when movement and settling are done
         """
         timeout = WAIT_MOVEMENT_TIMEOUT
-        
-        start_time = time.time()
+        settle_sec = ControllerConfigEnum.STAGE_TILING_SETTLE_SEC.value
+
+        timeout_start = time.time()
+        last_change_time = time.time()
         coor = self._get_coor()
+        threads_done = False
+
         while True:
-            if thread_xy.is_alive() or thread_z.is_alive():
-                thread_xy.join(timeout=0.1)
-                thread_z.join(timeout=0.1)
-            else:
-                event_finished.set()
-                self.sig_mvmt_finished.emit(self.msg_target_reached)
-                break
-            
-            if time.time() - start_time > timeout:
+            if not threads_done:
+                if thread_xy.is_alive() or thread_z.is_alive():
+                    thread_xy.join(timeout=0.1)
+                    thread_z.join(timeout=0.1)
+                else:
+                    threads_done = True
+                    last_change_time = time.time()  # Reset settle timer once threads finish
+
+            if time.time() - timeout_start > timeout:
                 event_finished.set()
                 self.sig_mvmt_finished.emit(self.msg_target_timeout)
                 break
-            
+
             coor_new = self._get_coor()
-            # Resets the timer if the coordinates are not the same (i.e., the stage is still moving)
-            if coor_new is None: continue
-            if coor is None: coor = coor_new
-            if not np.allclose(coor,coor_new,atol=0.001): start_time = time.time()
+            if coor_new is None:
+                time.sleep(0.01)
+                continue
+            if coor is None:
+                coor = coor_new
+            if not np.allclose(coor, coor_new, atol=0.001):
+                last_change_time = time.time()
+                timeout_start = time.time()  # Reset overall timeout while stage is still moving
             coor = coor_new
+
+            if threads_done and (time.time() - last_change_time) >= settle_sec:
+                event_finished.set()
+                self.sig_mvmt_finished.emit(self.msg_target_reached)
+                break
+
+            time.sleep(0.01)
         
     @Slot(tuple, threading.Event)
     def work(
@@ -594,6 +608,38 @@ class ImageCapture_Worker(QObject):
         return img
     
     @Slot(Enum_CamCorrectionType, bool, bool)
+    def grab_image_fresh(self, img_corr:Enum_CamCorrectionType, scalebar:bool, crosshair:bool):
+        """
+        Like grab_image(), but calls img_capture_fresh() for RAW captures so the
+        exposure is guaranteed to start AFTER this call (software trigger).
+        Use this for step-and-capture workflows like image tiling.
+        """
+        if not img_corr in Enum_CamCorrectionType:
+            self.sig_error.emit('Invalid video correction type: {}'.format(img_corr))
+            return
+        try:
+            if img_corr == Enum_CamCorrectionType.RAW:
+                img = self._camera_controller.img_capture_fresh()
+            else:
+                img = self._stageHub.get_image(request=img_corr)
+
+            if not isinstance(img, Image.Image):
+                self.sig_no_frame.emit()
+                return
+
+            img = self._overlay_scalebar(img) if scalebar else img
+            if crosshair: img = self._draw_crosshair(img)
+
+            new_frame: QPixmap = ImageQt.toqpixmap(img)
+            self.sig_img.emit(img)
+            self.sig_qpixmap.emit(new_frame)
+
+        except Exception as e:
+            print(f'Fresh capture failed: {e}')
+            self.sig_no_frame.emit()
+            self.sig_error.emit('Failed to capture fresh frame: {}'.format(e))
+
+    @Slot(Enum_CamCorrectionType, bool, bool)
     def grab_image(self, img_corr:Enum_CamCorrectionType, scalebar:bool, crosshair:bool):
         """
         Updates the video feed, taking in mind Tkinter's single thread.
@@ -650,6 +696,9 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
     
     _sig_go_to_coordinates = Signal(tuple,threading.Event)
     _sig_req_img = Signal(Enum_CamCorrectionType,bool,bool)
+    _sig_req_fresh_img = Signal(Enum_CamCorrectionType,bool,bool)
+    _sig_pause_video_ui = Signal()
+    _sig_resume_video_ui = Signal()
     
     _sig_req_auto_focus = Signal(float,float,float,int)
     
@@ -690,6 +739,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         self._video_height = ControllerConfigEnum.VIDEOFEED_HEIGHT.value    # Video feed height in pixel
         self._iscapturing = threading.Event()  # A flag to prevent multiple concurrent video capture
         self._flg_pause_video = threading.Event()  # A flag to check if the video feed is running
+        self._flg_img_ready = threading.Event()    # Set each time a new image (or no-frame) is received
         self._time_last_frame = 0.0   # The timestamp of the last frame captured, used to limit the frame rate
         self._time_last_img = 0.0     # The timestamp of the last image received
         self._currentImage:Image.Image|None = None   # The current image to be displayed
@@ -967,6 +1017,8 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
             ctrl_z=self.ctrl_z)
         self._worker_gotocoor.sig_mvmt_started.connect(self._statbar.showMessage)
         self._sig_go_to_coordinates.connect(self._worker_gotocoor.work)
+        self._sig_pause_video_ui.connect(self._pause_video_ui)
+        self._sig_resume_video_ui.connect(self._resume_video_ui)
         
         self._thread_gotocoor = QThread(self)
         self._worker_gotocoor.moveToThread(self._thread_gotocoor)
@@ -1628,6 +1680,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         
         # Connect the signal to request an image capture to the worker's grab_image method
         self._sig_req_img.connect(self._worker_img_capture.grab_image)
+        self._sig_req_fresh_img.connect(self._worker_img_capture.grab_image_fresh)
         self._worker_img_capture.sig_error.connect(lambda msg: print(f'Video worker error: {msg}'))
         self._worker_img_capture.sig_img.connect(self._handle_img_capture)
         self._worker_img_capture.sig_qpixmap.connect(self._handle_qpixmap_capture)
@@ -1647,22 +1700,31 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         return self._worker_img_capture
     
     def pause_video(self):
+        # Set flag immediately (thread-safe) so video_update() stops on the next cycle
         self._flg_pause_video.set()
-        
-        # Turn the button back into a camera on button
+        # UI updates must run on the main thread — queue regardless of caller thread
+        self._sig_pause_video_ui.emit()
+
+    @Slot()
+    def _pause_video_ui(self):
         self._btn_videotoggle.released.disconnect()
         self._btn_videotoggle.setText('Resume video feed')
         self._btn_videotoggle.released.connect(lambda: self.resume_video())
         self._btn_videotoggle.setStyleSheet('background-color: yellow; color: black')
-    
+
     def resume_video(self):
+        # Clear flag immediately (thread-safe) so video_update() resumes
         self._flg_pause_video.clear()
-        
-        # Turn the button into a video stop button
+        # UI updates and timer must run on the main thread
+        self._sig_resume_video_ui.emit()
+
+    @Slot()
+    def _resume_video_ui(self):
         self._btn_videotoggle.released.disconnect()
         self._btn_videotoggle.setText('Pause video feed')
         self._btn_videotoggle.released.connect(lambda: self.pause_video())
         self._btn_videotoggle.setStyleSheet('background-color: red')
+        QTimer.singleShot(0, self.video_update)
     
     def _init_video(self):
         if not self._camera_ctrl.get_initialisation_status(): self._camera_ctrl.__init__()
@@ -1691,6 +1753,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         """
         Handles the case where the camera fails to capture an image.
         """
+        self._flg_img_ready.set()
         self._iscapturing.clear()
         self._trigger_next_video_update()
     
@@ -1725,7 +1788,26 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         if not isinstance(img,Image.Image): return
         self._currentImage = img
         self._time_last_img = time.time()
+        self._flg_img_ready.set()
     
+    def get_img_ready_event(self) -> threading.Event:
+        """
+        Returns the event that is set whenever a new image (or no-frame) is received.
+        Clear it before triggering a capture, then wait on it to know when the result is ready.
+        """
+        return self._flg_img_ready
+
+    def wait_for_capture_drain(self, timeout: float = 2.0) -> None:
+        """
+        Blocks until any currently in-flight capture completes (i.e. _iscapturing clears).
+        Call this after pause_video() to guarantee no stale _handle_img_capture can fire afterwards.
+        """
+        deadline = time.time() + timeout
+        while self._iscapturing.is_set():
+            if time.time() > deadline:
+                break
+            time.sleep(0.01)
+
     @Slot()
     def trigger_img_capture(self):
         request = self._combo_vidcorrection.currentText()
@@ -1733,8 +1815,29 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
             Enum_CamCorrectionType[request],
             self._chkbox_scalebar.isChecked(),
             self._chkbox_crosshair.isChecked())
-        
         self._iscapturing.set()
+
+    @Slot()
+    def trigger_fresh_img_capture(self):
+        """
+        Like trigger_img_capture() but uses a software trigger to guarantee
+        the exposure starts after this call. Use for step-and-capture (tiling).
+        Camera must already be in single-frame trigger mode (call enter_tiling_mode first).
+        """
+        request = self._combo_vidcorrection.currentText()
+        self._sig_req_fresh_img.emit(
+            Enum_CamCorrectionType[request],
+            self._chkbox_scalebar.isChecked(),
+            self._chkbox_crosshair.isChecked())
+        self._iscapturing.set()
+
+    def enter_tiling_mode(self) -> None:
+        """Switch the camera to single-frame software trigger mode for tiling."""
+        self._camera_ctrl.set_single_frame_trigger_mode(True)
+
+    def exit_tiling_mode(self) -> None:
+        """Restore the camera to continuous streaming mode after tiling."""
+        self._camera_ctrl.set_single_frame_trigger_mode(False)
         
     def video_update(self):
         """

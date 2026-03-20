@@ -122,7 +122,27 @@ class Class_CameraController:
             return None
         self.img = Image.fromarray(frm)
         return self.img
-    
+
+    def set_single_frame_trigger_mode(self, enabled: bool) -> None:
+        """
+        Switch between continuous streaming (False) and single-frame software
+        trigger (True) mode. Override in subclasses that support this.
+        Call once before a tiling loop (True) and once after (False).
+        """
+        pass  # no-op for cameras that don't support it
+
+    def img_capture_fresh(self) -> Image.Image|None:
+        """
+        Flush buffered frames, issue a software trigger, and return the fresh frame.
+        Camera must already be in single-frame trigger mode (call
+        set_single_frame_trigger_mode(True) before the tiling loop).
+        Default falls back to img_capture(). Override in subclasses.
+
+        Returns:
+            Image.Image|None: A freshly exposed frame, or None on failure
+        """
+        return self.img_capture()
+
     def vidcapture_show(self) -> None:
         """
         Tests the video capture and shows the video feed.

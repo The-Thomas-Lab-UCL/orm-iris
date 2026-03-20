@@ -17,11 +17,9 @@ import matplotlib
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 from matplotlib.colorbar import Colorbar
-import matplotlib.pyplot as plt
 
 # Force matplotlib to use the backend to prevent memory leak
 matplotlib.use('Agg')
-plt.tight_layout()
 
 import pandas as pd
 import numpy as np
@@ -642,7 +640,8 @@ class MeaRaman_Plotter():
         self.intensity_name = DataAnalysisConfigEnum.INTENSITY_LABEL.value       # The spectra intensity column name
         self.ramanshift_name = DataAnalysisConfigEnum.RAMANSHIFT_LABEL.value     # The Raman shift column name
         
-        self._fig, self._ax = plt.subplots(figsize=plt_size)
+        self._fig = Figure(figsize=tuple(plt_size) if plt_size is not None else None)
+        self._ax = self._fig.add_subplot(111)
         
     def get_fig_ax(self) -> tuple[Figure, Axes]:
         """
