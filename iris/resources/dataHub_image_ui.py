@@ -46,41 +46,51 @@ class Ui_dataHub_image(object):
 
         self.horizontalLayout_2 = QHBoxLayout()
         self.horizontalLayout_2.setObjectName(u"horizontalLayout_2")
-        self.btn_save = QPushButton(self.groupBox)
-        self.btn_save.setObjectName(u"btn_save")
+        self.btn_rename = QPushButton(self.groupBox)
+        self.btn_rename.setObjectName(u"btn_rename")
 
-        self.horizontalLayout_2.addWidget(self.btn_save)
-
-        self.btn_load = QPushButton(self.groupBox)
-        self.btn_load.setObjectName(u"btn_load")
-
-        self.horizontalLayout_2.addWidget(self.btn_load)
+        self.horizontalLayout_2.addWidget(self.btn_rename)
 
         self.btn_remove = QPushButton(self.groupBox)
         self.btn_remove.setObjectName(u"btn_remove")
 
         self.horizontalLayout_2.addWidget(self.btn_remove)
 
+
+        self.verticalLayout.addLayout(self.horizontalLayout_2)
+
+        self.horizontalLayout_3 = QHBoxLayout()
+        self.horizontalLayout_3.setObjectName(u"horizontalLayout_3")
+        self.btn_save = QPushButton(self.groupBox)
+        self.btn_save.setObjectName(u"btn_save")
+
+        self.horizontalLayout_3.addWidget(self.btn_save)
+
+        self.btn_load = QPushButton(self.groupBox)
+        self.btn_load.setObjectName(u"btn_load")
+
+        self.horizontalLayout_3.addWidget(self.btn_load)
+
         self.line = QFrame(self.groupBox)
         self.line.setObjectName(u"line")
         self.line.setFrameShape(QFrame.Shape.VLine)
         self.line.setFrameShadow(QFrame.Shadow.Sunken)
 
-        self.horizontalLayout_2.addWidget(self.line)
+        self.horizontalLayout_3.addWidget(self.line)
 
         self.btn_save_png = QPushButton(self.groupBox)
         self.btn_save_png.setObjectName(u"btn_save_png")
 
-        self.horizontalLayout_2.addWidget(self.btn_save_png)
+        self.horizontalLayout_3.addWidget(self.btn_save_png)
 
         self.chk_scalebar = QCheckBox(self.groupBox)
         self.chk_scalebar.setObjectName(u"chk_scalebar")
         self.chk_scalebar.setChecked(True)
 
-        self.horizontalLayout_2.addWidget(self.chk_scalebar)
+        self.horizontalLayout_3.addWidget(self.chk_scalebar)
 
 
-        self.verticalLayout.addLayout(self.horizontalLayout_2)
+        self.verticalLayout.addLayout(self.horizontalLayout_3)
 
 
         self.verticalLayout_2.addLayout(self.verticalLayout)
@@ -100,9 +110,10 @@ class Ui_dataHub_image(object):
     def retranslateUi(self, dataHub_image):
         dataHub_image.setWindowTitle(QCoreApplication.translate("dataHub_image", u"Form", None))
         self.groupBox.setTitle(QCoreApplication.translate("dataHub_image", u"Brightfield Image", None))
+        self.btn_rename.setText(QCoreApplication.translate("dataHub_image", u"Rename selected", None))
+        self.btn_remove.setText(QCoreApplication.translate("dataHub_image", u"Remove selected", None))
         self.btn_save.setText(QCoreApplication.translate("dataHub_image", u"Save all (.db)", None))
         self.btn_load.setText(QCoreApplication.translate("dataHub_image", u"Load (.db)", None))
-        self.btn_remove.setText(QCoreApplication.translate("dataHub_image", u"Remove selected", None))
         self.btn_save_png.setText(QCoreApplication.translate("dataHub_image", u"Save selected units (.png)", None))
         self.chk_scalebar.setText(QCoreApplication.translate("dataHub_image", u"Include a scalebar", None))
     # retranslateUi

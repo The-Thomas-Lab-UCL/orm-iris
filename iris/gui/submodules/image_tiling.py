@@ -347,17 +347,18 @@ class Wdg_HiLvlTiling(qw.QWidget):
         Update the combobox with the ImageUnits stored in the ImageHub
         using the DataHubImage
         """
-        self._combo_imgunits.blockSignals(True)
-        self._combo_imgunits.setEnabled(False)
-        
         hub = self._dataHub_img.get_ImageMeasurement_Hub()
         list_ids = hub.get_list_ImageUnit_ids()
         dict_idToName = hub.get_dict_IDtoName()
         list_names = [dict_idToName[id] for id in list_ids]
-        
-        # Only update when needed
+
+        # Only update when needed — check BEFORE disabling so we don't leave
+        # the combobox stuck in a disabled/blocked state on a no-op call
         if list_names == self._list_imgunit_names: return
-        
+
+        self._combo_imgunits.blockSignals(True)
+        self._combo_imgunits.setEnabled(False)
+
         current_name = self._combo_imgunits.currentText()
         
         self._list_imgunit_names = list_names.copy()
@@ -370,7 +371,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
             self._combo_imgunits.setCurrentIndex(0)
             self.sig_req_plot_imgunit.emit(hub.get_ImageMeasurementUnit(unit_id=list_ids[0]), self._chk_lres.isChecked())
         
-        self._combo_imgunits.setEnabled(True)
+        self._combo_imgunits.setEnabled(bool(list_ids))
         self._combo_imgunits.blockSignals(False)
         
     @Slot(str)
