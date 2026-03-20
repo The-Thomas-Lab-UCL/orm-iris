@@ -176,6 +176,7 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
         self._plotter._ax = self._ax   # self._ax / self._fig are set by super().__init__()
         self._plotter._fig = self._fig
         self._pending_overlay: tuple[MeaImg_Unit, bool] | None = None
+        self._overlay_in_progress = False
         self._init_worker()
 
     # >>> Calibration fine-tuning widgets <<<
@@ -406,6 +407,7 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
         if self._pending_overlay is not None:
             img_unit, low_res = self._pending_overlay
             self._pending_overlay = None
+            self._overlay_in_progress = True
             self.sig_overlay_stitched_image.emit(img_unit, low_res)
         else:
             self._canvas_widget.draw_idle()
@@ -413,12 +415,22 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
 
     @Slot()
     def on_plotter_worker_finished(self) -> None:
-        """Keep _isplotting True until the overlay is also done."""
-        pass  # _isplotting is reset in handle_plot_overlay_finished
+        """Reset _isplotting if the overlay worker was never started.
+
+        The base worker emits sig_finished_plotting without sig_plotready when it
+        takes its early-return error path (invalid mapping unit). In that case
+        on_plotter_worker_plotready is never called, so _isplotting would stay True
+        forever. Resetting here when no overlay is in progress covers both the
+        error path and the no-overlay success path (already False, so harmless).
+        """
+        if not self._overlay_in_progress:
+            self._pending_overlay = None
+            self._isplotting = False
 
     @Slot()
     def handle_plot_overlay_finished(self) -> None:
         """Handle the plot overlay finished signal."""
+        self._overlay_in_progress = False
         self._canvas_widget.draw_idle()
         self._isplotting = False
 
