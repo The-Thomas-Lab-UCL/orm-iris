@@ -1862,19 +1862,26 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         Initialises the coordinate memory widgets and layouts.
 
         Expects the following widgets from the UI:
-            tree_memory     - QTreeWidget (2 columns: Name | Coordinate µm)
-            btn_memory_save - QPushButton "Store current coordinate"
-            btn_memory_goto - QPushButton "Go to selected coordinate" (toggles to Stop during motion)
-            btn_memory_delete - QPushButton "Delete selected"
+            tree_memory               - QTreeWidget (2 columns: Name | Coordinate µm)
+            btn_memory_save           - QPushButton "Store current coordinate"
+            btn_memory_goto           - QPushButton "Go to selected coordinate" (toggles to Stop during motion)
+            btn_memory_delete         - QPushButton "Delete selected"
+            btn_memory_save_beamdump  - QPushButton "Set as beam dump coordinate"
+            lbl_beamdump              - QLabel showing the current beam dump coordinate
 
-        Coordinates are persisted to CSV at MEMORY_CSV_PATH and reloaded on every app start.
-        Can be extended with beam-dump functionality by calling _store_current_coor() externally.
+        All coordinates (including the beam dump) are persisted to the same CSV.
+        The beam dump entry uses the reserved name '__beamdump__' and is never shown in the tree.
+        self.beamdump_coor is None when no beam dump coordinate has been saved.
         """
-        MEMORY_CSV_PATH = os.path.join(r'./autosave/coor - memory/', 'coor_memory.csv')
-        _LABEL_GOTO  = 'Go to selected coordinate'
-        _LABEL_STOP  = 'Stop'
-        _COL_NAME    = 0
-        _ROLE_DATA   = qt.ItemDataRole.UserRole
+        MEMORY_CSV_PATH  = os.path.join(r'./autosave/coor - memory/', 'coor_memory.csv')
+        _BEAMDUMP_KEY    = '__beamdump__'
+        _LABEL_GOTO      = 'Go to selected coordinate'
+        _LABEL_STOP      = 'Stop'
+        _COL_NAME        = 0
+        _ROLE_DATA       = qt.ItemDataRole.UserRole
+
+        # Public attribute: None until a beam dump coordinate is stored
+        self.beamdump_coor: tuple[float, float, float] | None = None
 
         # ── Tree widget setup ──────────────────────────────────────────────
         self.tree_memory.setColumnCount(2)
@@ -1882,10 +1889,21 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         self.tree_memory.header().setStretchLastSection(True)
         self.tree_memory.setSelectionMode(qw.QAbstractItemView.SelectionMode.SingleSelection)
 
+        # ── Beam dump label helper ────────────────────────────────────────
+        def _update_beamdump_label():
+            if self.beamdump_coor is None:
+                self.lbl_beamdump.setText('Beam dump: not set')
+            else:
+                x_um, y_um, z_um = self.beamdump_coor
+                self.lbl_beamdump.setText(
+                    'Beam dump: X:{:.1f} Y:{:.1f} Z:{:.1f} µm'.format(x_um, y_um, z_um))
+
         # ── CSV helpers ───────────────────────────────────────────────────
         def _load_csv():
             self.tree_memory.clear()
+            self.beamdump_coor = None
             if not os.path.exists(MEMORY_CSV_PATH):
+                _update_beamdump_label()
                 return
             try:
                 with open(MEMORY_CSV_PATH, newline='', encoding='utf-8') as f:
@@ -1893,12 +1911,16 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
                         x_um = float(row['x_um'])
                         y_um = float(row['y_um'])
                         z_um = float(row['z_um'])
+                        if row['name'] == _BEAMDUMP_KEY:
+                            self.beamdump_coor = (x_um, y_um, z_um)
+                            continue  # not shown in the tree
                         coor_str = 'X:{:.1f} Y:{:.1f} Z:{:.1f}'.format(x_um, y_um, z_um)
                         item = qw.QTreeWidgetItem([row['name'], coor_str])
                         item.setData(_COL_NAME, _ROLE_DATA, (x_um, y_um, z_um))
                         self.tree_memory.addTopLevelItem(item)
             except Exception as e:
                 print(f'coor_memory: failed to load CSV: {e}')
+            _update_beamdump_label()
 
         def _save_csv():
             try:
@@ -1911,6 +1933,11 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
                         if item is None: continue
                         x_um, y_um, z_um = item.data(_COL_NAME, _ROLE_DATA)
                         writer.writerow({'name': item.text(_COL_NAME),
+                                         'x_um': x_um, 'y_um': y_um, 'z_um': z_um})
+                    # Beam dump entry — always written last with its reserved name
+                    if self.beamdump_coor is not None:
+                        x_um, y_um, z_um = self.beamdump_coor
+                        writer.writerow({'name': _BEAMDUMP_KEY,
                                          'x_um': x_um, 'y_um': y_um, 'z_um': z_um})
             except Exception as e:
                 print(f'coor_memory: failed to save CSV: {e}')
@@ -2010,6 +2037,19 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
             self._flg_memory_goto_active = True
             self.go_to_coordinates((x_um / 1e3, y_um / 1e3, z_um / 1e3), override_controls=True)
 
+        # ── Store beam dump coordinate ────────────────────────────────────
+        def _store_beamdump():
+            coor = self.get_coordinates_closest_mm()
+            if any(c is None for c in coor):
+                qw.QMessageBox.warning(self, 'Store beam dump coordinate',
+                                       'Could not read current stage coordinates.')
+                return
+            x_mm, y_mm, z_mm = coor
+            assert x_mm is not None and y_mm is not None and z_mm is not None
+            self.beamdump_coor = (x_mm * 1e3, y_mm * 1e3, z_mm * 1e3)
+            _update_beamdump_label()
+            _save_csv()
+
         # ── Wire up signals ───────────────────────────────────────────────
         self._worker_gotocoor.sig_mvmt_started.connect(_on_mvmt_started)
         self._worker_gotocoor.sig_mvmt_finished.connect(_on_mvmt_finished)
@@ -2018,13 +2058,37 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         self.btn_memory_goto.clicked.connect(_goto_selected)
         if hasattr(self, 'btn_memory_delete'):
             self.btn_memory_delete.clicked.connect(_delete_selected)
+        if hasattr(self, 'btn_memory_save_beamdump'):
+            self.btn_memory_save_beamdump.clicked.connect(_store_beamdump)
 
-        # Expose store helper so external callers (e.g. beam dump) can save a coordinate
-        self.store_coor_memory = _store_current_coor
+        # Expose helpers for external callers
+        self.store_coor_memory  = _store_current_coor
+        self.store_beamdump_coor = _store_beamdump
 
         # ── Load persisted coordinates on startup ─────────────────────────
         _load_csv()
-    
+
+    def go_to_beamdump(self, event_finish: threading.Event | None = None) -> bool:
+        """
+        Moves the stage to the memorised beam dump coordinate (asynchronous).
+
+        Args:
+            event_finish: Optional threading.Event that will be set when motion completes.
+
+        Returns:
+            True  — motion was requested.
+            False — no beam dump coordinate has been stored; stage is not moved.
+        """
+        if self.beamdump_coor is None:
+            return False
+        x_um, y_um, z_um = self.beamdump_coor
+        self.go_to_coordinates(
+            (x_um / 1e3, y_um / 1e3, z_um / 1e3),
+            override_controls=True,
+            event_finish=event_finish,
+        )
+        return True
+
     @Slot(str,str)
     def status_update(self,message=None,bg_colour=None):
         """

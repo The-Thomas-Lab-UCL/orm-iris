@@ -24,7 +24,7 @@ class Ui_Hilvl_Raman(object):
     def setupUi(self, Hilvl_Raman):
         if not Hilvl_Raman.objectName():
             Hilvl_Raman.setObjectName(u"Hilvl_Raman")
-        Hilvl_Raman.resize(693, 612)
+        Hilvl_Raman.resize(736, 612)
         self.verticalLayout_4 = QVBoxLayout(Hilvl_Raman)
         self.verticalLayout_4.setObjectName(u"verticalLayout_4")
         self.main_layout = QVBoxLayout()
@@ -54,53 +54,6 @@ class Ui_Hilvl_Raman(object):
         self.verticalLayout_9.setObjectName(u"verticalLayout_9")
         self.gridLayout = QGridLayout()
         self.gridLayout.setObjectName(u"gridLayout")
-        self.chk_contMap_autoAdjustSpeed = QCheckBox(self.groupBox_2)
-        self.chk_contMap_autoAdjustSpeed.setObjectName(u"chk_contMap_autoAdjustSpeed")
-        self.chk_contMap_autoAdjustSpeed.setChecked(True)
-
-        self.gridLayout.addWidget(self.chk_contMap_autoAdjustSpeed, 3, 0, 1, 2)
-
-        self.horizontalSpacer = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-
-        self.gridLayout.addItem(self.horizontalSpacer, 0, 1, 1, 1)
-
-        self.groupbox_scanpattern = QGroupBox(self.groupBox_2)
-        self.groupbox_scanpattern.setObjectName(u"groupbox_scanpattern")
-        self.horizontalLayout_3 = QHBoxLayout(self.groupbox_scanpattern)
-        self.horizontalLayout_3.setObjectName(u"horizontalLayout_3")
-        self.rb_raster = QRadioButton(self.groupbox_scanpattern)
-        self.rb_raster.setObjectName(u"rb_raster")
-        self.rb_raster.setChecked(True)
-
-        self.horizontalLayout_3.addWidget(self.rb_raster)
-
-        self.rb_snake = QRadioButton(self.groupbox_scanpattern)
-        self.rb_snake.setObjectName(u"rb_snake")
-
-        self.horizontalLayout_3.addWidget(self.rb_snake)
-
-
-        self.gridLayout.addWidget(self.groupbox_scanpattern, 0, 0, 1, 1)
-
-        self.groupbox_scandir = QGroupBox(self.groupBox_2)
-        self.groupbox_scandir.setObjectName(u"groupbox_scandir")
-        self.horizontalLayout_2 = QHBoxLayout(self.groupbox_scandir)
-        self.horizontalLayout_2.setObjectName(u"horizontalLayout_2")
-        self.rb_xdir = QRadioButton(self.groupbox_scandir)
-        self.rb_xdir.setObjectName(u"rb_xdir")
-        self.rb_xdir.setChecked(True)
-
-        self.horizontalLayout_2.addWidget(self.rb_xdir)
-
-        self.rb_ydir = QRadioButton(self.groupbox_scandir)
-        self.rb_ydir.setObjectName(u"rb_ydir")
-        self.rb_ydir.setAutoExclusive(True)
-
-        self.horizontalLayout_2.addWidget(self.rb_ydir)
-
-
-        self.gridLayout.addWidget(self.groupbox_scandir, 1, 0, 1, 1)
-
         self.horizontalLayout = QHBoxLayout()
         self.horizontalLayout.setObjectName(u"horizontalLayout")
         self.label_2 = QLabel(self.groupBox_2)
@@ -127,7 +80,60 @@ class Ui_Hilvl_Raman(object):
         self.horizontalLayout.addWidget(self.label_3)
 
 
-        self.gridLayout.addLayout(self.horizontalLayout, 2, 0, 1, 2)
+        self.gridLayout.addLayout(self.horizontalLayout, 3, 0, 1, 2)
+
+        self.horizontalSpacer = QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        self.gridLayout.addItem(self.horizontalSpacer, 0, 1, 1, 1)
+
+        self.groupbox_scandir = QGroupBox(self.groupBox_2)
+        self.groupbox_scandir.setObjectName(u"groupbox_scandir")
+        self.horizontalLayout_2 = QHBoxLayout(self.groupbox_scandir)
+        self.horizontalLayout_2.setObjectName(u"horizontalLayout_2")
+        self.rb_xdir = QRadioButton(self.groupbox_scandir)
+        self.rb_xdir.setObjectName(u"rb_xdir")
+        self.rb_xdir.setChecked(True)
+
+        self.horizontalLayout_2.addWidget(self.rb_xdir)
+
+        self.rb_ydir = QRadioButton(self.groupbox_scandir)
+        self.rb_ydir.setObjectName(u"rb_ydir")
+        self.rb_ydir.setAutoExclusive(True)
+
+        self.horizontalLayout_2.addWidget(self.rb_ydir)
+
+
+        self.gridLayout.addWidget(self.groupbox_scandir, 1, 0, 1, 1)
+
+        self.chk_contMap_autoAdjustSpeed = QCheckBox(self.groupBox_2)
+        self.chk_contMap_autoAdjustSpeed.setObjectName(u"chk_contMap_autoAdjustSpeed")
+        self.chk_contMap_autoAdjustSpeed.setChecked(True)
+
+        self.gridLayout.addWidget(self.chk_contMap_autoAdjustSpeed, 4, 0, 1, 2)
+
+        self.groupbox_scanpattern = QGroupBox(self.groupBox_2)
+        self.groupbox_scanpattern.setObjectName(u"groupbox_scanpattern")
+        self.horizontalLayout_3 = QHBoxLayout(self.groupbox_scanpattern)
+        self.horizontalLayout_3.setObjectName(u"horizontalLayout_3")
+        self.rb_raster = QRadioButton(self.groupbox_scanpattern)
+        self.rb_raster.setObjectName(u"rb_raster")
+        self.rb_raster.setChecked(True)
+
+        self.horizontalLayout_3.addWidget(self.rb_raster)
+
+        self.rb_snake = QRadioButton(self.groupbox_scanpattern)
+        self.rb_snake.setObjectName(u"rb_snake")
+
+        self.horizontalLayout_3.addWidget(self.rb_snake)
+
+
+        self.gridLayout.addWidget(self.groupbox_scanpattern, 0, 0, 1, 1)
+
+        self.chk_beamdump = QCheckBox(self.groupBox_2)
+        self.chk_beamdump.setObjectName(u"chk_beamdump")
+        self.chk_beamdump.setChecked(True)
+
+        self.gridLayout.addWidget(self.chk_beamdump, 5, 0, 1, 2)
 
 
         self.verticalLayout_9.addLayout(self.gridLayout)
@@ -251,15 +257,16 @@ class Ui_Hilvl_Raman(object):
     def retranslateUi(self, Hilvl_Raman):
         Hilvl_Raman.setWindowTitle(QCoreApplication.translate("Hilvl_Raman", u"Form", None))
         self.groupBox_2.setTitle(QCoreApplication.translate("Hilvl_Raman", u"Imaging options", None))
+        self.label_2.setText(QCoreApplication.translate("Hilvl_Raman", u"Continuous scan speed modifier:", None))
+        self.label_3.setText(QCoreApplication.translate("Hilvl_Raman", u"%", None))
+        self.groupbox_scandir.setTitle(QCoreApplication.translate("Hilvl_Raman", u"Continuous scan options", None))
+        self.rb_xdir.setText(QCoreApplication.translate("Hilvl_Raman", u"Horizontal line scan", None))
+        self.rb_ydir.setText(QCoreApplication.translate("Hilvl_Raman", u"Vertical line scan", None))
         self.chk_contMap_autoAdjustSpeed.setText(QCoreApplication.translate("Hilvl_Raman", u"Automatically adjust the continuous mapping speed (only applicable for 'Continuous imaging')", None))
         self.groupbox_scanpattern.setTitle(QCoreApplication.translate("Hilvl_Raman", u"Scan pattern options", None))
         self.rb_raster.setText(QCoreApplication.translate("Hilvl_Raman", u"Raster", None))
         self.rb_snake.setText(QCoreApplication.translate("Hilvl_Raman", u"Snake", None))
-        self.groupbox_scandir.setTitle(QCoreApplication.translate("Hilvl_Raman", u"Continuous scan options", None))
-        self.rb_xdir.setText(QCoreApplication.translate("Hilvl_Raman", u"Horizontal line scan", None))
-        self.rb_ydir.setText(QCoreApplication.translate("Hilvl_Raman", u"Vertical line scan", None))
-        self.label_2.setText(QCoreApplication.translate("Hilvl_Raman", u"Continuous scan speed modifier:", None))
-        self.label_3.setText(QCoreApplication.translate("Hilvl_Raman", u"%", None))
+        self.chk_beamdump.setText(QCoreApplication.translate("Hilvl_Raman", u"Go to the 'beam-dump' location after measurements", None))
         self.tab_mappingoptions.setTabText(self.tab_mappingoptions.indexOf(self.tab_generaloptions), QCoreApplication.translate("Hilvl_Raman", u"General imaging options", None))
         self.chk_randomise.setText(QCoreApplication.translate("Hilvl_Raman", u"Randomise sampling points", None))
         self.chk_skipover.setText(QCoreApplication.translate("Hilvl_Raman", u"Skip over sampling points\n"

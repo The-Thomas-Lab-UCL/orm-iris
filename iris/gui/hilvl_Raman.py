@@ -1270,6 +1270,21 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         elif len(self._list_sel_mapCoor) > 0: pass
         else: self._list_sel_mapCoor = [mapping_coordinates,]
         if len(self._list_sel_mapCoor) == 0: return
+
+        # Guard: beam dump checked but no coordinate stored
+        if self._widget.chk_beamdump.isChecked() and self.motion_controller.beamdump_coor is None:
+            qw.QMessageBox.warning(
+                self,
+                'Beam dump location not set',
+                'The option "Go to the beam-dump location after measurements" is enabled, '
+                'but no beam dump coordinate has been stored yet.\n\n'
+                'Please either:\n'
+                '  • Set a beam dump location in the Stage Controller → Memory tab, or\n'
+                '  • Uncheck the beam dump option before starting.\n\n'
+                'The measurement has been cancelled.'
+            )
+            self._list_sel_mapCoor.clear()
+            return
         
         self.raman_controller.disable_widgets()
         self.motion_controller.disable_widgets()
@@ -1314,6 +1329,8 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         
         if msg == self._worker_hilvlacq.msg_mea_finished and len(self._list_sel_mapCoor) == 0:
             self._widget.chk_contMap_autoAdjustSpeed.setChecked(True)
+            if self._widget.chk_beamdump.isChecked():
+                self.motion_controller.go_to_beamdump()
             qw.QMessageBox.information(self,'Mapping measurement complete','The mapping measurement is complete and added to the data hub')
         elif msg == self._worker_hilvlacq.msg_mea_finished:
             self.initiate_mapping(method=self._last_mappingmethod)
