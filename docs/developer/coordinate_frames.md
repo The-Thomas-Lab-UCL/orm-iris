@@ -155,7 +155,7 @@ $$
 \qquad \texttt{(convert\_imgpt2phy)}
 $$
 
-> **FoR caveat:** these methods are FoR-agnostic — the output is in whatever FoR you supply as `coor_img_origin_mm`. If you pass a stage coordinate as the reference, the output is a stage coordinate; if you pass a measurement coordinate, the output is a measurement coordinate. Always be deliberate about which you are providing.
+> **FoR caveat:** always pass the **stage drive coordinate** as `coor_img_origin_mm`. Despite this, the output is always in the **measurement FoR** (absolute physical position of the feature) — not the stage FoR. This is because pixel `(0,0)` physically maps to `coor_img_origin_mm`, so `M_inv @ pixel` gives the physical displacement from that anchor to the feature, and adding the anchor gives an absolute physical position (= measurement coordinate). Do **not** pass a measurement coordinate as the reference — it will give a wrong result.
 
 **Example:**
 
@@ -177,11 +177,11 @@ The transformation only encodes the *relative* displacement in mm, then converts
 To go all the way from a pixel in a captured image to a measurement coordinate (the most common operation in the coordinate generators):
 
 ```python
-# 1. Pixel → physical (passing stage ref → output is in stage FoR)
-coor_phy = cal.convert_imgpt2phy(pixel, ref_stage_mm)
+# 1. Pixel → measurement FoR (pass stage drive coord as ref; output is measurement coord)
+coor_mea = cal.convert_imgpt2phy(pixel, ref_stage_mm)
 
-# 2. Stage → measurement
-coor_mea = cal.convert_stg2mea(coor_phy)
+# 2. Measurement → stage drive coordinate
+coor_stg = cal.convert_mea2stg(coor_mea)
 ```
 
 ---
@@ -231,8 +231,8 @@ These live under `iris/gui/submodules/meaCoor_generator/`.
 1. A stored (or stitched) image is displayed on the canvas.
 2. The user clicks a point (or two corners of a rectangle).
 3. The canvas emits the pixel coordinates in **original image scale** (the internal scene coordinates are scaled back up to match the stored image resolution).
-4. `convert_imgpt2phy()` converts the pixel to physical coordinates, using `_img_coor_stage_mm` as the reference coordinate (stage FoR in this case, so the output is in stage FoR).
-5. `convert_stg2mea()` shifts to measurement FoR.
+4. `convert_imgpt2phy()` converts the pixel to the **measurement FoR**, using `_img_coor_stage_mm` (a stage drive coordinate) as the anchor.
+5. `convert_mea2stg()` converts to the stage drive coordinate.
 
 When the displayed image is a stitched image, the canvas internally handles the coordinate scaling. If `correct_rot=True` is required (i.e., the image was de-rotated during stitching), the rotation correction must be applied as described above.
 
@@ -243,7 +243,7 @@ The live video path is conceptually simpler:
 1. A timer fires at ~25 Hz, refreshing the canvas from the live camera feed.
 2. At each refresh the current stage position is queried from the motion controller.
 3. When the user clicks, the clicked pixel and the *current stage position* are used as the pixel coordinate and reference stage coordinate respectively.
-4. The same `convert_imgpt2phy` → `convert_stg2mea` chain produces the measurement coordinate.
+4. The same `convert_imgpt2phy` → `convert_mea2stg` chain produces the stage drive coordinate (with `convert_imgpt2phy` outputting a measurement coordinate as an intermediate step).
 
 Because each frame is a fresh raw image (no stitching, no de-rotation), `correct_rot=False` is appropriate here.
 
@@ -291,7 +291,7 @@ The rendering sequence is:
 |---|---|---|---|
 | Stage → Measurement | `convert_stg2mea` | `ImgMea_Cal`, `MeaImg_Unit` | Simple offset addition |
 | Measurement → Stage | `convert_mea2stg` | `ImgMea_Cal`, `MeaImg_Unit` | Simple offset subtraction |
-| Physical → Image pixel | `convert_phy2imgpt` | `ImgMea_Cal`, `MeaImg_Unit` | Output FoR matches input ref FoR |
-| Image pixel → Physical | `convert_imgpt2phy` | `ImgMea_Cal`, `MeaImg_Unit` | Output FoR matches input ref FoR |
+| Physical → Image pixel | `convert_phy2imgpt` | `ImgMea_Cal`, `MeaImg_Unit` | Pass stage drive coord as ref; output is always in mea FoR |
+| Image pixel → Physical | `convert_imgpt2phy` | `ImgMea_Cal`, `MeaImg_Unit` | Pass stage drive coord as ref; output is always in mea FoR |
 | Stitched pixel → Physical | `convert_imgpt2phy(..., correct_rot=True)` | `MeaImg_Unit` | Undoes de-rotation first |
 | Physical → Stitched pixel | `convert_phy2imgpt(..., correct_rot=True)` | `MeaImg_Unit` | Applies de-rotation after |
