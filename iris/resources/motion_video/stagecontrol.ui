@@ -502,6 +502,13 @@ buttons to move in steps</string>
             </widget>
            </item>
            <item>
+            <widget class="QPushButton" name="btn_memory_delete">
+             <property name="text">
+              <string>Delete selected coordinates</string>
+             </property>
+            </widget>
+           </item>
+           <item>
             <widget class="QPushButton" name="btn_memory_goto">
              <property name="text">
               <string>Go to selected coordinate</string>
