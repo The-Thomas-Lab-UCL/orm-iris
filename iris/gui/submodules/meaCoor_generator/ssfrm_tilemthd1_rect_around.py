@@ -28,7 +28,9 @@ class TilingMethodControl_Design(Ui_tiling_method_control, qw.QWidget):
         self.setupUi(self)
         self.setLayout(self.main_layout)
 
-OVERLAP = 0.00   # Overlap between each tile (ratio to the image size)
+OVERLAP = 0.01   # Overlap between each tile (ratio to the image size); must be > 0 to ensure
+                 # adjacent tiles always overlap by enough pixels to cover the ~1px black
+                 # border that PIL's rotate() leaves after int-truncated cropping
 
 class worker_zcoor_getter(QObject):
     """

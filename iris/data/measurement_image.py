@@ -456,8 +456,8 @@ class MeaImg_Unit():
         
     # > Calculate the crop and the coordinate shift because of the cropping
         sizex,sizey = list_images[0].size
-        cropx_pixel = abs(int(sizey*np.sin(cal.rotation_rad)))
-        cropy_pixel = abs(int(sizex*np.sin(cal.rotation_rad)))
+        cropx_pixel = abs(int(sizey*np.sin(cal.rotation_rad))) + 1
+        cropy_pixel = abs(int(sizex*np.sin(cal.rotation_rad))) + 1
         # print(f'Crop size [pixel]: {cropx_pixel,cropy_pixel}')
         
         # Ensure that the angle is within -180 to 180 degrees
@@ -517,10 +517,11 @@ class MeaImg_Unit():
         img_limit_coor_min_pixel = (min([coor[0] for coor in list_coor_min_pixel]),\
             min([coor[1] for coor in list_coor_min_pixel]))
         
-        # Calculate the relative pixel coordinates
+        # Calculate the relative pixel coordinates, rounded to integers so PIL paste()
+        # places tiles exactly — fractional coords cause 1-pixel black gaps between tiles
         list_coor_pixel_rel = [(
-            coor[0]-img_limit_coor_min_pixel[0],\
-            coor[1]-img_limit_coor_min_pixel[1]
+            round(coor[0]-img_limit_coor_min_pixel[0]),
+            round(coor[1]-img_limit_coor_min_pixel[1])
             ) for coor in list_coor_min_pixel]
         
         # Generate an empty image 

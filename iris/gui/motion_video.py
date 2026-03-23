@@ -612,22 +612,26 @@ class ImageCapture_Worker(QObject):
     @Slot(Enum_CamCorrectionType, bool, bool)
     def grab_image_fresh(self, img_corr:Enum_CamCorrectionType, scalebar:bool, crosshair:bool):
         """
-        Like grab_image(), but calls img_capture_fresh() for RAW captures so the
-        exposure is guaranteed to start AFTER this call (software trigger).
+        Like grab_image(), but always uses img_capture_fresh() (software trigger) for the
+        raw capture so the exposure is guaranteed to start AFTER this call.
+        For non-RAW corrections the raw frame is captured fresh, then correction is applied
+        via the subprocess (which holds the correction state) without triggering a new capture.
         Use this for step-and-capture workflows like image tiling.
         """
         if not img_corr in Enum_CamCorrectionType:
             self.sig_error.emit('Invalid video correction type: {}'.format(img_corr))
             return
         try:
-            if img_corr == Enum_CamCorrectionType.RAW:
-                img = self._camera_controller.img_capture_fresh()
-            else:
-                img = self._stageHub.get_image(request=img_corr)
+            # Always capture a fresh triggered frame from the camera directly
+            img = self._camera_controller.img_capture_fresh()
 
             if not isinstance(img, Image.Image):
                 self.sig_no_frame.emit()
                 return
+
+            # Apply correction in the subprocess if requested (no new capture)
+            if img_corr != Enum_CamCorrectionType.RAW:
+                img = self._stageHub.apply_correction(img, img_corr)
 
             img = self._overlay_scalebar(img) if scalebar else img
             if crosshair: img = self._draw_crosshair(img)
@@ -1825,6 +1829,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         """
         Like trigger_img_capture() but uses a software trigger to guarantee
         the exposure starts after this call. Use for step-and-capture (tiling).
+        Camera must already be in single-frame trigger mode (call enter_tiling_mode first).
         Camera must already be in single-frame trigger mode (call enter_tiling_mode first).
         """
         request = self._combo_vidcorrection.currentText()
