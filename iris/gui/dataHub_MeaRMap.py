@@ -473,6 +473,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         list_unitID = [unit.get_unit_id() for unit in self.get_selected_MappingUnit()]
         list_matched_ids = self._filter_by_search()
         
+        self._tree.clearSelection()
         self._tree.clear()
         list_unit_ids, list_unit_names, list_metadata, list_num_measurements = self._MappingHub.get_summary_units()
         
