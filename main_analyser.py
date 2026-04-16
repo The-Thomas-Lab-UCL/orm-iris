@@ -81,7 +81,7 @@ if __name__ == '__main__':
     processor = mpp.Pool()
     analyser = main_analyser(processor)
     
-    analyser._dataHub_local.get_MappingHub().test_generate_dummy()
+    # analyser._dataHub_local.get_MappingHub().test_generate_dummy()
     
     analyser.show()
     sys.exit(app.exec())
