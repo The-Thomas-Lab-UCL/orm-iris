@@ -60,7 +60,13 @@ class CameraController_Webcam(Class_CameraController):
     def camera_termination(self):
         self.vc.release()
         self.flg_initialised = False
-    
+
+    def reinitialise_connection(self) -> None:
+        try: self.camera_termination()
+        except Exception as e: print(f'camera_reinitialisation error:\n{e}')
+        try: self.camera_intialisation()
+        except Exception as e: print(f'camera_reinitialisation error:\n{e}')
+
     def get_initialisation_status(self) -> bool:
         return self.flg_initialised
     

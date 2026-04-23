@@ -75,55 +75,62 @@ class CameraController_ThorlabsMono(Class_CameraController):
 
     def reinitialise_connection(self) -> None:
         """
-        Reinitialise the camera connection
+        Reinitialise the camera connection, preserving the current exposure time.
+        Fully disposes and recreates the SDK to guarantee a clean hardware state.
         """
+        exposure_time_us = None
+        try: exposure_time_us = self.get_exposure_time_us()
+        except Exception: pass
+
         try: self.camera_termination()
         except Exception as e: print('camera_reinitialisation error:\n{}'.format(e))
-        
+
         try: self._initialisation()
         except Exception as e: print('camera_reinitialisation error:\n{}'.format(e))
+
+        if exposure_time_us is not None:
+            try: self.set_exposure_time_us(exposure_time_us)
+            except Exception as e: print('camera_reinitialisation exposure restore error:\n{}'.format(e))
         
     def _initialisation(self) -> bool:
         """
         Check if the camera is initialised
         """
         self._lock.acquire()
-        
-        try: self.controller = TLCameraSDK()
-        except Exception as e: print('camera_initialisation error:\n{}'.format(e))
-        
-        available_cameras = self.controller.discover_available_cameras()
-        
-        if len(available_cameras) < 1:
-            print("no cameras detected")
-            
-        self.camera = self.controller.open_camera(available_cameras[self.camera_index])
-        self.camera.exposure_time_us = ControllerSpecificConfigEnum.THORLABS_CAMERA_EXPOSURE_TIME.value # exposure time in [us]. Default: 10000 (10ms)
-        self.camera.frames_per_trigger_zero_for_unlimited = ControllerSpecificConfigEnum.THORLABS_CAMERA_FRAMEPERTRIGGER.value  # number of frames obtained per trigger, 0 for continuous acquisition mode
-        self.camera.image_poll_timeout_ms = ControllerSpecificConfigEnum.THORLABS_CAMERA_IMAGEPOLL_TIMEOUT.value    # set image polling timeout in [ms]
-        
-        self._frame_width = self.camera.image_width_pixels
-        self._frame_height = self.camera.image_height_pixels
-        
-        self.camera.arm(2)
-        self.camera.issue_software_trigger()
-        
-        self.status = "video capture initialisation"  # Status message of the class
-        
-        if self._flg_show_preview == True:
-            self.win_name = 'preview'
-            cv2.namedWindow(self.win_name)
-            
-        # Post processing parameters
-        self._mirrorx = ControllerConfigEnum.CAMERA_MIRRORX.value
-        self._mirrory = ControllerConfigEnum.CAMERA_MIRRORY.value
-        
-        self.flg_initialised = True
-        
-        # Set the identifier
-        self._identifier = f"Thorlabs_{self.camera.model}, S/N:{self.camera.serial_number}"
-        
-        self._lock.release()
+        try:
+            self.controller = TLCameraSDK()
+
+            available_cameras = self.controller.discover_available_cameras()
+            if len(available_cameras) < 1:
+                raise RuntimeError('No Thorlabs cameras detected')
+
+            self.camera = self.controller.open_camera(available_cameras[self.camera_index])
+            self.camera.exposure_time_us = ControllerSpecificConfigEnum.THORLABS_CAMERA_EXPOSURE_TIME.value
+            self.camera.frames_per_trigger_zero_for_unlimited = ControllerSpecificConfigEnum.THORLABS_CAMERA_FRAMEPERTRIGGER.value
+            self.camera.image_poll_timeout_ms = ControllerSpecificConfigEnum.THORLABS_CAMERA_IMAGEPOLL_TIMEOUT.value
+
+            self._frame_width = self.camera.image_width_pixels
+            self._frame_height = self.camera.image_height_pixels
+
+            self.camera.arm(2)
+            self.camera.issue_software_trigger()
+
+            self.status = "video capture initialisation"
+
+            if self._flg_show_preview == True:
+                self.win_name = 'preview'
+                cv2.namedWindow(self.win_name)
+
+            self._mirrorx = ControllerConfigEnum.CAMERA_MIRRORX.value
+            self._mirrory = ControllerConfigEnum.CAMERA_MIRRORY.value
+
+            self.flg_initialised = True
+            self._identifier = f"Thorlabs_{self.camera.model}, S/N:{self.camera.serial_number}"
+        except Exception as e:
+            print('camera_initialisation error:\n{}'.format(e))
+            self.flg_initialised = False
+        finally:
+            self._lock.release()
         
     def camera_termination(self):
         self._lock.acquire()

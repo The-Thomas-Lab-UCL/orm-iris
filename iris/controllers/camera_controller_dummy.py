@@ -40,7 +40,13 @@ class CameraController_Dummy(Class_CameraController):
     def camera_termination(self):
         print('Terminating the camera')
         self.flg_initialised = False
-    
+
+    def reinitialise_connection(self) -> None:
+        try: self.camera_termination()
+        except Exception as e: print(f'camera_reinitialisation error:\n{e}')
+        try: self._initialisation()
+        except Exception as e: print(f'camera_reinitialisation error:\n{e}')
+
     def set_exposure_time_us(self, exposure_time_us: int | float) -> None:
         self._exposure_time_us = exposure_time_us
         print(f'Exposure time set to {exposure_time_us} us')

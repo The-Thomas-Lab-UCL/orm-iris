@@ -705,6 +705,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
     _sig_req_fresh_img = Signal(Enum_CamCorrectionType,bool,bool)
     _sig_pause_video_ui = Signal()
     _sig_resume_video_ui = Signal()
+    _sig_reinit_camera_done = Signal(bool, bool)  # (video_was_running, success)
     
     _sig_req_auto_focus = Signal(float,float,float,int)
     
@@ -958,10 +959,10 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         
         # > Video controllers
         self._btn_videotoggle = wdg_video.btn_camera_onoff
-        self._btn_reinit_conn = wdg_video.pushButton_2
+        self._btn_reinit_conn = wdg_video.btn_reinitConn
         self._btn_videotoggle.released.connect(lambda: self.resume_video())
-        # self._btn_reinit_conn.released.connect(lambda: self.reinitialise_connection('camera'))
-        self._btn_reinit_conn.setEnabled(False)
+        self._btn_reinit_conn.released.connect(lambda: self.reinitialise_connection('camera'))
+        self._btn_reinit_conn.setEnabled(True)
         self._btn_videotoggle.setStyleSheet('background-color: yellow')
         self._btn_reinit_conn.setStyleSheet('background-color: yellow')
         
@@ -1026,6 +1027,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         self._sig_go_to_coordinates.connect(self._worker_gotocoor.work)
         self._sig_pause_video_ui.connect(self._pause_video_ui)
         self._sig_resume_video_ui.connect(self._resume_video_ui)
+        self._sig_reinit_camera_done.connect(self._on_reinit_camera_done)
         
         self._thread_gotocoor = QThread(self)
         self._worker_gotocoor.moveToThread(self._thread_gotocoor)
@@ -1146,29 +1148,45 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         except Exception as e:
             qw.QMessageBox.critical(main_window, 'Error', 'Failed to set exposure time:\n' + str(e))
 
-    # @thread_assign
-    # def reinitialise_connection(self,unit:Literal['xy','z','camera']) -> threading.Thread:
-    #     """
-    #     Reinitialises the connection to the stage or camera
-        
-    #     Args:
-    #         unit (Literal['xy','z','camera']): The unit to reinitialise
-            
-    #     Returns:
-    #         threading.Thread: The thread started
-    #     """
-    #     if unit == 'xy':
-    #         self.ctrl_xy.reinitialise_connection()
-    #         self.signal_statbar_message.emit('XY stage re-initialised', None)
-    #     elif unit == 'z':
-    #         self.ctrl_z.reinitialise_connection()
-    #         self.signal_statbar_message.emit('Z stage re-initialised', None)
-    #     elif unit == 'camera':
-    #         self._camera_ctrl.reinitialise_connection()
-    #         self.signal_statbar_message.emit('Camera re-initialised', None)
-    #     else:
-    #         raise ValueError('Invalid unit for reinitialisation')
-        
+    def reinitialise_connection(self, unit: Literal['xy', 'z', 'camera']) -> None:
+        """
+        Reinitialises the connection to the stage or camera.
+        For 'camera': pauses video, waits for in-flight captures to drain,
+        reinitialises the camera in a background thread, then resumes video.
+        """
+        if unit != 'camera':
+            raise ValueError(f'reinitialise_connection: unsupported unit "{unit}"')
+
+        video_was_running = not self._flg_pause_video.is_set()
+        self.pause_video()
+        self._btn_reinit_conn.setEnabled(False)
+        self._btn_reinit_conn.setStyleSheet('background-color: grey')
+        self.sig_statbar_message.emit('Reinitialising camera connection...', 'yellow')
+
+        def _do_reinit():
+            self.wait_for_capture_drain()
+            try:
+                self._camera_ctrl.reinitialise_connection()
+            except Exception as e:
+                print(f'reinitialise_connection error: {e}')
+            success = self._camera_ctrl.get_initialisation_status()
+            self._sig_reinit_camera_done.emit(video_was_running, success)
+
+        self._thread_reinit = threading.Thread(target=_do_reinit, daemon=True)
+        self._thread_reinit.start()
+
+    @Slot(bool, bool)
+    def _on_reinit_camera_done(self, resume_video: bool, success: bool) -> None:
+        self._btn_reinit_conn.setEnabled(True)
+        if success:
+            self._btn_reinit_conn.setStyleSheet('background-color: yellow')
+            if resume_video:
+                self.resume_video()
+            self.sig_statbar_message.emit('Camera connection re-initialised', 'green')
+        else:
+            self._btn_reinit_conn.setStyleSheet('background-color: red')
+            self.sig_statbar_message.emit('Camera re-initialisation failed — reconnect USB and try again', 'red')
+
     def disable_overlays(self):
         """
         Disables the overlays on the video feed
