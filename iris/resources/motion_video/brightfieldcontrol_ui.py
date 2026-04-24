@@ -79,10 +79,10 @@ class Ui_wdg_brightfield_controller(object):
 
         self.gridLayout.addWidget(self.btn_saveff, 5, 0, 1, 1)
 
-        self.pushButton_2 = QPushButton(wdg_brightfield_controller)
-        self.pushButton_2.setObjectName(u"pushButton_2")
+        self.btn_reinitConn = QPushButton(wdg_brightfield_controller)
+        self.btn_reinitConn.setObjectName(u"btn_reinitConn")
 
-        self.gridLayout.addWidget(self.pushButton_2, 1, 1, 1, 1)
+        self.gridLayout.addWidget(self.btn_reinitConn, 1, 1, 1, 1)
 
         self.btn_setffgain = QPushButton(wdg_brightfield_controller)
         self.btn_setffgain.setObjectName(u"btn_setffgain")
@@ -118,8 +118,8 @@ class Ui_wdg_brightfield_controller(object):
 
         QWidget.setTabOrder(self.chk_crosshair, self.chk_scalebar)
         QWidget.setTabOrder(self.chk_scalebar, self.btn_camera_onoff)
-        QWidget.setTabOrder(self.btn_camera_onoff, self.pushButton_2)
-        QWidget.setTabOrder(self.pushButton_2, self.combo_image_correction)
+        QWidget.setTabOrder(self.btn_camera_onoff, self.btn_reinitConn)
+        QWidget.setTabOrder(self.btn_reinitConn, self.combo_image_correction)
         QWidget.setTabOrder(self.combo_image_correction, self.btn_setffgain)
         QWidget.setTabOrder(self.btn_setffgain, self.btn_setff)
         QWidget.setTabOrder(self.btn_setff, self.btn_saveff)
@@ -135,7 +135,7 @@ class Ui_wdg_brightfield_controller(object):
         self.chk_crosshair.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Show crosshair", None))
         self.chk_scalebar.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Show scalebar", None))
         self.btn_saveff.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Save flatfield correction", None))
-        self.pushButton_2.setText(QCoreApplication.translate("wdg_brightfield_controller", u"PushButton", None))
+        self.btn_reinitConn.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Reinitialise connection", None))
         self.btn_setffgain.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Set flatfield gain", None))
         self.btn_setff.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Acquire flatfield correction", None))
         self.btn_loadff.setText(QCoreApplication.translate("wdg_brightfield_controller", u"Load flatfield correction", None))

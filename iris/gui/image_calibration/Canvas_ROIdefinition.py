@@ -32,9 +32,11 @@ class Canvas_Image_Annotations(QGraphicsView):
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         
-        # Set the fixed size policy to mimic Tkinter's fixed size canvas initially
-        self.setFixedSize(QSize(size_pixel[0], size_pixel[1]))
         self.size_pixel = size_pixel
+        self.setSizePolicy(qw.QSizePolicy.Policy.Expanding, qw.QSizePolicy.Policy.Expanding)
+        self.setMinimumSize(QSize(100, 100))
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
         # Parameters for the canvas
         self._main = parent
@@ -97,7 +99,12 @@ class Canvas_Image_Annotations(QGraphicsView):
         # print(f'Canvas mousePressEvent at ({event.position().x()}, {event.position().y()}), type: {event.button()}')
         super().mousePressEvent(event)
         # print(f'List of click coordinates: {self._list_clickCoords}')
-        
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._image_item is not None:
+            self.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
     @Slot()
     def clear_all_annotations(self):
         """
@@ -340,7 +347,10 @@ class Canvas_Image_Annotations(QGraphicsView):
             self._image_item = canvas_newImage
             self._img_size = img.size
             self._img_scale = img_scale
-            
+
+            self._scene.setSceneRect(0, 0, pixmap.width(), pixmap.height())
+            self.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
 def test():
     app = qw.QApplication()
     main_window = qw.QMainWindow()

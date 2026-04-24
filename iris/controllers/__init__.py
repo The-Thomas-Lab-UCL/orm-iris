@@ -66,7 +66,7 @@ dict_controller_options_read = read_update_config_file_section(
 
 # > Controller choices <
 dict_controller_choices = {
-    'camera_controller': 'dummy',         # select between: 'dummy', 'webcam', 'thorlabs_mono', 'thorlabs_color'    
+    'camera_controller': 'dummy',         # select between: 'dummy', 'webcam', 'thorlabs_mono', 'thorlabs_mono2', 'thorlabs_color'
     'spectrometer_controller': 'dummy',   # select between: 'dummy', 'pi', 'qepro', 'andor', 'wasatch_enlighten'
     'stagexy_controller': 'dummy',        # select between: 'dummy', 'm30xym', 'zaber', 'pi'
     'stagez_controller': 'dummy',         # select between: 'dummy', 'z825b', 'mcm301', 'pfm450'
@@ -74,7 +74,7 @@ dict_controller_choices = {
 
 # > Controller choices <
 dict_controller_choices_comments = {
-    'camera_controller': 'select between: "dummy", "webcam", "thorlabs_mono", "thorlabs_color"',
+    'camera_controller': 'select between: "dummy", "webcam", "thorlabs_mono", "thorlabs_mono2", "thorlabs_color"',
     'spectrometer_controller': 'select between: "dummy", "pi", "qepro", "andor", "wasatch_enlighten"',
     'stagexy_controller': 'select between: "dummy", "m30xym", "zaber", "pi"',
     'stagez_controller': 'select between: "dummy", "z825b", "mcm301", "pfm450"',
@@ -323,6 +323,8 @@ if ControllerConfigEnum.CAMERA_CONTROLLER.value == 'webcam':
     from .camera_controller_webcam import CameraController_Webcam as CameraController
 elif ControllerConfigEnum.CAMERA_CONTROLLER.value == 'thorlabs_mono':
     from .camera_controller_thorlabs_mono import CameraController_ThorlabsMono as CameraController
+elif ControllerConfigEnum.CAMERA_CONTROLLER.value == 'thorlabs_mono2':
+    from .camera_controller_thorlabs_mono2 import CameraController_ThorlabsMono2 as CameraController
 elif ControllerConfigEnum.CAMERA_CONTROLLER.value == 'thorlabs_color':
     from .camera_controller_thorlabs_color import CameraController_ThorlabsColor as CameraController
 else:

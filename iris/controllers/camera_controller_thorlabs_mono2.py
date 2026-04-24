@@ -26,7 +26,7 @@ absolute_path_to_dlls = ControllerSpecificConfigEnum.THORLABS_CAMERA_DLL_PATH.va
 os.environ['PATH'] = absolute_path_to_dlls + os.pathsep + os.environ['PATH']
 os.add_dll_directory(absolute_path_to_dlls)
 
-class CameraController_ThorlabsMono(Class_CameraController):
+class CameraController_ThorlabsMono2(Class_CameraController):
     """
     A class that operates the camera, takes and stores the current frame for Thorlabs monochrome camera.
     """
@@ -47,6 +47,7 @@ class CameraController_ThorlabsMono(Class_CameraController):
         
         self._frame_width:int = None
         self._frame_height:int = None
+        self._bit_shift:int = None
                 
         self._flg_show_preview = show
         
@@ -111,6 +112,7 @@ class CameraController_ThorlabsMono(Class_CameraController):
 
             self._frame_width = self.camera.image_width_pixels
             self._frame_height = self.camera.image_height_pixels
+            self._bit_shift = max(0, self.camera.bit_depth - 8)
 
             self.camera.arm(2)
             self.camera.issue_software_trigger()
@@ -180,27 +182,28 @@ class CameraController_ThorlabsMono(Class_CameraController):
             return self.camera.exposure_time_us
     
     def frame_capture(self) -> (np.ndarray|None):
-        with self._lock: frame = self.camera.get_pending_frame_or_null()
-        
+        with self._lock:
+            frame = self.camera.get_pending_frame_or_null()
+            if frame is not None:
+                # Copy inside the lock before the SDK recycles the buffer
+                image_1d: np.ndarray = frame.image_buffer.copy()
+
         if frame is not None:
-            image_1d:np.ndarray=frame.image_buffer
-            image_array = image_1d.reshape(self.camera.image_height_pixels, self.camera.image_width_pixels)
-            
+            image_array = image_1d.reshape(self._frame_height, self._frame_width)
+
             if self._mirrorx: image_array = cv2.flip(image_array, 0)
             if self._mirrory: image_array = cv2.flip(image_array, 1)
-            
+
             self.img = image_array
             return self.img
         else:
             return None
-    
+
     def img_capture(self) -> Image.Image:
         frm = self.frame_capture()
         if frm is None: return None
-        # frm_normalised = cv2.normalize(frm, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
-        frm_normalised = frm*self._intensity_mod
-        self.img = Image.fromarray(frm_normalised)
-        self.img = self.img.convert('RGB')
+        frm_8bit = (frm >> self._bit_shift).astype(np.uint8)
+        self.img = Image.fromarray(frm_8bit).convert('RGB')
         return self.img
 
     def set_single_frame_trigger_mode(self, enabled: bool) -> None:
@@ -233,10 +236,10 @@ class CameraController_ThorlabsMono(Class_CameraController):
 
         if frame is None:
             return None
-        image_array = frame.image_buffer.reshape(self.camera.image_height_pixels, self.camera.image_width_pixels)
+        image_array = frame.image_buffer.copy().reshape(self._frame_height, self._frame_width)
         if self._mirrorx: image_array = cv2.flip(image_array, 0)
         if self._mirrory: image_array = cv2.flip(image_array, 1)
-        self.img = Image.fromarray(image_array * self._intensity_mod).convert('RGB')
+        self.img = Image.fromarray((image_array >> self._bit_shift).astype(np.uint8)).convert('RGB')
         return self.img
     
     def vidcapture_show(self):
@@ -252,11 +255,11 @@ class CameraController_ThorlabsMono(Class_CameraController):
                 
             # Adjust exposure time dynamically (example)
             if key == ord('i'):  # Increase exposure
-                try: self.camera.exposure_time_us += 100
+                try: self.camera.exposure_time_us += 10000
                 except Exception as e: print(f"Error: {e}")
                 print(f"Exposure increased to: {self.camera.exposure_time_us}")
             elif key == ord('d'):  # Decrease exposure
-                try: self.camera.exposure_time_us -= 100
+                try: self.camera.exposure_time_us -= 10000
                 except Exception as e: print(f"Error: {e}")
                 print(f"Exposure decreased to: {self.camera.exposure_time_us}")
                 
@@ -286,6 +289,7 @@ class CameraController_ThorlabsMono(Class_CameraController):
         
         
 if __name__ == '__main__':
-    vid = CameraController_ThorlabsMono(show=True)
+    vid = CameraController_ThorlabsMono2(show=True)
+    vid.set_exposure_time_us(100e3)
     vid.vidcapture_show()
     vid.camera_termination()
