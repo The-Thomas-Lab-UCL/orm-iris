@@ -43,34 +43,42 @@ from iris.resources.motion_video.brightfieldcontrol_ui import Ui_wdg_brightfield
 from iris.resources.motion_video.stagecontrol_ui import Ui_stagecontrol
 
 WAIT_MOVEMENT_TIMEOUT = 10.0  # Timeout for waiting for the movement to finish [s] (reset if the stage is still moving)
-AUTOFOCUS_BLUR_KERNEL_SIZE = 1  # The kernel size for the median blur in the autofocus algorithm. Larger values can help reduce noise but may also reduce the focus score sensitivity.
+AUTOFOCUS_BLUR_KERNEL_SIZE = AppVideoEnum.AUTOFOCUS_BLUR_KERNEL_SIZE.value
+AUTOFOCUS_NO_IMPROVE_STEPS = AppVideoEnum.AUTOFOCUS_NO_IMPROVE_STEPS.value
 
 class BrightfieldController(qw.QWidget,Ui_wdg_brightfield_controller):
     def __init__(self,parent=None):
         super().__init__(parent)
         self.setupUi(self)
         self.setLayout(self.main_layout)
-        
-        self._dock_index = 0
-        
-        # Set the initial dock location
-        self.main_win:qw.QMainWindow = self.window() # pyright: ignore[reportAttributeAccessIssue] ; assume the parent is a QMainWindow
-        
-        self._register_videofeed_dock()
+
+        self.main_win:qw.QMainWindow = self.window() # pyright: ignore[reportAttributeAccessIssue]
+        self._dock_original_index = 0
+
+        # Defer until after the widget is inserted into the window hierarchy so
+        # self.window() reliably returns the real QMainWindow.
+        QTimer.singleShot(0, self._register_videofeed_dock)
         self.dock_video.topLevelChanged.connect(self._handle_videofeed_docking_changed)
-        
+
     def _register_videofeed_dock(self):
-        # This tells the Main Window: "You are the boss of this dock now"
-        self._dock_original_index = self.main_win.layout().indexOf(self.dock_video) # pyright: ignore[reportOptionalMemberAccess] ; assume the parent is a QMainWindow
-        self._dock_original_index = max(0,self._dock_original_index-1)
-            
+        self.main_win = self.window() # pyright: ignore[reportAttributeAccessIssue]
+        if not isinstance(self.main_win, qw.QMainWindow):
+            return
+        self._dock_original_index = self.main_layout.indexOf(self.dock_video)
+        # Register the dock with the QMainWindow so Qt knows its home position,
+        # then immediately return it to the layout without actually floating it.
+        self.main_win.addDockWidget(qt.DockWidgetArea.RightDockWidgetArea, self.dock_video)
+        self.dock_video.setFloating(True)
+        self.dock_video.setFloating(False)
+        self.main_layout.insertWidget(self._dock_original_index, self.dock_video)
+
     @Slot(bool)
     def _handle_videofeed_docking_changed(self,floating:bool):
         if floating:
-            self.main_win.addDockWidget(qt.DockWidgetArea.RightDockWidgetArea, self.dock_video)
+            if isinstance(self.main_win, qw.QMainWindow):
+                self.main_win.addDockWidget(qt.DockWidgetArea.RightDockWidgetArea, self.dock_video)
             self.dock_video.setFloating(True)
         else:
-            self.main_layout.insertWidget(self._dock_original_index, self.dock_video)
             self.main_layout.insertWidget(self._dock_original_index, self.dock_video)
             self.dock_video.setFloating(False)
 
@@ -428,112 +436,178 @@ class AutoFocus_Worker(QObject):
         super().__init__()
         self.ctrl_z = ctrl_z
         self.flg_stop = flg_stop
-        
-        self._is_waiting_for_img = threading.Event()  # A flag to wait for the image to be captured
-        
-        self._list_coor_mm: list[float] = []  # The list of z coordinates in mm
-        self._next_coor_idx: int = 0  # The index of the next z coordinate to move to
-        self._list_focus_score: list[float] = []  # The list of focus scores corresponding to the z coordinates
-        
+
+        self._is_waiting_for_img = threading.Event()
         self._img_counter = 0
         self._kernel_size = AUTOFOCUS_BLUR_KERNEL_SIZE
-        
-    @Slot(float,float,float, int)
+
+        # Scan state
+        self._current_z: float = 0.0
+        self._step_size_mm: float = 0.0
+        self._step_dir: int = 1          # +1 towards end, -1 towards start
+        self._phase: str = 'idle'        # 'dir1' | 'dir2' | 'idle'
+        self._no_improve_count: int = 0
+        self._best_score: float = -1.0
+        self._best_z: float = 0.0
+        self._full_start_z_mm: float = 0.0
+        self._full_end_z_mm: float = 0.0
+
+        # All visited (z, score) pairs — used for parabola fitting at the end
+        self._visited_z: list[float] = []
+        self._visited_scores: list[float] = []
+
+    @Slot(float,float,float,int)
     def start(self, start_z_mm:float, end_z_mm:float, step_size_mm:float, kernel_size:int):
         """
-        Performs autofocus by moving the z stage and evaluating the focus metric
-        
+        Performs autofocus by moving the z stage and evaluating the focus metric.
+
+        Starts at the centre of [start_z_mm, end_z_mm], moves towards end_z_mm
+        (direction 1), reverses when AUTOFOCUS_NO_IMPROVE_STEPS consecutive
+        non-improving images are seen, then sweeps towards start_z_mm (direction 2)
+        until the stopping criterion is met again.  A parabola is fit to all
+        collected (z, score) pairs for sub-step precision.
+
         Args:
-            start_z_mm (float): The starting z position in mm
-            end_z_mm (float): The ending z position in mm
-            step_size_mm (float): The step size for moving the z stage in mm
-            kernel_size (int): The kernel size for the median blur in the focus score calculation. Larger values can help reduce noise but may also reduce the focus score sensitivity.
+            start_z_mm (float): One end of the search range in mm
+            end_z_mm (float): The other end of the search range in mm
+            step_size_mm (float): Step size in mm
+            kernel_size (int): Pre-blur kernel size (odd int; 1 = no blur)
         """
-        # Generate the list of z coordinates to move to
         try:
-            assert isinstance(kernel_size,int) and kernel_size > 0 and kernel_size % 2 == 1, 'Kernel size must be a positive odd integer'
+            assert isinstance(kernel_size,int) and kernel_size > 0 and kernel_size % 2 == 1, \
+                'Kernel size must be a positive odd integer'
             self._kernel_size = kernel_size
             self.flg_stop.clear()
-            print(f'Starting autofocus with start: {start_z_mm} mm, end: {end_z_mm} mm, step size: {step_size_mm} mm')
-            self._next_coor_idx = 0
-            if start_z_mm > end_z_mm: step_size_mm= -abs(step_size_mm)
-            self._list_coor_mm = np.arange(start_z_mm, end_z_mm + step_size_mm, step_size_mm).tolist()
-            self._list_focus_score.clear()
-            self._go_to_next_coor()
-            
+
+            self._full_start_z_mm = min(start_z_mm, end_z_mm)
+            self._full_end_z_mm   = max(start_z_mm, end_z_mm)
+            self._step_size_mm    = abs(step_size_mm)
+            self._step_dir        = 1     # first sweep towards end_z_mm
+            self._phase           = 'dir1'
+            self._no_improve_count = 0
+            self._best_score      = -1.0
+            self._best_z          = (start_z_mm + end_z_mm) / 2.0
+            self._current_z       = self._best_z
+            self._visited_z.clear()
+            self._visited_scores.clear()
+            self._img_counter     = 0
+
+            print(f'Starting autofocus: centre={self._current_z:.4f} mm, '
+                  f'step={self._step_size_mm:.4f} mm, '
+                  f'range=[{self._full_start_z_mm:.4f}, {self._full_end_z_mm:.4f}] mm, '
+                  f'no-improve threshold={AUTOFOCUS_NO_IMPROVE_STEPS}')
+
+            self.ctrl_z.move_direct(self._current_z)
+            self._is_waiting_for_img.set()
             self.sig_started.emit()
         except Exception as e:
             self.sig_error.emit('Invalid autofocus parameters: {}'.format(e))
-            return
-    
+
     @Slot()
     def _force_stop(self):
-        """
-        Force stops the autofocus process and clears the state
-        """
-        self._list_coor_mm.clear()
-        self._list_focus_score.clear()
+        self._visited_z.clear()
+        self._visited_scores.clear()
         self._is_waiting_for_img.clear()
-        
+        self._phase = 'idle'
+
     def _calculate_focus_score(self, image, blur):
-        image_filtered = cv.medianBlur(image, blur)
-        laplacian = cv.Laplacian(image_filtered, cv.CV_64F)
-        focus_score = laplacian.var()
-        return focus_score
-    
+        if blur > 1:
+            image = cv.medianBlur(image, blur)
+        sx = cv.Sobel(image, cv.CV_64F, 1, 0, ksize=3)
+        sy = cv.Sobel(image, cv.CV_64F, 0, 1, ksize=3)
+        return float((sx**2 + sy**2).mean())
+
+    def _estimate_peak_z(self) -> float:
+        """
+        Fit a parabola to all visited (z, score) pairs and return the vertex.
+        Falls back to argmax if fewer than 3 points or if the parabola opens upward.
+        Result is clamped to the original scan range.
+        """
+        z      = np.array(self._visited_z)
+        scores = np.array(self._visited_scores)
+        if len(z) < 3:
+            return float(z[int(np.argmax(scores))])
+        try:
+            a, b, _ = np.polyfit(z, scores, 2)
+            if a >= 0:
+                return float(z[int(np.argmax(scores))])
+            peak_z = -b / (2.0 * a)
+            return float(np.clip(peak_z, self._full_start_z_mm, self._full_end_z_mm))
+        except Exception:
+            return float(z[int(np.argmax(scores))])
+
     @Slot(Image.Image)
     def process_image(self, img:Image.Image):
-        if not isinstance(img,Image.Image): return
+        if not isinstance(img, Image.Image): return
         if not self._is_waiting_for_img.is_set(): return
-        if self._img_counter%2 == 0: self._img_counter += 1; return # Process every other image to allow the stage to settle
-        
-        # Prep for the next image
+        if self._img_counter % 2 == 0: self._img_counter += 1; return  # skip every other frame to let the stage settle
+
         self._img_counter = 0
         self._is_waiting_for_img.clear()
-        
+
         try:
             img_gray = cv.cvtColor(np.array(img), cv.COLOR_RGB2GRAY)
-            focus_score = self._calculate_focus_score(img_gray, blur=self._kernel_size)
-            self._list_focus_score.append(focus_score)
-            
-            # print(f'Score: {focus_score:.2f} at Z: {self._list_coor_mm[self._next_coor_idx-1]:.3f} mm')
-            self._go_to_next_coor()
+            score = self._calculate_focus_score(img_gray, blur=self._kernel_size)
+            self._visited_z.append(self._current_z)
+            self._visited_scores.append(score)
+            self._advance(score)
         except Exception as e:
             self.sig_error.emit('Error processing image: {}'.format(e))
-            
-    def _go_to_next_coor(self):
-        # print('Moving to next coordinate index:', self._next_coor_idx)
-        if self._next_coor_idx >= len(self._list_coor_mm):
-            # Finished all coordinates, emit the best focus score
-            if len(self._list_focus_score) == 0:
-                self.sig_error.emit('No focus scores calculated')
-                return
-            
-            # Find the coordinate with the best focus score
-            best_score = max(self._list_focus_score)
-            best_index = self._list_focus_score.index(best_score)
-            best_coor = self._list_coor_mm[best_index]
-            
-            # Move to the best coordinate
-            self.ctrl_z.move_direct(best_coor)
-            
-            print('Autofocus finished. Best Z: {:.3f} mm with focus score: {:.2f}'.format(best_coor, best_score))
-            
-            self.sig_finished.emit(best_coor)
-            
-            self._list_coor_mm.clear()
-            self._list_focus_score.clear()
-            return
-        
+
+    def _advance(self, score: float):
+        """Decide the next z position based on the latest score."""
+        # Update best
+        if score > self._best_score:
+            self._best_score = score
+            self._best_z     = self._current_z
+            self._no_improve_count = 0
+        else:
+            self._no_improve_count += 1
+
+        # print(f'[AF] z={self._current_z:.4f} score={score:.1f} best={self._best_score:.1f} no_improve={self._no_improve_count} phase={self._phase}')
+
         if self.flg_stop.is_set():
             self._force_stop()
             self.sig_error.emit('Autofocus stopped by user')
             return
-        
-        next_z_mm = self._list_coor_mm[self._next_coor_idx]
-        self.ctrl_z.move_direct(next_z_mm)
+
+        next_z = self._current_z + self._step_dir * self._step_size_mm
+        out_of_bounds  = next_z < self._full_start_z_mm or next_z > self._full_end_z_mm
+        should_reverse = self._no_improve_count >= AUTOFOCUS_NO_IMPROVE_STEPS or out_of_bounds
+
+        if should_reverse:
+            if self._phase == 'dir1':
+                # Reverse towards start_z_mm
+                self._phase = 'dir2'
+                self._step_dir = -1
+                self._no_improve_count = 0
+                print(f'[AF] Reversing direction at z={self._current_z:.4f} mm (best so far: {self._best_z:.4f} mm)')
+                next_z = self._current_z + self._step_dir * self._step_size_mm
+                if next_z < self._full_start_z_mm or next_z > self._full_end_z_mm:
+                    self._finish()
+                    return
+            else:
+                # dir2 exhausted — done
+                self._finish()
+                return
+
+        self._current_z = next_z
+        self.ctrl_z.move_direct(next_z)
         self._is_waiting_for_img.set()
-        self._next_coor_idx += 1
+
+    def _finish(self):
+        if not self._visited_scores:
+            self.sig_error.emit('No focus scores calculated')
+            return
+        best_z    = self._estimate_peak_z()
+        best_score = max(self._visited_scores)
+        self.ctrl_z.move_direct(best_z)
+        print(f'Autofocus finished. Best Z: {best_z:.4f} mm '
+              f'(score: {best_score:.2f}, {len(self._visited_scores)} positions measured)')
+        self.sig_finished.emit(best_z)
+        self._visited_z.clear()
+        self._visited_scores.clear()
+        self._phase = 'idle'
         
         
 class ImageCapture_Worker(QObject):

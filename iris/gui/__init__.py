@@ -130,11 +130,15 @@ class AppPlotEnum(Enum):
 ########################################################################################################################
 
 dict_appVideo_default = {
-    'videofeed_refresh_rate': 15, # Refresh rate for the video feed in [Hz]
+    'videofeed_refresh_rate': 15,       # Refresh rate for the video feed in [Hz]
+    'autofocus_no_improve_steps': 3,    # Consecutive non-improving steps before reversing / stopping direction
+    'autofocus_blur_kernel_size': 1,    # Pre-blur kernel before Tenengrad (must be odd; 1 = disabled)
 }
 
 dict_appVideo_comments = {
     'videofeed_refresh_rate': 'Refresh rate for the video feed in [Hz]',
+    'autofocus_no_improve_steps': 'Autofocus: consecutive non-improving steps before reversing / stopping direction',
+    'autofocus_blur_kernel_size': 'Autofocus: pre-blur kernel size before Tenengrad focus metric (must be odd; 1 = disabled)',
 }
 
 dict_appVideo_read = read_update_config_file_section(
@@ -144,7 +148,9 @@ dict_appVideo_read = read_update_config_file_section(
 )
 
 class AppVideoEnum(Enum):
-    VIDEOFEED_REFRESH_RATE = dict_appVideo_read['videofeed_refresh_rate']
+    VIDEOFEED_REFRESH_RATE       = dict_appVideo_read['videofeed_refresh_rate']
+    AUTOFOCUS_NO_IMPROVE_STEPS   = dict_appVideo_read['autofocus_no_improve_steps']
+    AUTOFOCUS_BLUR_KERNEL_SIZE   = dict_appVideo_read['autofocus_blur_kernel_size']
     
 ########################################################################################################################
 # >>> Shortcut configurations <<<
