@@ -15,16 +15,17 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QFormLayout, QHBoxLayout, QHeaderView,
-    QMainWindow, QPushButton, QSizePolicy, QTabWidget,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QFormLayout, QHBoxLayout,
+    QHeaderView, QMainWindow, QPushButton, QSizePolicy,
+    QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
+    QWidget)
 
-class Ui_MainWindow(object):
-    def setupUi(self, MainWindow):
-        if not MainWindow.objectName():
-            MainWindow.setObjectName(u"MainWindow")
-        MainWindow.resize(896, 761)
-        self.centralwidget = QWidget(MainWindow)
+class Ui_bf_sresSubstrate_coorGen(object):
+    def setupUi(self, bf_sresSubstrate_coorGen):
+        if not bf_sresSubstrate_coorGen.objectName():
+            bf_sresSubstrate_coorGen.setObjectName(u"bf_sresSubstrate_coorGen")
+        bf_sresSubstrate_coorGen.resize(896, 761)
+        self.centralwidget = QWidget(bf_sresSubstrate_coorGen)
         self.centralwidget.setObjectName(u"centralwidget")
         self.verticalLayout_2 = QVBoxLayout(self.centralwidget)
         self.verticalLayout_2.setObjectName(u"verticalLayout_2")
@@ -40,6 +41,20 @@ class Ui_MainWindow(object):
         self.horizontalLayout.setObjectName(u"horizontalLayout")
         self.lyt_coorHub = QVBoxLayout()
         self.lyt_coorHub.setObjectName(u"lyt_coorHub")
+        self.tree_img = QTreeWidget(self.tab_setup)
+        __qtreewidgetitem = QTreeWidgetItem()
+        __qtreewidgetitem.setText(0, u"1");
+        self.tree_img.setHeaderItem(__qtreewidgetitem)
+        self.tree_img.setObjectName(u"tree_img")
+        sizePolicy = QSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(self.tree_img.sizePolicy().hasHeightForWidth())
+        self.tree_img.setSizePolicy(sizePolicy)
+        self.tree_img.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+
+        self.lyt_coorHub.addWidget(self.tree_img)
+
 
         self.horizontalLayout.addLayout(self.lyt_coorHub)
 
@@ -71,12 +86,24 @@ class Ui_MainWindow(object):
         self.verticalLayout_7 = QVBoxLayout()
         self.verticalLayout_7.setObjectName(u"verticalLayout_7")
         self.tree_result = QTreeWidget(self.tab_result)
-        __qtreewidgetitem = QTreeWidgetItem()
-        __qtreewidgetitem.setText(0, u"1");
-        self.tree_result.setHeaderItem(__qtreewidgetitem)
+        __qtreewidgetitem1 = QTreeWidgetItem()
+        __qtreewidgetitem1.setText(0, u"1");
+        self.tree_result.setHeaderItem(__qtreewidgetitem1)
         self.tree_result.setObjectName(u"tree_result")
+        sizePolicy.setHeightForWidth(self.tree_result.sizePolicy().hasHeightForWidth())
+        self.tree_result.setSizePolicy(sizePolicy)
 
         self.verticalLayout_7.addWidget(self.tree_result)
+
+        self.btn_remove = QPushButton(self.tab_result)
+        self.btn_remove.setObjectName(u"btn_remove")
+
+        self.verticalLayout_7.addWidget(self.btn_remove)
+
+        self.btn_saveall = QPushButton(self.tab_result)
+        self.btn_saveall.setObjectName(u"btn_saveall")
+
+        self.verticalLayout_7.addWidget(self.btn_saveall)
 
 
         self.horizontalLayout_2.addLayout(self.verticalLayout_7)
@@ -96,20 +123,22 @@ class Ui_MainWindow(object):
 
         self.verticalLayout_2.addLayout(self.verticalLayout)
 
-        MainWindow.setCentralWidget(self.centralwidget)
+        bf_sresSubstrate_coorGen.setCentralWidget(self.centralwidget)
 
-        self.retranslateUi(MainWindow)
+        self.retranslateUi(bf_sresSubstrate_coorGen)
 
         self.tabWidget.setCurrentIndex(0)
 
 
-        QMetaObject.connectSlotsByName(MainWindow)
+        QMetaObject.connectSlotsByName(bf_sresSubstrate_coorGen)
     # setupUi
 
-    def retranslateUi(self, MainWindow):
-        MainWindow.setWindowTitle(QCoreApplication.translate("MainWindow", u"MainWindow", None))
-        self.btn_process.setText(QCoreApplication.translate("MainWindow", u"Process all selected ROI pictures", None))
-        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_setup), QCoreApplication.translate("MainWindow", u"Setup", None))
-        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_result), QCoreApplication.translate("MainWindow", u"Result", None))
+    def retranslateUi(self, bf_sresSubstrate_coorGen):
+        bf_sresSubstrate_coorGen.setWindowTitle(QCoreApplication.translate("bf_sresSubstrate_coorGen", u"MainWindow", None))
+        self.btn_process.setText(QCoreApplication.translate("bf_sresSubstrate_coorGen", u"Process all selected ROI pictures", None))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_setup), QCoreApplication.translate("bf_sresSubstrate_coorGen", u"Setup", None))
+        self.btn_remove.setText(QCoreApplication.translate("bf_sresSubstrate_coorGen", u"Remove selected", None))
+        self.btn_saveall.setText(QCoreApplication.translate("bf_sresSubstrate_coorGen", u"Save all", None))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_result), QCoreApplication.translate("bf_sresSubstrate_coorGen", u"Result", None))
     # retranslateUi
 

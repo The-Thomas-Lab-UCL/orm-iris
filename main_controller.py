@@ -48,6 +48,7 @@ from extensions.extension_intermediary import Ext_DataIntermediary
 from extensions.extension_template import Extension_MainWindow
 from extensions.optics_calibration_aid.ext_opticsCalibrationAid import Ext_OpticsCalibrationAid
 from extensions.camera_exposure_controller.ext_cameraExposureController import Ext_CameraExposureController
+from extensions.bf_sersSubstrate_coorGen.ext_BF_SERSSubstrate_coorGen import Ext_BF_SERSSubstrate_coorGen
 
 # NOTE: controller classes and enums imported lazily inside MainWindow_Controller.__init__
 # to avoid importing hardware SDKs / creating OS handles at module import time
@@ -165,6 +166,7 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
             frm_datahub_mapping=self._dataHub_map,
             frm_datahub_image=self._dataHub_img,
             frm_datahub_imgcal=self._dataHub_imgcal,
+            coorhub=self._coorHub
             )
         
     # >> Set up the calibration generator <<
@@ -316,9 +318,13 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         camera_exposure_extension = Ext_CameraExposureController(
             parent=self,
             intermediary=self._extension_intermediary)
-        
+        bf_sers_coorgen_extension = Ext_BF_SERSSubstrate_coorGen(
+            parent=self,
+            intermediary=self._extension_intermediary)
+
         self._list_extensions_toplevel.append(optics_calibration_extension)
         self._list_extensions_toplevel.append(camera_exposure_extension)
+        self._list_extensions_toplevel.append(bf_sers_coorgen_extension)
         
         for ext in self._list_extensions_toplevel:
             ext:Extension_MainWindow

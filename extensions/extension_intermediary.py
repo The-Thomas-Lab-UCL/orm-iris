@@ -25,6 +25,7 @@ from iris.gui.hilvl_Brightfield import Wdg_HighLvlController_Brightfield
 # Data containers/managers
 from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
 from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
+from iris.data.measurement_coordinates import List_MeaCoor_Hub
 
 class Ext_DataIntermediary():
     """
@@ -47,6 +48,7 @@ class Ext_DataIntermediary():
         frm_datahub_mapping: Wdg_DataHub_Mapping,
         frm_datahub_image: Wdg_DataHub_Image,
         frm_datahub_imgcal: Wdg_DataHub_ImgCal,
+        coorhub: List_MeaCoor_Hub,
         ) -> None:
         """
         Initialise the intermediary class with the required controllers and GUI components.
@@ -67,6 +69,7 @@ class Ext_DataIntermediary():
         self.frm_datahub_mapping = frm_datahub_mapping
         self.frm_datahub_image = frm_datahub_image
         self.frm_datahub_imgcal = frm_datahub_imgcal
+        self.coorhub = coorhub
         
     def get_spectrometer_controller(self) -> Class_SpectrometerController:
         """
@@ -141,3 +144,9 @@ class Ext_DataIntermediary():
         Get the data hub image calibration GUI.
         """
         return self.frm_datahub_imgcal
+    
+    def get_coorhub(self) -> List_MeaCoor_Hub:
+        """
+        Get the coordinate hub.
+        """
+        return self.coorhub
