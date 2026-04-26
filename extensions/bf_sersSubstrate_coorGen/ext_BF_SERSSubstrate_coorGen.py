@@ -47,7 +47,7 @@ class ProcessResult:
                  boundary_px_x: np.ndarray, boundary_px_y: np.ndarray,
                  boundary_stage_mm: np.ndarray, boundary_stage_mm_expanded: np.ndarray,
                  scan_pts_stage: np.ndarray, scan_pts_mea: np.ndarray,
-                 expansion_mm: float, step_size_mm: float):
+                 expansion_mm: float, step_size_x_mm: float, step_size_y_mm: float):
         self._img_unit = img_unit
         self._coor = coor
         self._arr = arr
@@ -65,7 +65,8 @@ class ProcessResult:
         self._scan_pts_stage = scan_pts_stage
         self._scan_pts_mea = scan_pts_mea
         self._expansion_mm = expansion_mm
-        self._step_size_mm = step_size_mm
+        self._step_size_x_mm = step_size_x_mm
+        self._step_size_y_mm = step_size_y_mm
 
     def get_name(self) -> str:
         return self._img_unit.get_IdName()[1]
@@ -117,16 +118,16 @@ class _PipelineParams:
                  params_smooth: Param_Smoothen_Boundary,
                  ransac_threshold: float,
                  ransac_trials: int,
-                 step_size_mm: float,
-                 z_mm: float,
+                 step_size_x_mm: float,
+                 step_size_y_mm: float,
                  expansion_mm: float):
         self.params_centre = params_centre
         self.params_edge = params_edge
         self.params_smooth = params_smooth
         self.ransac_threshold = ransac_threshold
         self.ransac_trials = ransac_trials
-        self.step_size_mm = step_size_mm
-        self.z_mm = z_mm
+        self.step_size_x_mm = step_size_x_mm
+        self.step_size_y_mm = step_size_y_mm
         self.expansion_mm = expansion_mm
 
 
@@ -193,20 +194,23 @@ class _ProcessWorker(QObject):
         y_min = boundary_stage_mm_expanded[:, 1].min()
         y_max = boundary_stage_mm_expanded[:, 1].max()
 
-        xs = np.arange(x_min, x_max + p.step_size_mm, p.step_size_mm)
-        ys = np.arange(y_min, y_max + p.step_size_mm, p.step_size_mm)
+        xs = np.arange(x_min, x_max + p.step_size_x_mm, p.step_size_x_mm)
+        ys = np.arange(y_min, y_max + p.step_size_y_mm, p.step_size_y_mm)
         xx, yy = np.meshgrid(xs, ys)
         grid_candidates = np.column_stack([xx.ravel(), yy.ravel()])
         inside = polygon.contains_points(grid_candidates)
         scan_pts_stage = grid_candidates[inside]
-
+        
         scan_pts_mea = np.array([
-            unit.convert_stg2mea((float(x), float(y)))
+            unit.convert_mea2stg((float(x), float(y)))
             for x, y in scan_pts_stage
         ])
-
+        
+        # Z from the mean of all stored z-coordinates in the image unit
+        z_mm = float(np.mean(unit.get_dict_measurement()['coor_z']))
+        
         scan_coordinates = [
-            (float(x), float(y), float(p.z_mm))
+            (float(x), float(y), z_mm)
             for x, y in scan_pts_mea
         ]
 
@@ -234,7 +238,8 @@ class _ProcessWorker(QObject):
             scan_pts_stage=scan_pts_stage,
             scan_pts_mea=scan_pts_mea,
             expansion_mm=p.expansion_mm,
-            step_size_mm=p.step_size_mm,
+            step_size_x_mm=p.step_size_x_mm,
+            step_size_y_mm=p.step_size_y_mm,
         )
 
     @staticmethod
@@ -274,7 +279,7 @@ class _PlotWorker(QObject):
         r = self._result
 
         fig = Figure(figsize=(12, 16))
-        fig.set_tight_layout(True)
+        fig.set_tight_layout(True) # pyright: ignore[reportAttributeAccessIssue] ; set_tight_layout is valid for Figure
         ax = fig.subplot_mosaic(
             [['rgb',     's_ch'  ],
              ['centre',  'sobel' ],
@@ -365,7 +370,9 @@ class _PlotWorker(QObject):
                               label=f'N={len(r._coor.mapping_coordinates)} scan pts')
         ax['overlay'].scatter(f.xc, f.yc, s=60, c='yellow', zorder=5, label='Centre')
         ax['overlay'].set_title(
-            f'Scan grid overlay  |  step={r._step_size_mm * 1e3:.0f} µm  |  N={len(r._coor.mapping_coordinates)}',
+            f'Scan grid overlay  |  '
+            f'step={r._step_size_x_mm * 1e3:.0f}×{r._step_size_y_mm * 1e3:.0f} µm  |  '
+            f'N={len(r._coor.mapping_coordinates)}',
             fontsize=fs)
         ax['overlay'].axis('off')
         ax['overlay'].legend(fontsize=fs - 1)
@@ -435,6 +442,9 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
 
     def _init_params_widgets(self):
         lyt = self.lyt_params
+        lyt.setFieldGrowthPolicy(qw.QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+
+        sp_expand = qw.QSizePolicy(qw.QSizePolicy.Policy.Expanding, qw.QSizePolicy.Policy.Fixed)
 
         def _add_spin(label: str, value: float, min_: float, max_: float,
                       decimals: int = 3, suffix: str = '') -> qw.QDoubleSpinBox:
@@ -442,6 +452,7 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
             spin.setRange(min_, max_)
             spin.setDecimals(decimals)
             spin.setValue(value)
+            spin.setSizePolicy(sp_expand)
             if suffix:
                 spin.setSuffix(suffix)
             lyt.addRow(label, spin)
@@ -451,6 +462,7 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
             spin = qw.QSpinBox()
             spin.setRange(min_, max_)
             spin.setValue(value)
+            spin.setSizePolicy(sp_expand)
             lyt.addRow(label, spin)
             return spin
 
@@ -475,9 +487,9 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
         self._spin_sm_poly       = _add_ispin('Savgol polyorder',       2,  1,   5)
 
         lyt.addRow(_make_section_label('Scan grid'))
-        self._spin_step_mm       = _add_spin('Step size [mm]',    0.05, 0.001, 10.0, 3)
-        self._spin_z_mm          = _add_spin('Z position [mm]',   0.0, -50.0, 50.0, 3)
-        self._spin_expansion_mm  = _add_spin('ROI expansion [mm]', 0.1, 0.0,   5.0, 3)
+        self._spin_step_x_um    = _add_spin('Step X [µm]',        50.0,  1.0, 10000.0, 1, ' µm')
+        self._spin_step_y_um    = _add_spin('Step Y [µm]',        50.0,  1.0, 10000.0, 1, ' µm')
+        self._spin_expansion_um = _add_spin('ROI expansion [µm]',  0.1,  0.0,     5.0, 3, ' µm')
 
     def _read_params(self) -> _PipelineParams:
         return _PipelineParams(
@@ -499,9 +511,9 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
             ),
             ransac_threshold=self._spin_ransac_thresh.value(),
             ransac_trials=self._spin_ransac_trials.value(),
-            step_size_mm=self._spin_step_mm.value(),
-            z_mm=self._spin_z_mm.value(),
-            expansion_mm=self._spin_expansion_mm.value(),
+            step_size_x_mm=self._spin_step_x_um.value() / 1000.0,  # µm → mm
+            step_size_y_mm=self._spin_step_y_um.value() / 1000.0,  # µm → mm
+            expansion_mm=self._spin_expansion_um.value() / 1000.0,  # µm → mm
         )
 
     # ── Result tab: plot canvas + buttons ─────────────────────────────────
@@ -514,13 +526,6 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
         self.lyt_result.addWidget(self._result_canvas)
 
     def _init_result_buttons(self):
-        btn_row = qw.QHBoxLayout()
-        self.btn_remove  = qw.QPushButton("Remove selected")
-        self.btn_saveall = qw.QPushButton("Save all to CoorHub")
-        btn_row.addWidget(self.btn_remove)
-        btn_row.addWidget(self.btn_saveall)
-        self.verticalLayout_7.addLayout(btn_row)
-
         self.tree_result.setHeaderLabels(['Result'])
 
     # ── Signal wiring ──────────────────────────────────────────────────────

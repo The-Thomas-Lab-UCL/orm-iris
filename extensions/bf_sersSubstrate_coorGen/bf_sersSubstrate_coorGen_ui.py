@@ -92,6 +92,7 @@ class Ui_bf_sresSubstrate_coorGen(object):
         self.tree_result.setObjectName(u"tree_result")
         sizePolicy.setHeightForWidth(self.tree_result.sizePolicy().hasHeightForWidth())
         self.tree_result.setSizePolicy(sizePolicy)
+        self.tree_result.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
         self.verticalLayout_7.addWidget(self.tree_result)
 
