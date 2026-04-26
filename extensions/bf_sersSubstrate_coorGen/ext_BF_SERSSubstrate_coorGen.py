@@ -107,6 +107,14 @@ class List_ProcessResult(list):
         super().remove(item)
         self._notify()
 
+    def replace_or_append(self, item: ProcessResult) -> None:
+        for i, r in enumerate(self):
+            if r.get_name() == item.get_name():
+                self[i] = item
+                self._notify()
+                return
+        self.append(item)
+
 
 # ── Worker: run the full pipeline for a list of MeaImg_Units ─────────────────
 
@@ -136,24 +144,18 @@ class _ProcessWorker(QObject):
     sig_error  = Signal(str, str) # (unit_name, error_message)
     sig_done   = Signal()
 
-    def __init__(self, units: list[MeaImg_Unit], params: _PipelineParams):
-        super().__init__()
-        self._units = units
-        self._p = params
-
-    @Slot()
-    def run(self):
-        for unit in self._units:
+    @Slot(list, object)
+    def submit(self, units: list, params: _PipelineParams):
+        for unit in units:
             name = unit.get_IdName()[1]
             try:
-                result = self._process_unit(unit)
+                result = self._process_unit(unit, params)
                 self.sig_result.emit(result)
             except Exception as e:
                 self.sig_error.emit(name, str(e))
         self.sig_done.emit()
 
-    def _process_unit(self, unit: MeaImg_Unit) -> ProcessResult:
-        p = self._p
+    def _process_unit(self, unit: MeaImg_Unit, p: _PipelineParams) -> ProcessResult:
 
         # Load stitched image
         img_stitched, coor_min_mm, _ = unit.get_image_all_stitched(low_res=False)
@@ -366,7 +368,7 @@ class _PlotWorker(QObject):
         ax['overlay'].plot(exp_px_x, exp_px_y,
                            'r--', lw=1, label=f'+{r._expansion_mm * 1e3:.0f} µm expansion')
         ax['overlay'].scatter(scan_px_x, scan_px_y,
-                              s=3, c='cyan', alpha=0.6,
+                              s=3, c='cyan', alpha=0.1,
                               label=f'N={len(r._coor.mapping_coordinates)} scan pts')
         ax['overlay'].scatter(f.xc, f.yc, s=60, c='yellow', zorder=5, label='Centre')
         ax['overlay'].set_title(
@@ -395,6 +397,7 @@ class _PlotWorker(QObject):
 class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWindow):
 
     _sig_update_img_list = Signal()
+    _sig_submit_work     = Signal(list, object)
 
     def __init__(self, parent, intermediary: Intermediary):
         super().__init__(parent, intermediary)
@@ -407,8 +410,15 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
         self._process_results = List_ProcessResult()
         self._process_results.add_observer(self._sync_result_tree)
 
-        self._process_thread: QThread | None = None
-        self._process_worker: _ProcessWorker | None = None
+        # Permanent background processor — created once, never torn down
+        self._process_worker = _ProcessWorker()
+        self._process_thread = QThread(self)
+        self._process_worker.moveToThread(self._process_thread)
+        self._process_worker.sig_result.connect(self._on_process_result)
+        self._process_worker.sig_error.connect(self._on_process_error)
+        self._process_worker.sig_done.connect(self._on_process_done)
+        self._sig_submit_work.connect(self._process_worker.submit)
+        self._process_thread.start()
 
         self._plot_thread: QThread | None = None
         self._plot_worker: _PlotWorker | None = None
@@ -489,7 +499,7 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
         lyt.addRow(_make_section_label('Scan grid'))
         self._spin_step_x_um    = _add_spin('Step X [µm]',        50.0,     1.0,    10000.0,    1, ' µm')
         self._spin_step_y_um    = _add_spin('Step Y [µm]',        50.0,     1.0,    10000.0,    1, ' µm')
-        self._spin_expansion_um = _add_spin('ROI expansion [µm]',  500.0,   0.0,    10000.0,    3, ' µm')
+        self._spin_expansion_um = _add_spin('ROI expansion [µm]',  200.0,   0.0,    10000.0,    3, ' µm')
 
     def _read_params(self) -> _PipelineParams:
         return _PipelineParams(
@@ -549,24 +559,11 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
         params = self._read_params()
 
         self.btn_process.setEnabled(False)
-
-        self._process_worker = _ProcessWorker(units, params)
-        self._process_thread = QThread(self)
-        self._process_worker.moveToThread(self._process_thread)
-
-        self._process_thread.started.connect(self._process_worker.run)
-        self._process_worker.sig_result.connect(self._on_process_result)
-        self._process_worker.sig_error.connect(self._on_process_error)
-        self._process_worker.sig_done.connect(self._on_process_done)
-        self._process_worker.sig_done.connect(self._process_thread.quit)
-        self._process_thread.finished.connect(self._process_worker.deleteLater)
-        self._process_thread.finished.connect(self._process_thread.deleteLater)
-
-        self._process_thread.start()
+        self._sig_submit_work.emit(units, params)
 
     @Slot(object)
     def _on_process_result(self, result: ProcessResult):
-        self._process_results.append(result)
+        self._process_results.replace_or_append(result)
 
     @Slot(str, str)
     def _on_process_error(self, unit_name: str, msg: str):
@@ -575,9 +572,11 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
     @Slot()
     def _on_process_done(self):
         self.btn_process.setEnabled(True)
-        self._process_thread = None
-        self._process_worker = None
         self.tabWidget.setCurrentWidget(self.tab_result)
+        qw.QMessageBox.information(
+            self, 'Processing complete',
+            f'All units processed. {len(self._process_results)} result(s) ready in the Result tab.'
+        )
 
     # ── Result tree sync ───────────────────────────────────────────────────
 
@@ -639,10 +638,9 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
         items = self.tree_result.selectedItems()
         if not items:
             return
-        name = items[0].text(0)
-        to_remove = next((r for r in self._process_results if r.get_name() == name), None)
-        if to_remove is not None:
-            self._process_results.remove(to_remove)
+        names = {item.text(0) for item in items}
+        for r in [r for r in self._process_results if r.get_name() in names]:
+            self._process_results.remove(r)
 
     @Slot()
     def _on_saveall_clicked(self):

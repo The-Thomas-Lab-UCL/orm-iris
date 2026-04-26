@@ -106,7 +106,7 @@
               <item>
                <widget class="QPushButton" name="btn_saveall">
                 <property name="text">
-                 <string>Save all</string>
+                 <string>Save selected</string>
                 </property>
                </widget>
               </item>

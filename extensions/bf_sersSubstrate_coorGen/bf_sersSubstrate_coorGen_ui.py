@@ -139,7 +139,7 @@ class Ui_bf_sresSubstrate_coorGen(object):
         self.btn_process.setText(QCoreApplication.translate("bf_sresSubstrate_coorGen", u"Process all selected ROI pictures", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_setup), QCoreApplication.translate("bf_sresSubstrate_coorGen", u"Setup", None))
         self.btn_remove.setText(QCoreApplication.translate("bf_sresSubstrate_coorGen", u"Remove selected", None))
-        self.btn_saveall.setText(QCoreApplication.translate("bf_sresSubstrate_coorGen", u"Save all", None))
+        self.btn_saveall.setText(QCoreApplication.translate("bf_sresSubstrate_coorGen", u"Save selected", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_result), QCoreApplication.translate("bf_sresSubstrate_coorGen", u"Result", None))
     # retranslateUi
 
