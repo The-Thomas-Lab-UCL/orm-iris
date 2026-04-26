@@ -1,10 +1,6 @@
 import numpy as np
 from dataclasses import dataclass
 
-import glob
-from pathlib import Path
-import os
-
 @dataclass
 class Ellipse_Cartesian:
     """
@@ -13,17 +9,17 @@ class Ellipse_Cartesian:
     """
     x: np.ndarray   # x-coordinates of the ellipse (Cartesian coor system)
     y: np.ndarray   # y-coordinates of the ellipse (Cartesian coor system)
-    
+
     def get_polar(self, centre_x:float, centre_y:float) -> tuple[np.ndarray, np.ndarray]:
         """
         Calculate boundary radii and angles from raw edge points given a centre
-        
+
         Args:
             centre_x (float): x-coordinate of ellipse centre (pixels)
             centre_y (float): y-coordinate of ellipse centre (pixels)
 
         Returns:
-            tuple[np.ndarray, np.ndarray]: 
+            tuple[np.ndarray, np.ndarray]:
                 - radii     : radial distances of edge points from centre
                 - angles    : angles of edge points relative to centre (radians)
         """
@@ -40,11 +36,11 @@ class Ellipse_Polar:
     r: np.ndarray   # radial distances of edge points from centre
     theta: np.ndarray   # angles of edge points relative to centre (radians)
     centre: tuple[float, float]   # (x, y) coordinates of ellipse centre (pixels)
-    
+
     def get_cartesian(self) -> Ellipse_Cartesian:
         """
         Convert polar coordinates back to Cartesian coordinates.
-        
+
         Returns:
             Ellipse_Cartesian: An Ellipse_Cartesian object containing x and y coordinates of the edge points
         """
@@ -56,7 +52,7 @@ class Ellipse_Polar:
 def calculate_ellipse_radius(angle:float, a:float, b:float, theta:float):
     """
     Radial distance from ellipse centre to boundary at given angle.
-    
+
     Args:
         angle (float): angle in radians (0 along +x axis, increasing counterclockwise)
         a (float): major axis length
@@ -71,19 +67,19 @@ def generate_mask(ellipse: Ellipse_Polar, img_height, img_width):
     """
     Build binary substrate mask: pixels closer to centre than boundary radius
     in their angular direction are inside the substrate.
-    
+
     Internally builds a 360-degree lookup table by interpolating boundary_smooth
     onto uniform integer degrees — so angles can be non-uniform or non-integer.
-    
+
     Args:
         ellipse (Ellipse_Polar): Ellipse_Polar object containing the smoothed boundary radii and angles
-        hc (int): height of the image (pixels)
-        wc (int): width of the image (pixels)
+        img_height (int): height of the image (pixels)
+        img_width (int): width of the image (pixels)
     """
     boundary_smooth = ellipse.r
     angles = ellipse.theta
     xc, yc = ellipse.centre
-    
+
     # Build a 360-entry lookup table: for each integer degree, interpolate
     # the boundary radius from whatever (potentially non-uniform) angles we have
     degree_bins = np.arange(360)
@@ -111,21 +107,3 @@ def generate_mask(ellipse: Ellipse_Polar, img_height, img_width):
             if r_px < lookup[ray_idx]:
                 mask[yi, xi] = True
     return mask
-
-def get_list_files_from_directory(msg:str, extension:str):
-    dir_path = input(msg)
-    
-    # Remove the prefix and suffix if it's a quoted string
-    if dir_path.startswith('"') and dir_path.endswith('"'):
-        dir_path = dir_path[1:-1]
-    if dir_path.startswith("'") and dir_path.endswith("'"):
-        dir_path = dir_path[1:-1]
-    
-    dir_path = Path(dir_path)
-    
-    extension = extension.lstrip('.')
-    list_file_paths = glob.glob(os.path.join(dir_path, f'*.{extension}'))
-    
-    print(f"Found {len(list_file_paths)} {extension.upper()} files in {dir_path}.")
-    
-    return list_file_paths

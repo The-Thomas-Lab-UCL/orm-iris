@@ -5,7 +5,7 @@ from scipy.signal import savgol_filter
 from matplotlib.axes import Axes
 from dataclasses import dataclass
 
-from substrate_characterisation.utils import calculate_ellipse_radius, Ellipse_Cartesian, Ellipse_Polar
+from extensions.bf_sersSubstrate_coorGen.utils import calculate_ellipse_radius, Ellipse_Cartesian, Ellipse_Polar
 
 @dataclass
 class EllipseFitResult:

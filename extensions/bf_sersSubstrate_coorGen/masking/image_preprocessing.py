@@ -1,14 +1,7 @@
 import numpy as np
 from PIL import Image
-from skimage import filters
-from skimage.measure import ransac, EllipseModel
-from scipy.ndimage import uniform_filter1d
-from scipy.signal import savgol_filter
 
-import matplotlib
 from matplotlib.axes import Axes
-from matplotlib.figure import Figure
-import matplotlib.pyplot as plt
 
 def convert_img2gray_s_channel(arr, axes:Axes|None=None):
     """Extract HSV saturation channel from RGB array, normalised to 0-1."""
