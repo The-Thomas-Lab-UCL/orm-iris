@@ -487,9 +487,9 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
         self._spin_sm_poly       = _add_ispin('Savgol polyorder',       2,  1,   5)
 
         lyt.addRow(_make_section_label('Scan grid'))
-        self._spin_step_x_um    = _add_spin('Step X [µm]',        50.0,  1.0, 10000.0, 1, ' µm')
-        self._spin_step_y_um    = _add_spin('Step Y [µm]',        50.0,  1.0, 10000.0, 1, ' µm')
-        self._spin_expansion_um = _add_spin('ROI expansion [µm]',  0.1,  0.0,     5.0, 3, ' µm')
+        self._spin_step_x_um    = _add_spin('Step X [µm]',        50.0,     1.0,    10000.0,    1, ' µm')
+        self._spin_step_y_um    = _add_spin('Step Y [µm]',        50.0,     1.0,    10000.0,    1, ' µm')
+        self._spin_expansion_um = _add_spin('ROI expansion [µm]',  500.0,   0.0,    10000.0,    3, ' µm')
 
     def _read_params(self) -> _PipelineParams:
         return _PipelineParams(
