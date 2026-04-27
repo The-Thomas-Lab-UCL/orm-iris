@@ -49,8 +49,13 @@ from iris.controllers.class_spectrometer_controller import Class_SpectrometerCon
 from iris import DataAnalysisConfigEnum
 from iris.controllers import ControllerSpecificConfigEnum
 
-ANDOR_SINGLE_TRACK_CENTRE = 128
-ANDOR_SINGLE_TRACK_HEIGHT = 40
+# ANDOR_SINGLE_TRACK_CENTRE = 128
+# ANDOR_SINGLE_TRACK_HEIGHT = 40
+# ANDOR_READOUT_MODE = 'Single Track'  # Options: 'FVB' or 'Single Track'
+
+ANDOR_SINGLE_TRACK_CENTRE = ControllerSpecificConfigEnum.ANDOR_SINGLE_TRACK_CENTRE.value
+ANDOR_SINGLE_TRACK_HEIGHT = ControllerSpecificConfigEnum.ANDOR_SINGLE_TRACK_HEIGHT.value
+ANDOR_READOUT_MODE = ControllerSpecificConfigEnum.ANDOR_READOUT_MODE.value
 
 # %% Andor dll imports
 # Add the path to the Andor SDK2 DLLs
@@ -984,9 +989,8 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         self._total_pixel = self._x_pixel * self._y_pixel
         
         # Detector ROI and readout mode
-        # Single Track collapses the user-defined row band on-chip before readout,
-        # giving the same 1-D output as FVB but for a configurable row window.
-        self._set_single_track_parameters()
+        # Configured via ANDOR_READOUT_MODE ('FVB' or 'Single Track').
+        self._setup_readout_mode()
 
         # --- Readout speed setup ---
         # VS speed: use the SDK's own recommended fastest index (not hardcoded).
@@ -1006,7 +1010,7 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         print(f"HS speed set to index 0 ({getHSSpeed(0):.3f} MHz)")
 
         # --- Acquisition mode: RunTillAbort for lowest per-frame overhead ---
-        setReadMode(mode='3. Single-Track')
+        # Read mode is already set by _setup_readout_mode() above.
         setAcquisitionMode(mode='5. RunTillAbort')
         setKineticCycleTime(0.0)   # minimum possible cycle time
         setTriggerMode('0. Internal')
@@ -1131,47 +1135,30 @@ class SpectrometerController_Andor(Class_SpectrometerController):
                 print(f"Shutting down... Current: {getTemperature()} degC. Target: {SAFE_SHUTDOWN_TEMP} degC")
         self._lock.release()
         
-    def _set_ROI_parameters(self):
+    def _setup_readout_mode(self):
         """
-        Set the Region of Interest (ROI) parameters for the detector according to
-        the user-defined settings in the config.ini file.
+        Configure the detector readout mode according to ANDOR_READOUT_MODE.
+
+        'full_vertical_binning':
+            Full Vertical Binning: all rows summed on-chip, fastest
+            readout, no spatial selectivity. Uses _set_ROI_parameters()
+            for column ROI/binning.
+        'single_track':
+            A user-defined horizontal band of rows is summed on-chip
+            before readout. Centre row and height set via
+            ANDOR_SINGLE_TRACK_CENTRE and ANDOR_SINGLE_TRACK_HEIGHT.
+            Uses _set_single_track_parameters().
         """
-        xmin_dev = 1
-        xmax_dev = self._x_pixel
-        ymin_dev = 1
-        ymax_dev = self._y_pixel
-        
-        xmin_user = ControllerSpecificConfigEnum.ANDOR_ROI_COL_MIN.value
-        xmax_user = ControllerSpecificConfigEnum.ANDOR_ROI_COL_MAX.value
-        xbin_user = ControllerSpecificConfigEnum.ANDOR_ROI_BIN_COL.value
-        
-        ymin_user = ControllerSpecificConfigEnum.ANDOR_ROI_ROW_MIN.value
-        ymax_user = ControllerSpecificConfigEnum.ANDOR_ROI_ROW_MAX.value
-        ybin_user = ControllerSpecificConfigEnum.ANDOR_ROI_BIN_ROW.value
-        
-        xstart = max(xmin_dev, xmin_user)
-        xend = min(xmax_dev, xmax_user)
-        xbin = min(xbin_user, (xend-xstart+1))
-        assert (xend-xstart+1) % xbin == 0, \
-            f"Invalid X ROI parameters: {xstart}, {xend}, {xbin}. " \
-            "The bin must divide the range evenly."
-
-        ystart = max(ymin_dev, ymin_user)
-        yend = min(ymax_dev, ymax_user)
-        ybin = min(ybin_user, (yend-ystart+1))
-        assert (yend-ystart+1) % ybin == 0, \
-            f"Invalid Y ROI parameters: {ystart}, {yend}, {ybin}. " \
-            "The bin must divide the range evenly."
-            
-        setImage(hbin=xbin, vbin=ybin, hstart=xstart, hend=xend, vstart=ystart, vend=yend)
-
-        self._x_pixel = int((xend - xstart + 1) / xbin)
-        self._y_pixel = int((yend - ystart + 1) / ybin)
-        self._total_pixel = int(self._x_pixel * self._y_pixel)
-
-        print(f"ROI: xstart={xstart}, xend={xend}, xbin={xbin}, "
-              f"ystart={ystart}, yend={yend}, ybin={ybin} "
-              f"→ effective pixels: {self._x_pixel} x {self._y_pixel}")
+        if ANDOR_READOUT_MODE == 'full_vertical_binning':
+            setReadMode(mode='0. Full Vertical Binning')
+            print(f"Readout mode: Full Vertical Binning")
+        elif ANDOR_READOUT_MODE == 'single_track':
+            setReadMode(mode='3. Single-Track')
+            self._set_single_track_parameters()
+            print(f"Readout mode: Single Track")
+        else:
+            raise ValueError(f"Invalid ANDOR_READOUT_MODE: '{ANDOR_READOUT_MODE}'. "
+                             f"Must be 'FVB' or 'Single Track'.")
 
     def _set_single_track_parameters(self):
         """
@@ -1186,21 +1173,6 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         Only the column ROI / binning parameters (COL_MIN, COL_MAX, BIN_COL)
         are applied here; row parameters are handled by SetSingleTrack itself.
         """
-        # --- Column ROI (same logic as _set_ROI_parameters) ---
-        xmin_dev = 1
-        xmax_dev = self._x_pixel
-
-        xmin_user = ControllerSpecificConfigEnum.ANDOR_ROI_COL_MIN.value
-        xmax_user = ControllerSpecificConfigEnum.ANDOR_ROI_COL_MAX.value
-        xbin_user = ControllerSpecificConfigEnum.ANDOR_ROI_BIN_COL.value
-
-        xstart = max(xmin_dev, xmin_user)
-        xend   = min(xmax_dev, xmax_user)
-        xbin   = min(xbin_user, (xend - xstart + 1))
-        assert (xend - xstart + 1) % xbin == 0, \
-            f"Invalid X ROI parameters: {xstart}, {xend}, {xbin}. " \
-            "The bin must divide the range evenly."
-
         # --- Single Track row parameters ---
         centre = int(ANDOR_SINGLE_TRACK_CENTRE)
         height = int(ANDOR_SINGLE_TRACK_HEIGHT)
@@ -1210,18 +1182,14 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         assert 1 <= height <= self._y_pixel, \
             f"ANDOR_SINGLE_TRACK_HEIGHT={height} is outside the valid range [1, {self._y_pixel}]."
 
-        # SetImage sets the horizontal ROI/binning for Single Track mode.
         # The vstart/vend arguments are ignored by the SDK in Single Track mode;
         # the row selection is handled exclusively by SetSingleTrack.
-        setImage(hbin=xbin, vbin=1, hstart=xstart, hend=xend, vstart=1, vend=self._y_pixel)
         setSingleTrack(centre_pixel=centre, height_pixel=height)
-
-        self._x_pixel    = int((xend - xstart + 1) / xbin)
+        
         self._y_pixel    = 1   # Single Track always produces a single output row
         self._total_pixel = self._x_pixel
 
         print(f"Single Track: centre={centre}, height={height}, "
-              f"xstart={xstart}, xend={xend}, xbin={xbin} "
               f"→ effective pixels: {self._x_pixel}")
             
     def get_integration_time_us(self) -> int:
