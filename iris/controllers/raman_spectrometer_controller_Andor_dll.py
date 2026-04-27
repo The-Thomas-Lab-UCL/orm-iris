@@ -49,6 +49,9 @@ from iris.controllers.class_spectrometer_controller import Class_SpectrometerCon
 from iris import DataAnalysisConfigEnum
 from iris.controllers import ControllerSpecificConfigEnum
 
+ANDOR_SINGLE_TRACK_CENTRE = 128
+ANDOR_SINGLE_TRACK_HEIGHT = 40
+
 # %% Andor dll imports
 # Add the path to the Andor SDK2 DLLs
 path_dll_andor = ControllerSpecificConfigEnum.ANDOR_ATMCD64D_DLL_PATH.value
@@ -980,9 +983,11 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         self._x_pixel, self._y_pixel = getDetector()
         self._total_pixel = self._x_pixel * self._y_pixel
         
-        # Detector ROI
-        self._set_ROI_parameters()
-        
+        # Detector ROI and readout mode
+        # Single Track collapses the user-defined row band on-chip before readout,
+        # giving the same 1-D output as FVB but for a configurable row window.
+        self._set_single_track_parameters()
+
         # --- Readout speed setup ---
         # VS speed: use the SDK's own recommended fastest index (not hardcoded).
         vs_idx, vs_speed_us = getFastestRecommendedVSSpeed()
@@ -1001,7 +1006,7 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         print(f"HS speed set to index 0 ({getHSSpeed(0):.3f} MHz)")
 
         # --- Acquisition mode: RunTillAbort for lowest per-frame overhead ---
-        setReadMode(mode='0. Full Vertical Binning')
+        setReadMode(mode='3. Single-Track')
         setAcquisitionMode(mode='5. RunTillAbort')
         setKineticCycleTime(0.0)   # minimum possible cycle time
         setTriggerMode('0. Internal')
@@ -1057,6 +1062,8 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         self._identifier = f"Andor_{getCameraSerialNumber()}"
         self._initialise_cooler()
         self._integration_time_us = self.get_integration_time_us()
+        self._stop_continuous_acquisition()  # ensure not acquiring before shutter config
+        self._open_ex_shutter()
         # Start the continuous acquisition loop now that everything is configured.
         with self._lock:
             self._start_continuous_acquisition()
@@ -1067,20 +1074,21 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         """
         with self._lock:
             self._stop_continuous_acquisition()
+        self._close_ex_shutter()
         self._cooler_shutdown_protocol()
         
     def _open_ex_shutter(self):
         """
         Open the external shutter if available.
         """
-        try: setShutterEx(1,1,100,100,1)
+        try: setShutterEx(1,1,100,100,5)  # type=1: TTL high = open, ext_mode=5: open for any series
         except Exception as e: print(f"Failed to open external shutter: {e}")
             
     def _close_ex_shutter(self):
         """
         Close the external shutter if available.
         """
-        try: setShutterEx(1,1,100,100,2)
+        try: setShutterEx(1,1,100,100,2)  # type=1: TTL high = open
         except Exception as e: print(f"Failed to close external shutter: {e}")
         
     def _initialise_cooler(self):
@@ -1164,6 +1172,57 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         print(f"ROI: xstart={xstart}, xend={xend}, xbin={xbin}, "
               f"ystart={ystart}, yend={yend}, ybin={ybin} "
               f"→ effective pixels: {self._x_pixel} x {self._y_pixel}")
+
+    def _set_single_track_parameters(self):
+        """
+        Set the Single Track readout parameters for the detector according to
+        the user-defined settings in the config.ini file.
+
+        Single Track collapses a user-defined horizontal band of rows on-chip
+        before readout, producing a 1-D spectrum of length x_pixel. The centre
+        row and track height are read from ANDOR_SINGLE_TRACK_CENTRE and
+        ANDOR_SINGLE_TRACK_HEIGHT in ControllerSpecificConfigEnum.
+
+        Only the column ROI / binning parameters (COL_MIN, COL_MAX, BIN_COL)
+        are applied here; row parameters are handled by SetSingleTrack itself.
+        """
+        # --- Column ROI (same logic as _set_ROI_parameters) ---
+        xmin_dev = 1
+        xmax_dev = self._x_pixel
+
+        xmin_user = ControllerSpecificConfigEnum.ANDOR_ROI_COL_MIN.value
+        xmax_user = ControllerSpecificConfigEnum.ANDOR_ROI_COL_MAX.value
+        xbin_user = ControllerSpecificConfigEnum.ANDOR_ROI_BIN_COL.value
+
+        xstart = max(xmin_dev, xmin_user)
+        xend   = min(xmax_dev, xmax_user)
+        xbin   = min(xbin_user, (xend - xstart + 1))
+        assert (xend - xstart + 1) % xbin == 0, \
+            f"Invalid X ROI parameters: {xstart}, {xend}, {xbin}. " \
+            "The bin must divide the range evenly."
+
+        # --- Single Track row parameters ---
+        centre = int(ANDOR_SINGLE_TRACK_CENTRE)
+        height = int(ANDOR_SINGLE_TRACK_HEIGHT)
+
+        assert 1 <= centre <= self._y_pixel, \
+            f"ANDOR_SINGLE_TRACK_CENTRE={centre} is outside the sensor row range [1, {self._y_pixel}]."
+        assert 1 <= height <= self._y_pixel, \
+            f"ANDOR_SINGLE_TRACK_HEIGHT={height} is outside the valid range [1, {self._y_pixel}]."
+
+        # SetImage sets the horizontal ROI/binning for Single Track mode.
+        # The vstart/vend arguments are ignored by the SDK in Single Track mode;
+        # the row selection is handled exclusively by SetSingleTrack.
+        setImage(hbin=xbin, vbin=1, hstart=xstart, hend=xend, vstart=1, vend=self._y_pixel)
+        setSingleTrack(centre_pixel=centre, height_pixel=height)
+
+        self._x_pixel    = int((xend - xstart + 1) / xbin)
+        self._y_pixel    = 1   # Single Track always produces a single output row
+        self._total_pixel = self._x_pixel
+
+        print(f"Single Track: centre={centre}, height={height}, "
+              f"xstart={xstart}, xend={xend}, xbin={xbin} "
+              f"→ effective pixels: {self._x_pixel}")
             
     def get_integration_time_us(self) -> int:
         """
@@ -1296,7 +1355,7 @@ if __name__ == "__main__":
     controller = SpectrometerController_Andor()
     controller._open_ex_shutter()
     
-    int_time_us = int(50e3)   # 100 ms
+    int_time_us = int(100e3)   # 100 ms
     controller.set_integration_time_us(int_time_us)
     print(f"Integration time set to {controller.get_integration_time_us()/1e3:.1f} ms")
 
@@ -1304,21 +1363,23 @@ if __name__ == "__main__":
     fig, ax = plt.subplots()
     t_start = time.time()
     count = 0
-    while True:
-        mea, _, _ = controller.measure_spectrum()
-        count += 1
-        elapsed = time.time() - t_start
-        if elapsed >= 1.0:
-            print(f"Throughput: {count / elapsed:.1f} frames/sec")
-            count = 0
-            t_start = time.time()
+    try:
+        while True:
+            mea, _, _ = controller.measure_spectrum()
+            count += 1
+            elapsed = time.time() - t_start
+            if elapsed >= 1.0:
+                print(f"Time taken: {elapsed / count * 1e3:.1f} ms. Throughput: {count / elapsed:.1f} frames/sec")
+                count = 0
+                t_start = time.time()
 
-        ax.clear()
-        ax.plot(mea[DataAnalysisConfigEnum.WAVELENGTH_LABEL.value],
-                mea[DataAnalysisConfigEnum.INTENSITY_LABEL.value])
-        fig.canvas.draw()
-        fig.canvas.flush_events()
-        if fig.waitforbuttonpress(1e-3): break
+            ax.clear()
+            ax.plot(mea[DataAnalysisConfigEnum.WAVELENGTH_LABEL.value],
+                    mea[DataAnalysisConfigEnum.INTENSITY_LABEL.value])
+            fig.canvas.draw()
+            fig.canvas.flush_events()
+            if fig.waitforbuttonpress(1e-3): break
+    except: pass
 
     # # Save the last measurement as a .sif file
     # try:
