@@ -1285,6 +1285,107 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         with self._lock:
             saveAsSif(path)
 
+    def capture_full_image_for_track_setup(self, integration_time_ms: float = 100.0) -> np.ndarray:
+        """
+        Capture a single full 2-D image of the sensor in Image mode and display
+        it with the current Single Track region overlaid. Intended as a setup
+        utility to help choose ANDOR_SINGLE_TRACK_CENTRE and
+        ANDOR_SINGLE_TRACK_HEIGHT.
+
+        The RunTillAbort acquisition loop is stopped before the image acquisition
+        and restarted afterwards with the original readout mode restored, so normal
+        operation is unaffected after this call returns.
+
+        Args:
+            integration_time_ms (float): Integration time for the image in milliseconds.
+
+        Returns:
+            np.ndarray: The captured full-sensor image (y_pixel × x_pixel).
+        """
+        with self._lock:
+            # --- Stop continuous acquisition ---
+            self._stop_continuous_acquisition()
+
+            # --- Switch temporarily to full Image mode ---
+            x_pixel_full, y_pixel_full = getDetector()
+            setReadMode(mode='4. Image')
+            setAcquisitionMode(mode='1. Single')
+            setImage(hbin=1, vbin=1, hstart=1, hend=x_pixel_full, vstart=1, vend=y_pixel_full)
+            setExposureTime(integration_time_ms * 1e-3)
+            setTriggerMode('0. Internal')
+            setKineticCycleTime(0.0)
+
+            # --- Acquire ---
+            print(f"Capturing full image ({x_pixel_full} x {y_pixel_full}) "
+                  f"at {integration_time_ms:.1f} ms integration...")
+            startAcquisition()
+            waitForAcquisition()
+            img = getAcquiredData(x_pixel_full * y_pixel_full).reshape(y_pixel_full, x_pixel_full)
+
+            # --- Restore original readout mode and restart ---
+            self._setup_readout_mode()
+            setAcquisitionMode(mode='5. RunTillAbort')
+            setKineticCycleTime(0.0)
+            setTriggerMode('0. Internal')
+            setExposureTime(self._integration_time_us * 1e-6)
+            self._start_continuous_acquisition()
+
+        # --- Plot ---
+        centre = ANDOR_SINGLE_TRACK_CENTRE
+        height = ANDOR_SINGLE_TRACK_HEIGHT
+        top    = centre - height // 2 - 1  # convert to 0-indexed for plotting
+        bottom = centre + height // 2 - 1
+
+        fig, axes = plt.subplots(2, 2, figsize=(14, 5),
+                                 gridspec_kw={'width_ratios': [3, 1]})
+
+        # Left: 2-D image with Single Track region overlaid
+        ax_img: Axes = axes[0,0]
+        im = ax_img.imshow(img, cmap='inferno', aspect='auto',
+                           extent=[1, x_pixel_full, y_pixel_full, 1])
+        ax_img.axhline(top,    color='cyan', linewidth=1.5, linestyle='--',
+                       label=f'Track top (row {top+1})')
+        ax_img.axhline(bottom, color='cyan', linewidth=1.5, linestyle='-',
+                       label=f'Track bottom (row {bottom+1})')
+        ax_img.axhline(centre, color='lime', linewidth=1.0, linestyle=':',
+                       label=f'Centre (row {centre})')
+        ax_img.set_xlabel('Column (pixel)')
+        ax_img.set_ylabel('Row (pixel)')
+        ax_img.set_title(f'Full sensor image — Single Track overlay\n'
+                         f'centre={centre}, height={height}')
+        ax_img.legend(fontsize=8, loc='upper right')
+        plt.colorbar(im, ax=ax_img, label='Counts')
+
+        # Right: row sum profile (vertical) to help identify signal band
+        ax_prof: Axes = axes[0,1]
+        row_sum = np.sum(img, axis=1)
+        ax_prof.plot(row_sum, np.arange(1, y_pixel_full + 1))
+        ax_prof.axhline(top + 1,    color='cyan', linewidth=1.5, linestyle='--')
+        ax_prof.axhline(bottom + 1, color='cyan', linewidth=1.5, linestyle='-')
+        ax_prof.axhline(centre,     color='lime', linewidth=1.0, linestyle=':')
+        ax_prof.invert_yaxis()
+        ax_prof.set_xlabel('Summed intensity')
+        ax_prof.set_ylabel('Row (pixel)')
+        ax_prof.set_title('Row sum profile')
+
+        # Bottom: Spectrum obtained by summing the full image over the Single Track rows, to verify it looks correct.
+        ax_spec: Axes = axes[1,0]
+        track_sum = np.sum(img[top:bottom+1, :], axis=0)
+        ax_spec.plot(np.arange(1, x_pixel_full + 1), track_sum)
+        ax_spec.set_xlabel('Column (pixel)')
+        ax_spec.set_ylabel('Summed intensity')
+        ax_spec.set_title('Spectrum from Single Track rows')
+                
+        plt.tight_layout()
+        plt.show()
+
+        print(f"Current Single Track: centre={centre}, height={height} "
+              f"(rows {top+1} – {bottom+1})")
+        print(f"To update: set ANDOR_SINGLE_TRACK_CENTRE and ANDOR_SINGLE_TRACK_HEIGHT "
+              f"at the top of this file.")
+
+        return img
+
 
 #%% Tests
 if __name__ == "__main__":
@@ -1310,6 +1411,9 @@ if __name__ == "__main__":
     # try: img = acquisition_test_img(); plot_img(img)
     # except Exception as e: print(f"Acquisition test failed: {e}")
     
+    # try: controller.capture_full_image_for_track_setup(integration_time_ms=100.0)
+    # except Exception as e: print(f"Track setup image failed: {e}")
+    
     # try: continuous_acquisition_test()
     # except Exception as e: print(f"Continuous acquisition test failed: {e}")
     
@@ -1321,6 +1425,11 @@ if __name__ == "__main__":
     # fig.show()
     
     controller = SpectrometerController_Andor()
+    
+    try:
+        matplotlib.use('TkAgg')
+        controller.capture_full_image_for_track_setup(integration_time_ms=100.0)
+    except Exception as e: print(f"Track setup image failed: {e}")
     
     int_time_us = int(100e3)   # 100 ms
     controller.set_integration_time_us(int_time_us)
