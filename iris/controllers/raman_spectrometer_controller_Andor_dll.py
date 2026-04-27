@@ -1321,7 +1321,6 @@ if __name__ == "__main__":
     # fig.show()
     
     controller = SpectrometerController_Andor()
-    controller._open_ex_shutter()
     
     int_time_us = int(100e3)   # 100 ms
     controller.set_integration_time_us(int_time_us)
