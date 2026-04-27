@@ -129,11 +129,11 @@ GetVSSpeed.restype = ctypes.c_uint
 
 SetVSSpeed = andorDLL.SetVSSpeed
 SetVSSpeed.argtypes = [ctypes.c_int] # [index of the speed to set]
-SetVSSpeed.restype = ctypes.c_uint
+SetVSSpeed.restype = ctypes.c_uint  # DRV_SUCCESS: Vertical speed set., DRV_NOT_INITIALIZED: System not initialized., DRV_NOT_AVAILABLE: Your system does not support this feature., DRV_ACQUIRING: Acquisition in progress., DRV_P1INVALID: Invalid speed index parameter.
 
 SetVSAmplitude = andorDLL.SetVSAmplitude
 SetVSAmplitude.argtypes = [ctypes.c_int] # [state of the amplitude: 0. Low, 1. High]
-SetVSAmplitude.restype = ctypes.c_uint
+SetVSAmplitude.restype = ctypes.c_uint  # DRV_SUCCESS: Amplitude set., DRV_NOT_INITIALIZED: System not initialized., DRV_NOT_AVAILABLE: Your system does not support this feature., DRV_ACQUIRING: Acquisition in progress., DRV_P1INVALID: Invalid amplitude parameter.
 
 # >>> Horizontal shift speed (NEW)
 # unsigned int WINAPI GetNumberHSSpeeds(int channel, int typ, int* speeds)
@@ -151,21 +151,22 @@ SetHSSpeed = andorDLL.SetHSSpeed
 SetHSSpeed.argtypes = [ctypes.c_int, ctypes.c_int]
 SetHSSpeed.restype = ctypes.c_uint
 
+# unsigned int WINAPI SetShutterEx(int typ, int mode, int closingtime, int openingtime, int extmode)
 SetShutterEx = andorDLL.SetShutterEx
-SetShutterEx.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
-SetShutterEx.restype = ctypes.c_uint
+SetShutterEx.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int] # [type, mode, closing time in ms, opening time in ms, external mode]
+SetShutterEx.restype = ctypes.c_uint # DRV_SUCCESS: Shutter set., DRV_NOT_INITIALIZED: System not initialized., DRV_ACQUIRING: Acquisition in progress., DRV_ERROR_ACK: Unable to communicate with card., DRV_NOT_SUPPORTED: Camera does not support shutter control., DRV_P1INVALID: Invalid TTL type., DRV_P2INVALID: Invalid internal mode., DRV_P3INVALID: Invalid time to close., DRV_P4INVALID: Invalid time to open., DRV_P5INVALID: Invalid external mode.
 
 # >>> Temperature
 GetTemperatureRange = andorDLL.GetTemperatureRange
-GetTemperatureRange.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
+GetTemperatureRange.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)] # Min and max temp
 GetTemperatureRange.restype = ctypes.c_uint
 
 SetTemperature = andorDLL.SetTemperature
-SetTemperature.argtypes = [ctypes.c_int]
+SetTemperature.argtypes = [ctypes.c_int] # [temperature]
 SetTemperature.restype = ctypes.c_uint
 
 GetTemperature = andorDLL.GetTemperature
-GetTemperature.argtypes = [ctypes.POINTER(ctypes.c_int)]
+GetTemperature.argtypes = [ctypes.POINTER(ctypes.c_int)] # [temperature]
 GetTemperature.restype = ctypes.c_uint
 
 CoolerON = andorDLL.CoolerON
@@ -178,30 +179,46 @@ CoolerOFF.restype = ctypes.c_uint
 
 # >>> Readout settings
 SetReadMode = andorDLL.SetReadMode
-SetReadMode.argtypes = [ctypes.c_int]
+SetReadMode.argtypes = [ctypes.c_int] # [readout mode index: 0-FVB,1-MultiTrack,2-RandomTrack,3-SingleTrack,4-Image]
 SetReadMode.restype = ctypes.c_uint
 
 SetImage = andorDLL.SetImage
-SetImage.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+SetImage.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int] # [hbin, vbin, hstart, hend, vstart, vend]
+    # int hbin: number of pixels to bin horizontally.
+    # int vbin: number of pixels to bin vertically.
+    # int hstart: Start column (inclusive).
+    # int hend: End column (inclusive).
+    # int vstart: Start row (inclusive).
+    # int vend: End row (inclusive)
 SetImage.restype = ctypes.c_uint
+    # DRV_SUCCESS: All parameters accepted.
+    # DRV_NOT_INITIALIZED: System not initialized.
+    # DRV_ACQUIRING: Acquisition in progress.
+    # DRV_P1INVALID: Binning parameters invalid.
+    # DRV_P2INVALID: Binning parameters invalid.
+    # DRV_P3INVALID: Sub-area co-ordinate is invalid.
+    # DRV_P4INVALID: Sub-area co-ordinate is invalid.
+    # DRV_P5INVALID: Sub-area co-ordinate is invalid.
+    # DRV_P6INVALID: Sub-area co-ordinate is invalid.
 
 SetAcquisitionMode = andorDLL.SetAcquisitionMode
-SetAcquisitionMode.argtypes = [ctypes.c_int]
+SetAcquisitionMode.argtypes = [ctypes.c_int] # [acquisition mode index: 1-singleScan,2-accumulate,3-kinetics,4-fastKinetics,5-RunTillAbort]
 SetAcquisitionMode.restype = ctypes.c_uint
 
-AbortAcquisition = andorDLL.AbortAcquisition
+AbortAcquisition = andorDLL.AbortAcquisition # Aborts acquisition for the RunTillAbort mode
 AbortAcquisition.argtypes = []
 AbortAcquisition.restype = ctypes.c_uint
 
-WaitForAcquisition = andorDLL.WaitForAcquisition
+# unsigned int WINAPI WaitForAcquisition(void)
+WaitForAcquisition = andorDLL.WaitForAcquisition # Blocks the calling thread until acquisition is complete
 WaitForAcquisition.argtypes = []
-WaitForAcquisition.restype = ctypes.c_uint
+WaitForAcquisition.restype = ctypes.c_uint # DRV_SUCCESS: Acquisition complete., DRV_NOT_INITIALIZED: System not initialized., DRV_NO_NEW_DATA: Non-Acquisition Event occurred.(e.g. CancelWait () called)
 
-WaitForAcquisitionTimeOut = andorDLL.WaitForAcquisitionTimeOut
-WaitForAcquisitionTimeOut.argtypes = [ctypes.c_int]
+WaitForAcquisitionTimeOut  = andorDLL.WaitForAcquisitionTimeOut  # Blocks the calling thread until acquisition is complete
+WaitForAcquisitionTimeOut.argtypes = [ctypes.c_int] # [timeout in milliseconds]
 WaitForAcquisitionTimeOut.restype = ctypes.c_uint
 
-CancelWait = andorDLL.CancelWait
+CancelWait = andorDLL.CancelWait # Cancels the wait for acquisition blocking event
 CancelWait.argtypes = []
 CancelWait.restype = ctypes.c_uint
 
@@ -209,53 +226,55 @@ PrepareAcquisition = andorDLL.PrepareAcquisition
 PrepareAcquisition.argtypes = []
 PrepareAcquisition.restype = ctypes.c_uint
 
-StartAcquisition = andorDLL.StartAcquisition
+StartAcquisition = andorDLL.StartAcquisition # Starts the acquisition process
 StartAcquisition.argtypes = []
-StartAcquisition.restype = ctypes.c_uint
+StartAcquisition.restype = ctypes.c_uint # Read the docs for the return value references
 
 SetExposureTime = andorDLL.SetExposureTime
-SetExposureTime.argtypes = [ctypes.c_float]
+SetExposureTime.argtypes = [ctypes.c_float] # [exposure time in seconds]
 SetExposureTime.restype = ctypes.c_uint
 
 GetAcquisitionTimings = andorDLL.GetAcquisitionTimings
-GetAcquisitionTimings.argtypes = [ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float)]
+GetAcquisitionTimings.argtypes = [ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float)] # [exposure time [s], accummulate [s], kinetic time [s]]
 GetAcquisitionTimings.restype = ctypes.c_uint
 
 SetSingleTrack = andorDLL.SetSingleTrack
-SetSingleTrack.argtypes = [ctypes.c_int, ctypes.c_int]
+SetSingleTrack.argtypes = [ctypes.c_int, ctypes.c_int] # [idx center of track, idx height]
 SetSingleTrack.restype = ctypes.c_uint
 
 SendSoftwareTrigger = andorDLL.SendSoftwareTrigger
 SendSoftwareTrigger.argtypes = []
-SendSoftwareTrigger.restype = ctypes.c_uint
+SendSoftwareTrigger.restype = ctypes.c_uint # 
 
 IsTriggerModeAvailable = andorDLL.IsTriggerModeAvailable
-IsTriggerModeAvailable.argtypes = [ctypes.c_int]
-IsTriggerModeAvailable.restype = ctypes.c_uint
+IsTriggerModeAvailable.argtypes = [ctypes.c_int] # [trigger mode index (see set trigger mode)]
+IsTriggerModeAvailable.restype = ctypes.c_uint # DRV_SUCCESS or DRV_INVALID_MODE for available and not available respectively
 
 SetTriggerMode = andorDLL.SetTriggerMode
-SetTriggerMode.argtypes = [ctypes.c_int]
-SetTriggerMode.restype = ctypes.c_uint
+SetTriggerMode.argtypes = [ctypes.c_int] # [trigger mode index: 0. Internal, 1. External, 6. External Start, 7. External Exposure (Bulb), 9. External FVB EM (only valid for EM Newton models in FVB mode), 10. Software Trigger, 12. External Charge Shifting]
+SetTriggerMode.restype = ctypes.c_uint # DRV_SUCCESS : Trigger mode set., DRV_NOT_INITIALIZED : System not initialized., DRV_ACQUIRING : Acquisition in progress., DRV_P1INVALID : Trigger mode invalid.
 
 SetKineticCycleTime = andorDLL.SetKineticCycleTime
-SetKineticCycleTime.argtypes = [ctypes.c_float]
-SetKineticCycleTime.restype = ctypes.c_uint
+SetKineticCycleTime.argtypes = [ctypes.c_float] # [kinetic cycle time in seconds]
+SetKineticCycleTime.restype = ctypes.c_uint # DRV_SUCCESS: Cycle time accepted., DRV_NOT_INITIALIZED: System not initialized., DRV_ACQUIRING: Acquisition in progress., DRV_P1INVALID: Time invalid.
 
 SetNumberAccumulations = andorDLL.SetNumberAccumulations
-SetNumberAccumulations.argtypes = [ctypes.c_int]
-SetNumberAccumulations.restype = ctypes.c_uint
+SetNumberAccumulations.argtypes = [ctypes.c_int] # [number of accumulations]
+SetNumberAccumulations.restype = ctypes.c_uint # DRV_SUCCESS: Number of accumulations set., DRV_NOT_INITIALIZED: System not initialized., DRV_ACQUIRING: Acquisition in progress., DRV_P1INVALID: Invalid number of accumulations.
 
 GetMostRecentImage = andorDLL.GetMostRecentImage
-GetMostRecentImage.argtypes = [ctypes.POINTER(ctypes.c_long), ctypes.c_ulong]
-GetMostRecentImage.restype = ctypes.c_uint
+GetMostRecentImage.argtypes = [ctypes.POINTER(ctypes.c_long),ctypes.c_ulong] # [array to store the image, sized to the sensor, number of pixels]
+GetMostRecentImage.restype = ctypes.c_uint # DRV_SUCCESS: Image has been copied into array., DRV_NOT_INITIALIZED: System not initialized., DRV_ERROR_ACK: Unable to communicate with card., DRV_P1INVALID: Invalid pointer (i.e. NULL)., DRV_P2INVALID: Array size is incorrect., DRV_NO_NEW_DATA: There is no new data yet.
 
+# unsigned int WINAPI GetAcquiredData(at_32* arr, unsigned long size)
 GetAcquiredData = andorDLL.GetAcquiredData
-GetAcquiredData.argtypes = [ctypes.POINTER(ctypes.c_int32), ctypes.c_ulong]
-GetAcquiredData.restype = ctypes.c_uint
+GetAcquiredData.argtypes = [ctypes.POINTER(ctypes.c_int32),ctypes.c_ulong] # [array to store the data, sized to the sensor, number of pixels]
+GetAcquiredData.restype = ctypes.c_uint # DRV_SUCCESS: Data has been copied into array., DRV_NOT_INITIALIZED: System not initialized., DRV_ERROR_ACK: Unable to communicate with card., DRV_P1INVALID: Invalid pointer (i.e. NULL)., DRV_P2INVALID: Array size is incorrect., DRV_NO_NEW_DATA: There is no new data yet.
 
+#>>> Save settings <<<
 SaveAsSif = andorDLL.SaveAsSif
-SaveAsSif.argtypes = [ctypes.c_char_p]
-SaveAsSif.restype = ctypes.c_uint
+SaveAsSif.argtypes = [ctypes.c_char_p]  # char* path
+SaveAsSif.restype = ctypes.c_uint   # unsigned int return
 
 #%% Device responses
 DRV_SUCCESS = 20002
@@ -349,17 +368,35 @@ class ErrorCodes(Enum):
     DRV_INVALID_COUNTCONVERT_MODE = 20101
 
 def read_return_message(error_code) -> str|None:
+    """
+    Returns the error message corresponding to the given error code.
+
+    Args:
+        error_code (int): The error code to look up.
+
+    Returns:
+        str: The corresponding error message, or None if the code is for DRV_SUCCESS.
+    """
     if error_code == ErrorCodes.DRV_SUCCESS.value: return None
     try: return ErrorCodes(error_code).name
     except ValueError: return "Unknown error"
 
 #%% Function wrappers
 def initialize(dirpath: str) -> None:
+    """
+    Initialize the Andor SDK and set the working directory.
+    
+    Raises:
+        RuntimeError: If initialization fails.
+    """
     ret = Initialize(dirpath.encode('utf-8'))
     if read_return_message(ret):
         raise RuntimeError(f"Failed to initialize Andor SDK: {ret}")
 
 def shutdown() -> None:
+    """
+    Shutdown the Andor SDK and release resources.
+    """
     try: abortAcquisition()
     except: pass
     ret = Shutdown()
@@ -367,6 +404,12 @@ def shutdown() -> None:
         raise RuntimeError(f"Failed to shutdown Andor SDK: {ret}")
 
 def getCameraSerialNumber() -> int:
+    """
+    Get the camera serial number.
+
+    Returns:
+        int: The camera serial number.
+    """
     serial_number = ctypes.c_int()
     ret = GetCameraSerialNumber(ctypes.byref(serial_number))
     msg = read_return_message(ret)
@@ -374,6 +417,12 @@ def getCameraSerialNumber() -> int:
     return serial_number.value
 
 def getDetector() -> tuple[int,int]:
+    """
+    Get the sensor size [pixel x pixel]
+
+    Returns:
+        tuple[int,int]: The x and y pixels of the sensor in pixels.
+    """
     x_pixel = ctypes.c_int()
     y_pixel = ctypes.c_int()
     ret = GetDetector(ctypes.byref(x_pixel), ctypes.byref(y_pixel))
@@ -382,6 +431,12 @@ def getDetector() -> tuple[int,int]:
     return x_pixel.value, y_pixel.value
 
 def getFastestRecommendedVSSpeed() -> tuple[int, float]:
+    """
+    Get the list of the fastest recommended vertical shift speeds.
+
+    Returns:
+        tuple[int, float]: The index and the fastest recommended vertical shift speed in microseconds.
+    """
     speed = ctypes.c_float()
     index = ctypes.c_int()
     ret = GetFastestRecommendedVSSpeed(ctypes.byref(index), ctypes.byref(speed))
@@ -390,6 +445,12 @@ def getFastestRecommendedVSSpeed() -> tuple[int, float]:
     return index.value, speed.value
 
 def getNumberVSSpeeds() -> int:
+    """
+    Get the number of available vertical shift speeds.
+
+    Returns:
+        int: The number of available vertical shift speeds.
+    """
     num_speeds = ctypes.c_int()
     ret = GetNumberVSSpeeds(ctypes.byref(num_speeds))
     msg = read_return_message(ret)
@@ -397,6 +458,15 @@ def getNumberVSSpeeds() -> int:
     return num_speeds.value
 
 def getVSSpeed(index: int) -> float:
+    """
+    Get the current vertical shift speed in microseconds per pixel shift for the given index.
+    
+    Args:
+        index (int): The index of the vertical shift speed to get.
+    
+    Returns:
+        float: The current vertical shift speed in microseconds.
+    """
     speed = ctypes.c_float()
     ret = GetVSSpeed(ctypes.c_int(index), ctypes.byref(speed))
     msg = read_return_message(ret)
@@ -404,11 +474,28 @@ def getVSSpeed(index: int) -> float:
     return speed.value
 
 def setVSSpeed(index: int) -> None:
+    """
+    Set the vertical shift speed.
+
+    Args:
+        index (int): The index of the vertical shift speed to set. Refer to getFastestRecommendedVSSpeed() for the list of available speeds and their corresponding indices.
+    """
     ret = SetVSSpeed(ctypes.c_int(index))
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to set vertical shift speed: {msg}")
     
 def setVSAmplitude(level: int) -> None:
+    """
+    Set the vertical shift amplitude. (0 to 4 for +0 to +4 respectively, with 0 for normal amplitude)
+    
+    NOTE: Exercise caution when increasing the amplitude of the vertical clock voltage, since higher
+    clocking voltages may result in increased clock-induced charge (noise) in your signal. In
+    general, only the very highest vertical clocking speeds are likely to benefit from an
+    increased vertical clock voltage amplitude.
+    
+    Args:
+        level (int): The level of the vertical shift amplitude to set.
+    """
     ret = SetVSAmplitude(ctypes.c_int(level))
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to set vertical shift amplitude: {msg}")
@@ -473,11 +560,39 @@ def setHSSpeed(index: int, typ: int = _HS_TYP) -> None:
     if msg: raise RuntimeError(f"Failed to set HS speed: {msg}")
 
 def setShutterEx(type: int, mode: int, closing_time: int, opening_time: int, ext_mode: int) -> None:
+    """
+    Set the shutter parameters.
+
+    Args:
+        type (int): TTL signal type to control the shutter (
+            0: Output TTL low signal to open shutter,
+            1: Output TTL high signal to open shutter).
+        mode (int): Shutter mode (
+            0: Fully Auto,
+            1: Permanently Open,
+            2: Permanently Closed,
+            4: Open for FVB series,
+            5: Open for any series).
+        closing_time (int): Time shutter takes to close in milliseconds.
+        opening_time (int): Time shutter takes to open in milliseconds.
+        ext_mode (int): External mode (
+            0: Fully Auto,
+            1: Permanently Open,
+            2: Permanently Closed,
+            4: Open for FVB series,
+            5: Open for any series).
+    """
     ret = SetShutterEx(ctypes.c_int(type), ctypes.c_int(mode), ctypes.c_int(closing_time), ctypes.c_int(opening_time), ctypes.c_int(ext_mode))
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to set shutter parameters: {msg}")
 
 def getTemperatureRange() -> tuple[float, float]:
+    """
+    Get the temperature range of the Andor SDK.
+
+    Returns:
+        tuple[float, float]: The minimum and maximum temperature.
+    """
     min_temp = ctypes.c_float()
     max_temp = ctypes.c_float()
     ret = GetTemperatureRange(ctypes.byref(min_temp), ctypes.byref(max_temp))
@@ -486,33 +601,72 @@ def getTemperatureRange() -> tuple[float, float]:
     return min_temp.value, max_temp.value
 
 def setTemperature(target_temp: int) -> None:
+    """
+    Set the temperature of the Andor SDK.
+
+    Args:
+        target_temp (int): The target temperature to set [degC].
+    """
     target_temp = int(target_temp)
     ret = SetTemperature(ctypes.c_int(target_temp))
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to set temperature: {msg}")
 
 def getTemperature() -> int:
+    """
+    Get the current temperature of the Andor SDK.
+
+    Returns:
+        int: The current temperature [degC].
+    """
     current_temp = ctypes.c_int()
     GetTemperature(ctypes.byref(current_temp))
     return current_temp.value
 
 def coolerON() -> None:
+    """
+    Turn on the cooler of the Andor SDK.
+    """
     ret = CoolerON()
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to turn on cooler: {msg}")
 
 def coolerOFF() -> None:
+    """
+    Turn off the cooler of the Andor SDK.
+    """
     ret = CoolerOFF()
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to turn off cooler: {msg}")
 
 def checkCoolingStatus() -> None:
+    """
+    Checks if the target temperature has been achieved.
+
+    Raises:
+        RuntimeError: If the return value is not DRV_TEMPERATURE_STABILIZED.
+            (either not reached, not stabilised, or error occurred)
+    """
     current_temp = ctypes.c_int()
     ret = GetTemperature(ctypes.byref(current_temp))
     if ret != ErrorCodes.DRV_TEMPERATURE_STABILIZED.value:
         raise RuntimeError(f"Failed to get cooling status: {read_return_message(ret)}")
 
 def setImage(hbin:int, vbin:int, hstart:int, hend:int, vstart:int, vend:int) -> None:
+    """
+    Set the image parameters for the instrument (only for the 'Image' mode!).
+    Example to get a full image: SetImage(1,1,1,1024,1,256) for a 1024x256 detector.
+    Refer to page 41 (Section 3 - Readout modes - Image) of the Andor SDK2 programming manual
+    for more details.
+
+    Args:
+        hbin (int): Number of pixels to bin horizontally.
+        vbin (int): Number of pixels to bin vertically.
+        hstart (int): Start column (inclusive).
+        hend (int): End column (inclusive).
+        vstart (int): Start row (inclusive).
+        vend (int): End row (inclusive).
+    """
     ret = SetImage(ctypes.c_int(hbin), ctypes.c_int(vbin), ctypes.c_int(hstart), ctypes.c_int(hend), ctypes.c_int(vstart), ctypes.c_int(vend))
     if ret == ErrorCodes.DRV_NOT_INITIALIZED.value: raise RuntimeError('System not initialized')
     elif ret == ErrorCodes.DRV_ACQUIRING.value: raise RuntimeError('Acquisition in progress')
@@ -525,6 +679,13 @@ def setImage(hbin:int, vbin:int, hstart:int, hend:int, vstart:int, vend:int) -> 
 
 def setReadMode(mode:Literal['0. Full Vertical Binning', '1. Multi-Track', '2. Random-Track',
                              '3. Single-Track', '4. Image']) -> None:
+    """
+    Set the read mode of the Andor SDK.
+
+    Args:
+        mode (Literal['0. Full Vertical Binning', '1. Multi-Track', '2. Random-Track',
+            '3. Single-Track', '4. Image']): The read mode to set.
+    """
     if mode not in ['0. Full Vertical Binning', '1. Multi-Track', '2. Random-Track',
                     '3. Single-Track', '4. Image']: raise ValueError(f"Invalid read mode: {mode}")
     mode_cint = ctypes.c_int(int(mode.split('.')[0]))
@@ -533,6 +694,12 @@ def setReadMode(mode:Literal['0. Full Vertical Binning', '1. Multi-Track', '2. R
     if msg: raise RuntimeError(f"Failed to set read mode: {msg}")
 
 def setAcquisitionMode(mode:Literal['1. Single','2. Accumulate','3. Kinetics','4. FastKinetics','5. RunTillAbort']) -> None:
+    """
+    Set the acquisition mode of the Andor SDK.
+
+    Args:
+        mode (Literal['1. Single','2. Accumulate','3. Kinetics','4. FastKinetics','5. RunTillAbort']): The acquisition mode to set.
+    """
     if mode not in ['1. Single','2. Accumulate','3. Kinetics','4. FastKinetics','5. RunTillAbort']: raise ValueError(f"Invalid acquisition mode: {mode}")
     mode_cint = ctypes.c_int(int(mode.split('.')[0]))
     ret = SetAcquisitionMode(mode_cint)
@@ -540,38 +707,69 @@ def setAcquisitionMode(mode:Literal['1. Single','2. Accumulate','3. Kinetics','4
     if msg: raise RuntimeError(f"Failed to set acquisition mode: {msg}")
 
 def abortAcquisition() -> None:
+    """
+    Abort the current acquisition on the Andor SDK.
+    """
     ret = AbortAcquisition()
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to abort acquisition: {msg}")
 
 def waitForAcquisition() -> bool:
+    """
+    Wait for the acquisition to complete.
+
+    Returns:
+        bool: True if the acquisition completed successfully, False if a non-acquisition event occurred (e.g. CancelWait called).
+    """
     ret = WaitForAcquisition()
     if ret == ErrorCodes.DRV_SUCCESS.value: return True
     elif ret == ErrorCodes.DRV_NO_NEW_DATA.value: return False
     else: raise RuntimeError(f"Failed to wait for acquisition: {read_return_message(ret)}")
 
 def waitForAcquisitionTimeOut(timeout_ms:int|float) -> bool:
+    """
+    Wait for the acquisition to complete or time out.
+
+    Args:
+        timeout_ms (int): The timeout duration in milliseconds.
+        
+    Returns:
+        bool: True if the acquisition completed successfully, False if it timed out.
+    """
     timeout_ms = int(timeout_ms)
     ret = WaitForAcquisitionTimeOut(ctypes.c_int(timeout_ms))
     if ret == ErrorCodes.DRV_NO_NEW_DATA.value: return False
     else: return True
 
 def cancelWait() -> None:
+    """
+    Cancel the wait for acquisition timeout.
+    """
     ret = CancelWait()
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to cancel wait: {msg}")
 
 def prepareAcquisition() -> None:
+    """
+    Prepare the acquisition. It is also automatically called by startAcquisition
+    but, calling this early might save time prior to the actual acquisition.
+    """
     ret = PrepareAcquisition()
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to prepare acquisition: {msg}")
 
 def startAcquisition() -> None:
+    """
+    Start the acquisition on the Andor SDK.
+    """
     ret = StartAcquisition()
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to start acquisition: {msg}")
 
 def setExposureTime(exposure_time_sec:float) -> None:
+    """
+    Set the exposure time for the Andor SDK.
+    """
     exposure_time_sec = float(exposure_time_sec)
     exposure_time_cfloat = ctypes.c_float(exposure_time_sec)
     ret = SetExposureTime(exposure_time_cfloat)
@@ -579,6 +777,13 @@ def setExposureTime(exposure_time_sec:float) -> None:
     if msg: raise RuntimeError(f"Failed to set exposure time: {msg}")
 
 def getAcquisitionTimings_sec() -> tuple[float, float, float]:
+    """
+    Get the acquisition timings of the current instrument setup (readout and trigger settings).
+    Refer to page 46 (Section 4 - Kinetic Series) of the Andor SDK2 programming manual.
+    
+    Returns:
+        tuple[float, float, float]: The exposure time, accumulate cycle time, and kinetic cycle times, all in [sec]
+    """
     exposure_time = ctypes.c_float()
     accumulate_cycle_time = ctypes.c_float()
     kinetic_cycle_time = ctypes.c_float()
@@ -588,6 +793,13 @@ def getAcquisitionTimings_sec() -> tuple[float, float, float]:
     return exposure_time.value, accumulate_cycle_time.value, kinetic_cycle_time.value
 
 def setSingleTrack(centre_pixel:int,height_pixel:int) -> None:
+    """
+    Set the single track mode for the Andor SDK.
+    
+    Args:
+        centre_pixel (int): The centre pixel for the single track.
+        height_pixel (int): The height pixel for the single track.
+    """
     centre_pixel = int(centre_pixel)
     height_pixel = int(height_pixel)
     ret = SetSingleTrack(ctypes.c_int(centre_pixel), ctypes.c_int(height_pixel))
@@ -595,6 +807,9 @@ def setSingleTrack(centre_pixel:int,height_pixel:int) -> None:
     elif ret == ErrorCodes.DRV_P2INVALID.value: raise ValueError('Track height invalid')
 
 def sendSoftwareTrigger() -> None:
+    """
+    Send a software trigger to the instrument
+    """
     ret = SendSoftwareTrigger()
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to send software trigger: {msg}")
@@ -602,6 +817,12 @@ def sendSoftwareTrigger() -> None:
 def isTriggerModeAvailable(mode:Literal[ '0. Internal', '1. External', '6. External Start',
     '7. External Exposure (Bulb)', '9. External FVB EM', '10. Software Trigger',
     '12. External Charge Shifting']) -> bool:
+    """
+    Check if the trigger mode is available on the instrument.
+    
+    Args:
+        mode (Literal): The trigger mode to check.
+    """
     mode_idx = int(mode.split('.')[0])
     ret = IsTriggerModeAvailable(ctypes.c_int(mode_idx))
     if ret == ErrorCodes.DRV_SUCCESS.value: return True
@@ -611,6 +832,16 @@ def isTriggerModeAvailable(mode:Literal[ '0. Internal', '1. External', '6. Exter
 def setTriggerMode(mode:Literal[ '0. Internal', '1. External', '6. External Start',
     '7. External Exposure (Bulb)', '9. External FVB EM', '10. Software Trigger',
     '12. External Charge Shifting']) -> bool:
+    """
+    Check if the trigger mode is available on the instrument.
+    
+    Args:
+        mode (Literal): The trigger mode to set.
+        
+    Raises:
+        RuntimeError: If the trigger mode cannot be set.
+        ValueError: If the trigger mode is invalid.
+    """
     if mode not in ['0. Internal', '1. External', '6. External Start',
                     '7. External Exposure (Bulb)', '9. External FVB EM', '10. Software Trigger',
                     '12. External Charge Shifting']:
@@ -624,16 +855,44 @@ def setTriggerMode(mode:Literal[ '0. Internal', '1. External', '6. External Star
     else: raise RuntimeError(f"Failed to set trigger mode: {read_return_message(ret)}")
 
 def setKineticCycleTime(time_sec: float) -> None:
+    """
+    Set the kinetic cycle time for the Andor SDK.
+    """
     ret = SetKineticCycleTime(ctypes.c_float(float(time_sec)))
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to set kinetic cycle time: {msg}")
 
 def setNumberAccumulations(num_accum:int) -> None:
+    """
+    This function will set the number of scans accumulated in memory. This will only take
+    effect if the acquisition mode is either Accumulate or Kinetic Series.
+    
+    Args:
+        num_accum (int): The number of accumulations to set.
+    """
     ret = SetNumberAccumulations(ctypes.c_int(int(num_accum)))
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to set number of accumulations: {msg}")
     
 def getMostRecentImage(xpixel:int, ypixel:int, total_pixels:int) -> np.ndarray:
+    """
+    Get the most recent image from the instrument.
+    
+    Args:
+        xpixel (int): The x pixel size
+        ypixel (int): The y pixel size
+        total_pixels (int): The total number of pixels
+        
+    Raises:
+        RuntimeError("Library is not initialised")
+        RuntimeError("Unable to communicate with card")
+        SyntaxError("Invalid pointer (i.e. NULL).")
+        ValueError("Array size is incorrect.")
+        BufferError("There is no new data yet")
+        
+    Returns:
+        np.ndarray: The most recent image
+    """
     total_pixels = xpixel * ypixel
     image_array = (ctypes.c_long * total_pixels)()
     ret = GetMostRecentImage(image_array, ctypes.c_ulong(total_pixels))
@@ -645,6 +904,23 @@ def getMostRecentImage(xpixel:int, ypixel:int, total_pixels:int) -> np.ndarray:
     return np.ctypeslib.as_array(image_array).reshape((ypixel, xpixel))
 
 def getAcquiredData(total_pixels:int) -> np.ndarray:
+    """
+    Get the acquired data from the instrument.
+    
+    Args:
+        total_pixels (int): The total number of pixels
+    
+    Raises:
+        RuntimeError("Library is not initialised")
+        RuntimeError("Acquisition in progress")
+        RuntimeError("Unable to communicate with card")
+        SyntaxError("Invalid pointer (i.e. NULL).")
+        ValueError("Array size is incorrect.")
+        BufferError("There is no new data yet")
+    
+    Returns:
+        np.ndarray: The acquired data
+    """
     data_array = (ctypes.c_int32 * total_pixels)()
     ret = GetAcquiredData(data_array, ctypes.c_ulong(total_pixels))
     if ret == ErrorCodes.DRV_NOT_INITIALIZED.value: raise RuntimeError("Library is not initialised")
@@ -656,6 +932,19 @@ def getAcquiredData(total_pixels:int) -> np.ndarray:
     return np.ctypeslib.as_array(data_array)
 
 def saveAsSif(path: str) -> None:
+    """
+    Saves the data from the last acquisition into a .sif file.
+
+    Args:
+        path (str): The full file path where the data should be saved.
+
+    Raises:
+        RuntimeError: System not initialized or communication error.
+        ChildProcessError: Acquisition is still in progress.
+        ValueError: Invalid filename/path.
+        MemoryError: File too large to be generated in memory.
+    """
+    # Convert python string to bytes for the C function
     path_bytes = path.encode('utf-8')
     ret = SaveAsSif(path_bytes)
     if ret == ErrorCodes.DRV_SUCCESS.value: return
@@ -667,7 +956,9 @@ def saveAsSif(path: str) -> None:
     else: raise Exception(f"Unknown error occurred. Return code: {ret}")
 
 #%% KEY PARAMETERS
-SAFE_SHUTDOWN_TEMP = -10
+SAFE_SHUTDOWN_TEMP = -10    # Temperature above which it is safe for the device to be shut down.
+                            # Any lower temperatures risks DAMAGING the sensor in the long term.
+                            # Naturally, DO NOT MODIFY THIS CONSTANT! Safe temp: -20degC
 assert SAFE_SHUTDOWN_TEMP >= -20, f"Safe shutdown temperature must be at least -20 degC, but got {SAFE_SHUTDOWN_TEMP} degC"
 
 #%% Controller class definition
@@ -749,11 +1040,20 @@ class SpectrometerController_Andor(Class_SpectrometerController):
     # ------------------------------------------------------------------
 
     def get_identifier(self) -> str:
+        """
+        Returns the unique identifier of the spectrometer controller.
+        
+        Returns:
+            str: The unique identifier of the spectrometer controller.
+        """
         if self._identifier is None:
             self._identifier = f"Andor_{getCameraSerialNumber()}"
         return self._identifier
         
     def initialisation(self):
+        """
+        Initialises the spectrometer controller
+        """
         self._identifier = f"Andor_{getCameraSerialNumber()}"
         self._initialise_cooler()
         self._integration_time_us = self.get_integration_time_us()
@@ -762,15 +1062,24 @@ class SpectrometerController_Andor(Class_SpectrometerController):
             self._start_continuous_acquisition()
         
     def terminate(self):
+        """
+        Terminates the spectrometer controller according to the manufacturer's protocol
+        """
         with self._lock:
             self._stop_continuous_acquisition()
         self._cooler_shutdown_protocol()
         
     def _open_ex_shutter(self):
+        """
+        Open the external shutter if available.
+        """
         try: setShutterEx(1,1,100,100,1)
         except Exception as e: print(f"Failed to open external shutter: {e}")
             
     def _close_ex_shutter(self):
+        """
+        Close the external shutter if available.
+        """
         try: setShutterEx(1,1,100,100,2)
         except Exception as e: print(f"Failed to close external shutter: {e}")
         
@@ -801,6 +1110,9 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         self._lock.release()
         
     def _cooler_shutdown_protocol(self):
+        """
+        Shutdown protocol for the cooler.
+        """
         self._lock.acquire()
         coolerOFF()
         i=0
@@ -812,6 +1124,10 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         self._lock.release()
         
     def _set_ROI_parameters(self):
+        """
+        Set the Region of Interest (ROI) parameters for the detector according to
+        the user-defined settings in the config.ini file.
+        """
         xmin_dev = 1
         xmax_dev = self._x_pixel
         ymin_dev = 1
@@ -850,6 +1166,12 @@ class SpectrometerController_Andor(Class_SpectrometerController):
               f"→ effective pixels: {self._x_pixel} x {self._y_pixel}")
             
     def get_integration_time_us(self) -> int:
+        """
+        Returns the integration time of the device
+        
+        Returns:
+            int: Integration time in microseconds
+        """
         with self._lock:
             exposure_sec, _, kinetic_sec = getAcquisitionTimings_sec()
         self._integration_time_us = int(exposure_sec * 1e6)
@@ -857,6 +1179,12 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         return self._integration_time_us
     
     def get_integration_time_limits_us(self):
+        """
+        Get the integration time limits of the device
+
+        Returns:
+            tuple: A tuple containing the minimum, maximum, and increment of the integration time in [us]
+        """
         return (10, 1e9, 1)
     
     def set_integration_time_us(self, integration_time: int) -> int:
@@ -921,6 +1249,12 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         return (spectra, timestamp, self._integration_time_us)
     
     def _test_save_last_measurement_as_sif(self, path: str) -> None:
+        """
+        Test function to save the last measurement as a .sif file.
+
+        Args:
+            path (str): The full file path where the data should be saved.
+        """
         with self._lock:
             saveAsSif(path)
 
@@ -928,11 +1262,41 @@ class SpectrometerController_Andor(Class_SpectrometerController):
 #%% Tests
 if __name__ == "__main__":
     matplotlib.use('TkAgg')
+    # try: initialisation_and_connection_test()
+    # except Exception as e: print(f"Initialisation and connection test failed: {e}")
 
+    # try: parameter_initialisation_tests()
+    # except Exception as e: print(f'Parameter initialisation tests failed: {e}')
+    
+    # try: capabilities_check()
+    # except Exception as e: print(f'Capabilities check failed: {e}')
+
+    # try: device_termination()
+    # except Exception as e: print(f"Device termination failed: {e}")
+    
+    # try: connection_test()
+    # except Exception as e: print(f"Connection test failed: {e}")
+    
+    # try: cooler_tests()
+    # except Exception as e: print(f"Cooler tests failed: {e}")
+    
+    # try: img = acquisition_test_img(); plot_img(img)
+    # except Exception as e: print(f"Acquisition test failed: {e}")
+    
+    # try: continuous_acquisition_test()
+    # except Exception as e: print(f"Continuous acquisition test failed: {e}")
+    
+    # try: shutdown()
+    # except Exception as e: print(f"Shutdown failed: {e}")
+    
+    
+    # fig, ax = plt.subplots()
+    # fig.show()
+    
     controller = SpectrometerController_Andor()
     controller._open_ex_shutter()
     
-    int_time_us = int(100e3)   # 100 ms
+    int_time_us = int(50e3)   # 100 ms
     controller.set_integration_time_us(int_time_us)
     print(f"Integration time set to {controller.get_integration_time_us()/1e3:.1f} ms")
 
@@ -955,5 +1319,12 @@ if __name__ == "__main__":
         fig.canvas.draw()
         fig.canvas.flush_events()
         if fig.waitforbuttonpress(1e-3): break
+
+    # # Save the last measurement as a .sif file
+    # try:
+    #     controller._test_save_last_measurement_as_sif("test_measurement.sif")
+    #     print(f'Saved last measurement as test_measurement.sif')
+    # except Exception as e:
+    #     print(f"Failed to save last measurement as .sif file: {e}")
 
     controller.terminate()
