@@ -13,3 +13,4 @@ test.py
 calibrations/
 docs/.obsidian/
 dist/
+.claude/

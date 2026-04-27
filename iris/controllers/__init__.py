@@ -24,6 +24,7 @@ dict_controller_options_default = {
     'stage_inverty': False,     # Flip the stage y-axis coordinate system direction
     'stage_flipxy': False, # Flip the XY stage coordinate system
     'stage_tiling_waittime_sec': 0.2,  # Wait time after each stage movement during tiling measurements in [s]
+    'stage_tiling_settle_sec': 0.3,    # Min time the stage must be stationary before image capture in [s]
     # > Camera <
     'camera_index': 0,          # Index of the camera device to be used for capturing
     'videofeed_height': 250,    # Height of the video feed window
@@ -45,6 +46,7 @@ dict_controller_options_comments = {
     'stage_inverty': 'Flip the stage y-axis coordinate system direction',
     'stage_flipxy': 'Flip the x and y axis of the XY stage coordinate system',
     'stage_tiling_waittime_sec': 'Wait time after each stage movement during tiling measurements in seconds',
+    'stage_tiling_settle_sec': 'Min time the stage must be stationary (coordinates stable) before image capture in seconds',
     # > Camera <
     'camera_index': 'Index of the camera device to be used for capturing',
     'videofeed_height': 'Height of the video feed window',
@@ -64,7 +66,7 @@ dict_controller_options_read = read_update_config_file_section(
 
 # > Controller choices <
 dict_controller_choices = {
-    'camera_controller': 'dummy',         # select between: 'dummy', 'webcam', 'thorlabs_mono', 'thorlabs_color'    
+    'camera_controller': 'dummy',         # select between: 'dummy', 'webcam', 'thorlabs_mono', 'thorlabs_mono2', 'thorlabs_color'
     'spectrometer_controller': 'dummy',   # select between: 'dummy', 'pi', 'qepro', 'andor', 'wasatch_enlighten'
     'stagexy_controller': 'dummy',        # select between: 'dummy', 'm30xym', 'zaber', 'pi'
     'stagez_controller': 'dummy',         # select between: 'dummy', 'z825b', 'mcm301', 'pfm450'
@@ -72,7 +74,7 @@ dict_controller_choices = {
 
 # > Controller choices <
 dict_controller_choices_comments = {
-    'camera_controller': 'select between: "dummy", "webcam", "thorlabs_mono", "thorlabs_color"',
+    'camera_controller': 'select between: "dummy", "webcam", "thorlabs_mono", "thorlabs_mono2", "thorlabs_color"',
     'spectrometer_controller': 'select between: "dummy", "pi", "qepro", "andor", "wasatch_enlighten"',
     'stagexy_controller': 'select between: "dummy", "m30xym", "zaber", "pi"',
     'stagez_controller': 'select between: "dummy", "z825b", "mcm301", "pfm450"',
@@ -121,6 +123,7 @@ class ControllerConfigEnum(Enum):
     STAGE_INVERTY = dict_controller_options_read['stage_inverty']
     STAGE_FLIPXY = dict_controller_options_read['stage_flipxy']
     STAGE_TILING_WAITTIME_SEC = dict_controller_options_read['stage_tiling_waittime_sec']
+    STAGE_TILING_SETTLE_SEC = dict_controller_options_read['stage_tiling_settle_sec']
 
     # > Camera <
     CAMERA_INDEX = dict_controller_options_read['camera_index']
@@ -320,6 +323,8 @@ if ControllerConfigEnum.CAMERA_CONTROLLER.value == 'webcam':
     from .camera_controller_webcam import CameraController_Webcam as CameraController
 elif ControllerConfigEnum.CAMERA_CONTROLLER.value == 'thorlabs_mono':
     from .camera_controller_thorlabs_mono import CameraController_ThorlabsMono as CameraController
+elif ControllerConfigEnum.CAMERA_CONTROLLER.value == 'thorlabs_mono2':
+    from .camera_controller_thorlabs_mono2 import CameraController_ThorlabsMono2 as CameraController
 elif ControllerConfigEnum.CAMERA_CONTROLLER.value == 'thorlabs_color':
     from .camera_controller_thorlabs_color import CameraController_ThorlabsColor as CameraController
 else:

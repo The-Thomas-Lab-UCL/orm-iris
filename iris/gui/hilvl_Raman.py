@@ -300,11 +300,12 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         time_start = time.time()
         total_points = len(mapping_coordinates)
         self._event_isacquiring.set()
+        msg = self.msg_mea_finished
         for i, coor in enumerate(mapping_coordinates):
             try:
                 # time1 = time.time()
                 if not self._event_isacquiring.is_set():
-                    self.emit_finish_signals(self.msg_mea_cancelled)
+                    msg = self.msg_mea_cancelled
                     break
                 
                 # Go to the requested coordinates
@@ -354,7 +355,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 self.sig_progress_update_str.emit(progress_msg)
         
         self._event_isacquiring.clear()
-        self.emit_finish_signals(self.msg_mea_finished)
+        self.emit_finish_signals(msg)
         return
 
     @Slot(AcquisitionParams, list, MappingSpeedParam, queue.Queue)
@@ -404,10 +405,11 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             coor_mea=mapping_coordinates_ends[0],
         )
         
+        msg = self.msg_mea_finished
         for i, coor in enumerate(mapping_coordinates_ends):
             try:
-                flg_continue = self._execute_scan_continuous_step(mapping_speed_param, q_mea_out, event_finish_setvel, event_finish_goto, q_trig, i, coor)
-                if not flg_continue: break
+                if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled; break
+                self._execute_scan_continuous_step(mapping_speed_param, q_mea_out, event_finish_setvel, event_finish_goto, q_trig, i, coor)
             except Exception as e:
                 self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
                 print('Error in run_scan_continuous:',e)
@@ -424,7 +426,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         q_trig.put(EnumTrig.FINISH)
         
         self._event_isacquiring.clear()
-        self.emit_finish_signals(self.msg_mea_finished)
+        self.emit_finish_signals(msg)
 
     def _execute_scan_continuous_step(
         self,
@@ -435,7 +437,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         q_trig:queue.Queue,
         coor_idx:int,
         coor:tuple,
-        ) -> bool:
+        ) -> None:
         """
         Executes a single step in the continuous mapping measurement.
 
@@ -447,15 +449,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             q_trig (queue.Queue): Queue to send the measurement trigger commands
             i (int): The index of the current coordinate
             coor (tuple): The target coordinate
-            
-        Returns:
-            bool: True if the step was executed successfully, False if the measurement was cancelled
-        """
-        
-        if not self._event_isacquiring.is_set():
-            self.emit_finish_signals(self.msg_mea_cancelled)
-            return False
-            
+        """ 
         # Go to the requested coordinates
         # time1 = time.time()
         # print(f'\nMoving to coordinates: {coor} (Index {coor_idx}), distance from last: {math.dist(self._last_coor, coor) if hasattr(self, "_last_coor") else "N/A"}')
@@ -497,7 +491,6 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         # time4 = time.time()
         
         # print(f'Point {coor_idx+1} done. Move time: {(time2-time1)*1e3:.0f} ms, SetVel time: {(time3-time2)*1e3:.0f} ms, Sync time: {(time4-time3)*1e3:.0f} ms. Total time: {(time4-time1)*1e3:.0f} ms.')
-        return True
         
     def _auto_adjust_mapping_speed(
         self,
@@ -1277,6 +1270,21 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         elif len(self._list_sel_mapCoor) > 0: pass
         else: self._list_sel_mapCoor = [mapping_coordinates,]
         if len(self._list_sel_mapCoor) == 0: return
+
+        # Guard: beam dump checked but no coordinate stored
+        if self._widget.chk_beamdump.isChecked() and self.motion_controller.beamdump_coor is None:
+            qw.QMessageBox.warning(
+                self,
+                'Beam dump location not set',
+                'The option "Go to the beam-dump location after measurements" is enabled, '
+                'but no beam dump coordinate has been stored yet.\n\n'
+                'Please either:\n'
+                '  • Set a beam dump location in the Stage Controller → Memory tab, or\n'
+                '  • Uncheck the beam dump option before starting.\n\n'
+                'The measurement has been cancelled.'
+            )
+            self._list_sel_mapCoor.clear()
+            return
         
         self.raman_controller.disable_widgets()
         self.motion_controller.disable_widgets()
@@ -1321,6 +1329,8 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         
         if msg == self._worker_hilvlacq.msg_mea_finished and len(self._list_sel_mapCoor) == 0:
             self._widget.chk_contMap_autoAdjustSpeed.setChecked(True)
+            if self._widget.chk_beamdump.isChecked():
+                self.motion_controller.go_to_beamdump()
             qw.QMessageBox.information(self,'Mapping measurement complete','The mapping measurement is complete and added to the data hub')
         elif msg == self._worker_hilvlacq.msg_mea_finished:
             self.initiate_mapping(method=self._last_mappingmethod)

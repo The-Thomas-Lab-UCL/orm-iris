@@ -340,6 +340,7 @@ class Wdg_Calibration(qw.QWidget):
     # >>> Display widget <<<
         # Canvas to display the image and button to show current image
         self._canvas_img = Canvas_Image_Annotations(wdg.wdg_holder_canvas)
+        wdg.holder_canvas.addWidget(self._canvas_img)
         self._chk_lowres = wdg.chk_lres
         self._btn_showImage = wdg.btn_showimage
         self._btn_showLiveFeed = wdg.btn_refresh

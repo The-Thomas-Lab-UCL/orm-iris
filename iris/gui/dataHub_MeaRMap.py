@@ -330,10 +330,18 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._sig_req_delte_unit.connect(self._worker.delete_unit)
         self._worker.sig_delete_done.connect(self._sig_req_update_tree.emit)
         self._worker.sig_delete_error.connect(lambda msg: qw.QMessageBox.warning(self, "Delete error", msg))
-        
+
         # Other connection setup
         self._worker.sig_saveload_done.connect(self._handle_saveload_result)
-        self._sig_req_update_tree.connect(self.update_tree)
+
+        # Debounce tree updates: many signals (observer + sig_delete_done) can fire in
+        # rapid succession during a single deletion. Collapsing them into one update
+        # prevents the main thread from blocking repeatedly on fuzzy search + tree rebuild.
+        self._update_tree_timer = QTimer(self)
+        self._update_tree_timer.setSingleShot(True)
+        self._update_tree_timer.setInterval(50)  # 50 ms debounce
+        self._update_tree_timer.timeout.connect(self.update_tree)
+        self._sig_req_update_tree.connect(self._update_tree_timer.start)
         
     # > Autosave info <
         # Autosave parameters
@@ -465,6 +473,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         list_unitID = [unit.get_unit_id() for unit in self.get_selected_MappingUnit()]
         list_matched_ids = self._filter_by_search()
         
+        self._tree.clearSelection()
         self._tree.clear()
         list_unit_ids, list_unit_names, list_metadata, list_num_measurements = self._MappingHub.get_summary_units()
         

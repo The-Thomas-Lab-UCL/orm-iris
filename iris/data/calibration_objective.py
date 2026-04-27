@@ -450,6 +450,37 @@ class ImgMea_Cal:
         
         return
         
+    def get_scaled_copy(self, scale:float) -> 'ImgMea_Cal':
+        """
+        Returns a copy of this calibration with the pixel-per-mm scale factors
+        adjusted for a rescaled image.
+
+        When an image is resized by `scale` (e.g. 0.5 = half resolution), one pixel
+        in the new image represents the same physical area as `1/scale` pixels in the
+        original, so the pixel-per-mm values must be multiplied by `scale`. Rotation,
+        flip, and laser coordinates (which are in mm) are unchanged.
+
+        Args:
+            scale (float): Resolution scale factor applied to the image (0 < scale <= 1)
+
+        Returns:
+            ImgMea_Cal: New calibration object with adjusted scale factors
+        """
+        assert self.check_calibration_set(), 'Calibration parameters are not set'
+        assert 0 < scale <= 1, 'Scale must be between 0 (exclusive) and 1 (inclusive)'
+
+        scaled = ImgMea_Cal()
+        scaled.set_calibration_params(
+            scale_x_pixelPerMm=float(self.scale_x_pixelPerMm * scale),
+            scale_y_pixelPerMm=float(self.scale_y_pixelPerMm * scale),
+            laser_coor_x_mm=float(self.laser_coor_x_mm),
+            laser_coor_y_mm=float(self.laser_coor_y_mm),
+            rotation_rad=float(self.rotation_rad),
+            flip_y=int(self.flip_y),
+        )
+        scaled.id = self.id
+        return scaled
+
     def get_calibration_only_tuple(self) -> NotImplementedError:
         raise NotImplementedError('This method is not implemented')
         
@@ -466,20 +497,20 @@ class ImgMea_Cal:
         self.flip_y = -1
         
         S_inv = np.array(
-            [[self.scale_x_pixelPerMm, 0],
-             [0, self.scale_y_pixelPerMm]]
+            [[1/self.scale_x_pixelPerMm, 0],
+             [0, 1/self.scale_y_pixelPerMm]]
         )
-        
+
         F_inv = np.array(
             [[1, 0],
              [0, self.flip_y]]
         )
-        
+
         R_inv = np.array(
             [[np.cos(self.rotation_rad), -np.sin(self.rotation_rad)],
              [np.sin(self.rotation_rad), np.cos(self.rotation_rad)]]
         )
-        
+
         self.mat_M_inv_img2stg = S_inv @ F_inv @ R_inv
         self.mat_M_stg2img = np.linalg.inv(self.mat_M_inv_img2stg)
     

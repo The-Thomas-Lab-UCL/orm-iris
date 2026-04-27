@@ -1,7 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D # For 3D plotting
-import matplotlib
 
 def generate_warped_grid(p00, p10, p01, p11, num_u_lines, num_v_lines):
     """
@@ -64,6 +61,8 @@ def generate_warped_grid(p00, p10, p01, p11, num_u_lines, num_v_lines):
     return grid_points_x, grid_points_y, grid_points_z, u_lines_3d, v_lines_3d
 
 if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 - registers 3D projection
     # --- Example Usage ---
     # Define your four wonky 3D coordinates.
     # Let's imagine them slightly tilted and not perfectly rectangular in XY plane
@@ -97,7 +96,7 @@ if __name__ == "__main__":
     # Plot the corner points for reference
     ax.scatter([p00_coords[0], p10_coords[0], p01_coords[0], p11_coords[0]],
             [p00_coords[1], p10_coords[1], p01_coords[1], p11_coords[1]],
-            [p00_coords[2], p10_coords[2], p01_coords[2], p11_coords[2]],
+            [p00_coords[2], p10_coords[2], p01_coords[2], p11_coords[2]],  # type: ignore[arg-type]
             color='red', s=50, label='Corner Points')
 
 

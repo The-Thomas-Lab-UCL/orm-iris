@@ -436,19 +436,23 @@ class DataStreamer_StageCam(mp.Process):
                 if not flg_data: continue
                 try:
                     request = self._pipe.recv()
-                    img = self._cam_controller.img_capture()
-                    arr_img = np.array(img)
-                    
-                    if request == Enum_CamCorrectionType.RAW:
+                    # Support (correction_type, arr) to apply correction to a pre-captured array
+                    if isinstance(request, tuple) and len(request) == 2 and isinstance(request[0], Enum_CamCorrectionType):
+                        correction_type, arr_img = request
+                    else:
+                        correction_type = request
+                        arr_img = np.array(self._cam_controller.img_capture())
+
+                    if correction_type == Enum_CamCorrectionType.RAW:
                         proc_img = arr_img
-                    elif request == Enum_CamCorrectionType.FLATFIELD:
+                    elif correction_type == Enum_CamCorrectionType.FLATFIELD:
                         proc_img = self._correct_arr_flatfield(arr_img)
-                    elif request == Enum_CamCorrectionType.BACKGROUND_SUBTRACTION:
+                    elif correction_type == Enum_CamCorrectionType.BACKGROUND_SUBTRACTION:
                         proc_img = self._correct_backgroundSubtraction_3channel(arr_img)
                     else:
                         return_pkg = self._handle_other_requests(request)
-                        
-                    if request in Enum_CamCorrectionType.__members__.values():
+
+                    if correction_type in Enum_CamCorrectionType.__members__.values():
                         if proc_img is None: raise ValueError('Processed image is None')
                         return_pkg = self._convert_arr2img(proc_img)
                         
@@ -459,7 +463,7 @@ class DataStreamer_StageCam(mp.Process):
                     self._pipe.send(return_pkg)
             self._pipe.close()
             
-        def _handle_other_requests(self,request:tuple[Any]) -> Any:
+        def _handle_other_requests(self,request:tuple) -> Any:
             """
             Handle other commands from the main process
             
@@ -503,7 +507,7 @@ class DataStreamer_StageCam(mp.Process):
                 
             else:
                 raise ValueError('Invalid request type, not in Enum_CommandType')
-            
+
             return return_pkg
                 
             
@@ -571,6 +575,25 @@ class DataStreamer_StageCam(mp.Process):
             self._cam_pipe_main.send((self.Enum_CommandType.SET_FLATFIELD_GAIN,gain))
             self._cam_pipe_main.recv()
     
+    def apply_correction(self, img:Image.Image, correction:Enum_CamCorrectionType) -> Image.Image:
+        """
+        Apply an image correction to an already-captured PIL image.
+        The correction is performed inside the subprocess (which holds the correction state),
+        so no new camera capture is triggered.
+
+        Args:
+            img (Image.Image): Already-captured raw image
+            correction (Enum_CamCorrectionType): Correction type to apply
+
+        Returns:
+            Image.Image: Corrected image, or the original if correction fails
+        """
+        arr = np.array(img)
+        with self._lock_pipe:
+            self._cam_pipe_main.send((correction, arr))
+            result = self._cam_pipe_main.recv()
+        return result if isinstance(result, Image.Image) else img
+
     def get_image(self, request:Enum_CamCorrectionType) -> Image.Image:
         """
         Get the image from the camera controller

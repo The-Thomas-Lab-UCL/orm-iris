@@ -10,6 +10,8 @@ import PySide6.QtCore as qc
 from PySide6.QtCore import Qt as qt, Signal, Slot, QObject, QThread, QTimer
 from PySide6.QtGui import QPixmap
 
+import csv
+import os
 import threading
 import queue
 
@@ -41,34 +43,42 @@ from iris.resources.motion_video.brightfieldcontrol_ui import Ui_wdg_brightfield
 from iris.resources.motion_video.stagecontrol_ui import Ui_stagecontrol
 
 WAIT_MOVEMENT_TIMEOUT = 10.0  # Timeout for waiting for the movement to finish [s] (reset if the stage is still moving)
-AUTOFOCUS_BLUR_KERNEL_SIZE = 1  # The kernel size for the median blur in the autofocus algorithm. Larger values can help reduce noise but may also reduce the focus score sensitivity.
+AUTOFOCUS_BLUR_KERNEL_SIZE = AppVideoEnum.AUTOFOCUS_BLUR_KERNEL_SIZE.value
+AUTOFOCUS_NO_IMPROVE_STEPS = AppVideoEnum.AUTOFOCUS_NO_IMPROVE_STEPS.value
 
 class BrightfieldController(qw.QWidget,Ui_wdg_brightfield_controller):
     def __init__(self,parent=None):
         super().__init__(parent)
         self.setupUi(self)
         self.setLayout(self.main_layout)
-        
-        self._dock_index = 0
-        
-        # Set the initial dock location
-        self.main_win:qw.QMainWindow = self.window() # pyright: ignore[reportAttributeAccessIssue] ; assume the parent is a QMainWindow
-        
-        self._register_videofeed_dock()
+
+        self.main_win:qw.QMainWindow = self.window() # pyright: ignore[reportAttributeAccessIssue]
+        self._dock_original_index = 0
+
+        # Defer until after the widget is inserted into the window hierarchy so
+        # self.window() reliably returns the real QMainWindow.
+        QTimer.singleShot(0, self._register_videofeed_dock)
         self.dock_video.topLevelChanged.connect(self._handle_videofeed_docking_changed)
-        
+
     def _register_videofeed_dock(self):
-        # This tells the Main Window: "You are the boss of this dock now"
-        self._dock_original_index = self.main_win.layout().indexOf(self.dock_video) # pyright: ignore[reportOptionalMemberAccess] ; assume the parent is a QMainWindow
-        self._dock_original_index = max(0,self._dock_original_index-1)
-            
+        self.main_win = self.window() # pyright: ignore[reportAttributeAccessIssue]
+        if not isinstance(self.main_win, qw.QMainWindow):
+            return
+        self._dock_original_index = self.main_layout.indexOf(self.dock_video)
+        # Register the dock with the QMainWindow so Qt knows its home position,
+        # then immediately return it to the layout without actually floating it.
+        self.main_win.addDockWidget(qt.DockWidgetArea.RightDockWidgetArea, self.dock_video)
+        self.dock_video.setFloating(True)
+        self.dock_video.setFloating(False)
+        self.main_layout.insertWidget(self._dock_original_index, self.dock_video)
+
     @Slot(bool)
     def _handle_videofeed_docking_changed(self,floating:bool):
         if floating:
-            self.main_win.addDockWidget(qt.DockWidgetArea.RightDockWidgetArea, self.dock_video)
+            if isinstance(self.main_win, qw.QMainWindow):
+                self.main_win.addDockWidget(qt.DockWidgetArea.RightDockWidgetArea, self.dock_video)
             self.dock_video.setFloating(True)
         else:
-            self.main_layout.insertWidget(self._dock_original_index, self.dock_video)
             self.main_layout.insertWidget(self._dock_original_index, self.dock_video)
             self.dock_video.setFloating(False)
 
@@ -286,40 +296,54 @@ class Motion_GoToCoor_Worker(QObject):
     def _notify_finish(self, thread_xy:threading.Thread, thread_z:threading.Thread,
                        event_finished:threading.Event):
         """
-        Waits for the target to be reached, the coordinate doesn't update within the timeout, raises a TimeoutError
-        
+        Waits for the target to be reached and for the stage to be stationary for a minimum
+        settle time before signalling completion. Raises a TimeoutError if the total timeout
+        (reset while stage is still moving) is exceeded.
+
         Args:
             thread_xy (threading.Thread): The thread moving the XY stage
             thread_z (threading.Thread): The thread moving the Z stage
-            timeout (float): Timeout in seconds
-                        
-        Raises:
-            TimeoutError: If the target is not reached within the timeout
+            event_finished (threading.Event): Event to signal when movement and settling are done
         """
         timeout = WAIT_MOVEMENT_TIMEOUT
-        
-        start_time = time.time()
+        settle_sec = ControllerConfigEnum.STAGE_TILING_SETTLE_SEC.value
+
+        timeout_start = time.time()
+        last_change_time = time.time()
         coor = self._get_coor()
+        threads_done = False
+
         while True:
-            if thread_xy.is_alive() or thread_z.is_alive():
-                thread_xy.join(timeout=0.1)
-                thread_z.join(timeout=0.1)
-            else:
-                event_finished.set()
-                self.sig_mvmt_finished.emit(self.msg_target_reached)
-                break
-            
-            if time.time() - start_time > timeout:
-                event_finished.set()
+            if not threads_done:
+                if thread_xy.is_alive() or thread_z.is_alive():
+                    thread_xy.join(timeout=0.1)
+                    thread_z.join(timeout=0.1)
+                else:
+                    threads_done = True
+                    last_change_time = time.time()  # Reset settle timer once threads finish
+
+            if time.time() - timeout_start > timeout:
+                if event_finished is not None: event_finished.set()
                 self.sig_mvmt_finished.emit(self.msg_target_timeout)
                 break
-            
+
             coor_new = self._get_coor()
-            # Resets the timer if the coordinates are not the same (i.e., the stage is still moving)
-            if coor_new is None: continue
-            if coor is None: coor = coor_new
-            if not np.allclose(coor,coor_new,atol=0.001): start_time = time.time()
+            if coor_new is None:
+                time.sleep(0.01)
+                continue
+            if coor is None:
+                coor = coor_new
+            if not np.allclose(coor, coor_new, atol=0.001):
+                last_change_time = time.time()
+                timeout_start = time.time()  # Reset overall timeout while stage is still moving
             coor = coor_new
+
+            if threads_done and (time.time() - last_change_time) >= settle_sec:
+                if event_finished is not None: event_finished.set()
+                self.sig_mvmt_finished.emit(self.msg_target_reached)
+                break
+
+            time.sleep(0.01)
         
     @Slot(tuple, threading.Event)
     def work(
@@ -412,112 +436,178 @@ class AutoFocus_Worker(QObject):
         super().__init__()
         self.ctrl_z = ctrl_z
         self.flg_stop = flg_stop
-        
-        self._is_waiting_for_img = threading.Event()  # A flag to wait for the image to be captured
-        
-        self._list_coor_mm: list[float] = []  # The list of z coordinates in mm
-        self._next_coor_idx: int = 0  # The index of the next z coordinate to move to
-        self._list_focus_score: list[float] = []  # The list of focus scores corresponding to the z coordinates
-        
+
+        self._is_waiting_for_img = threading.Event()
         self._img_counter = 0
         self._kernel_size = AUTOFOCUS_BLUR_KERNEL_SIZE
-        
-    @Slot(float,float,float, int)
+
+        # Scan state
+        self._current_z: float = 0.0
+        self._step_size_mm: float = 0.0
+        self._step_dir: int = 1          # +1 towards end, -1 towards start
+        self._phase: str = 'idle'        # 'dir1' | 'dir2' | 'idle'
+        self._no_improve_count: int = 0
+        self._best_score: float = -1.0
+        self._best_z: float = 0.0
+        self._full_start_z_mm: float = 0.0
+        self._full_end_z_mm: float = 0.0
+
+        # All visited (z, score) pairs — used for parabola fitting at the end
+        self._visited_z: list[float] = []
+        self._visited_scores: list[float] = []
+
+    @Slot(float,float,float,int)
     def start(self, start_z_mm:float, end_z_mm:float, step_size_mm:float, kernel_size:int):
         """
-        Performs autofocus by moving the z stage and evaluating the focus metric
-        
+        Performs autofocus by moving the z stage and evaluating the focus metric.
+
+        Starts at the centre of [start_z_mm, end_z_mm], moves towards end_z_mm
+        (direction 1), reverses when AUTOFOCUS_NO_IMPROVE_STEPS consecutive
+        non-improving images are seen, then sweeps towards start_z_mm (direction 2)
+        until the stopping criterion is met again.  A parabola is fit to all
+        collected (z, score) pairs for sub-step precision.
+
         Args:
-            start_z_mm (float): The starting z position in mm
-            end_z_mm (float): The ending z position in mm
-            step_size_mm (float): The step size for moving the z stage in mm
-            kernel_size (int): The kernel size for the median blur in the focus score calculation. Larger values can help reduce noise but may also reduce the focus score sensitivity.
+            start_z_mm (float): One end of the search range in mm
+            end_z_mm (float): The other end of the search range in mm
+            step_size_mm (float): Step size in mm
+            kernel_size (int): Pre-blur kernel size (odd int; 1 = no blur)
         """
-        # Generate the list of z coordinates to move to
         try:
-            assert isinstance(kernel_size,int) and kernel_size > 0 and kernel_size % 2 == 1, 'Kernel size must be a positive odd integer'
+            assert isinstance(kernel_size,int) and kernel_size > 0 and kernel_size % 2 == 1, \
+                'Kernel size must be a positive odd integer'
             self._kernel_size = kernel_size
             self.flg_stop.clear()
-            print(f'Starting autofocus with start: {start_z_mm} mm, end: {end_z_mm} mm, step size: {step_size_mm} mm')
-            self._next_coor_idx = 0
-            if start_z_mm > end_z_mm: step_size_mm= -abs(step_size_mm)
-            self._list_coor_mm = np.arange(start_z_mm, end_z_mm + step_size_mm, step_size_mm).tolist()
-            self._list_focus_score.clear()
-            self._go_to_next_coor()
-            
+
+            self._full_start_z_mm = min(start_z_mm, end_z_mm)
+            self._full_end_z_mm   = max(start_z_mm, end_z_mm)
+            self._step_size_mm    = abs(step_size_mm)
+            self._step_dir        = 1     # first sweep towards end_z_mm
+            self._phase           = 'dir1'
+            self._no_improve_count = 0
+            self._best_score      = -1.0
+            self._best_z          = (start_z_mm + end_z_mm) / 2.0
+            self._current_z       = self._best_z
+            self._visited_z.clear()
+            self._visited_scores.clear()
+            self._img_counter     = 0
+
+            print(f'Starting autofocus: centre={self._current_z:.4f} mm, '
+                  f'step={self._step_size_mm:.4f} mm, '
+                  f'range=[{self._full_start_z_mm:.4f}, {self._full_end_z_mm:.4f}] mm, '
+                  f'no-improve threshold={AUTOFOCUS_NO_IMPROVE_STEPS}')
+
+            self.ctrl_z.move_direct(self._current_z)
+            self._is_waiting_for_img.set()
             self.sig_started.emit()
         except Exception as e:
             self.sig_error.emit('Invalid autofocus parameters: {}'.format(e))
-            return
-    
+
     @Slot()
     def _force_stop(self):
-        """
-        Force stops the autofocus process and clears the state
-        """
-        self._list_coor_mm.clear()
-        self._list_focus_score.clear()
+        self._visited_z.clear()
+        self._visited_scores.clear()
         self._is_waiting_for_img.clear()
-        
+        self._phase = 'idle'
+
     def _calculate_focus_score(self, image, blur):
-        image_filtered = cv.medianBlur(image, blur)
-        laplacian = cv.Laplacian(image_filtered, cv.CV_64F)
-        focus_score = laplacian.var()
-        return focus_score
-    
+        if blur > 1:
+            image = cv.medianBlur(image, blur)
+        sx = cv.Sobel(image, cv.CV_64F, 1, 0, ksize=3)
+        sy = cv.Sobel(image, cv.CV_64F, 0, 1, ksize=3)
+        return float((sx**2 + sy**2).mean())
+
+    def _estimate_peak_z(self) -> float:
+        """
+        Fit a parabola to all visited (z, score) pairs and return the vertex.
+        Falls back to argmax if fewer than 3 points or if the parabola opens upward.
+        Result is clamped to the original scan range.
+        """
+        z      = np.array(self._visited_z)
+        scores = np.array(self._visited_scores)
+        if len(z) < 3:
+            return float(z[int(np.argmax(scores))])
+        try:
+            a, b, _ = np.polyfit(z, scores, 2)
+            if a >= 0:
+                return float(z[int(np.argmax(scores))])
+            peak_z = -b / (2.0 * a)
+            return float(np.clip(peak_z, self._full_start_z_mm, self._full_end_z_mm))
+        except Exception:
+            return float(z[int(np.argmax(scores))])
+
     @Slot(Image.Image)
     def process_image(self, img:Image.Image):
-        if not isinstance(img,Image.Image): return
+        if not isinstance(img, Image.Image): return
         if not self._is_waiting_for_img.is_set(): return
-        if self._img_counter%2 == 0: self._img_counter += 1; return # Process every other image to allow the stage to settle
-        
-        # Prep for the next image
+        if self._img_counter % 2 == 0: self._img_counter += 1; return  # skip every other frame to let the stage settle
+
         self._img_counter = 0
         self._is_waiting_for_img.clear()
-        
+
         try:
             img_gray = cv.cvtColor(np.array(img), cv.COLOR_RGB2GRAY)
-            focus_score = self._calculate_focus_score(img_gray, blur=self._kernel_size)
-            self._list_focus_score.append(focus_score)
-            
-            # print(f'Score: {focus_score:.2f} at Z: {self._list_coor_mm[self._next_coor_idx-1]:.3f} mm')
-            self._go_to_next_coor()
+            score = self._calculate_focus_score(img_gray, blur=self._kernel_size)
+            self._visited_z.append(self._current_z)
+            self._visited_scores.append(score)
+            self._advance(score)
         except Exception as e:
             self.sig_error.emit('Error processing image: {}'.format(e))
-            
-    def _go_to_next_coor(self):
-        # print('Moving to next coordinate index:', self._next_coor_idx)
-        if self._next_coor_idx >= len(self._list_coor_mm):
-            # Finished all coordinates, emit the best focus score
-            if len(self._list_focus_score) == 0:
-                self.sig_error.emit('No focus scores calculated')
-                return
-            
-            # Find the coordinate with the best focus score
-            best_score = max(self._list_focus_score)
-            best_index = self._list_focus_score.index(best_score)
-            best_coor = self._list_coor_mm[best_index]
-            
-            # Move to the best coordinate
-            self.ctrl_z.move_direct(best_coor)
-            
-            print('Autofocus finished. Best Z: {:.3f} mm with focus score: {:.2f}'.format(best_coor, best_score))
-            
-            self.sig_finished.emit(best_coor)
-            
-            self._list_coor_mm.clear()
-            self._list_focus_score.clear()
-            return
-        
+
+    def _advance(self, score: float):
+        """Decide the next z position based on the latest score."""
+        # Update best
+        if score > self._best_score:
+            self._best_score = score
+            self._best_z     = self._current_z
+            self._no_improve_count = 0
+        else:
+            self._no_improve_count += 1
+
+        # print(f'[AF] z={self._current_z:.4f} score={score:.1f} best={self._best_score:.1f} no_improve={self._no_improve_count} phase={self._phase}')
+
         if self.flg_stop.is_set():
             self._force_stop()
             self.sig_error.emit('Autofocus stopped by user')
             return
-        
-        next_z_mm = self._list_coor_mm[self._next_coor_idx]
-        self.ctrl_z.move_direct(next_z_mm)
+
+        next_z = self._current_z + self._step_dir * self._step_size_mm
+        out_of_bounds  = next_z < self._full_start_z_mm or next_z > self._full_end_z_mm
+        should_reverse = self._no_improve_count >= AUTOFOCUS_NO_IMPROVE_STEPS or out_of_bounds
+
+        if should_reverse:
+            if self._phase == 'dir1':
+                # Reverse towards start_z_mm
+                self._phase = 'dir2'
+                self._step_dir = -1
+                self._no_improve_count = 0
+                print(f'[AF] Reversing direction at z={self._current_z:.4f} mm (best so far: {self._best_z:.4f} mm)')
+                next_z = self._current_z + self._step_dir * self._step_size_mm
+                if next_z < self._full_start_z_mm or next_z > self._full_end_z_mm:
+                    self._finish()
+                    return
+            else:
+                # dir2 exhausted — done
+                self._finish()
+                return
+
+        self._current_z = next_z
+        self.ctrl_z.move_direct(next_z)
         self._is_waiting_for_img.set()
-        self._next_coor_idx += 1
+
+    def _finish(self):
+        if not self._visited_scores:
+            self.sig_error.emit('No focus scores calculated')
+            return
+        best_z    = self._estimate_peak_z()
+        best_score = max(self._visited_scores)
+        self.ctrl_z.move_direct(best_z)
+        print(f'Autofocus finished. Best Z: {best_z:.4f} mm '
+              f'(score: {best_score:.2f}, {len(self._visited_scores)} positions measured)')
+        self.sig_finished.emit(best_z)
+        self._visited_z.clear()
+        self._visited_scores.clear()
+        self._phase = 'idle'
         
         
 class ImageCapture_Worker(QObject):
@@ -594,6 +684,42 @@ class ImageCapture_Worker(QObject):
         return img
     
     @Slot(Enum_CamCorrectionType, bool, bool)
+    def grab_image_fresh(self, img_corr:Enum_CamCorrectionType, scalebar:bool, crosshair:bool):
+        """
+        Like grab_image(), but always uses img_capture_fresh() (software trigger) for the
+        raw capture so the exposure is guaranteed to start AFTER this call.
+        For non-RAW corrections the raw frame is captured fresh, then correction is applied
+        via the subprocess (which holds the correction state) without triggering a new capture.
+        Use this for step-and-capture workflows like image tiling.
+        """
+        if not img_corr in Enum_CamCorrectionType:
+            self.sig_error.emit('Invalid video correction type: {}'.format(img_corr))
+            return
+        try:
+            # Always capture a fresh triggered frame from the camera directly
+            img = self._camera_controller.img_capture_fresh()
+
+            if not isinstance(img, Image.Image):
+                self.sig_no_frame.emit()
+                return
+
+            # Apply correction in the subprocess if requested (no new capture)
+            if img_corr != Enum_CamCorrectionType.RAW:
+                img = self._stageHub.apply_correction(img, img_corr)
+
+            img = self._overlay_scalebar(img) if scalebar else img
+            if crosshair: img = self._draw_crosshair(img)
+
+            new_frame: QPixmap = ImageQt.toqpixmap(img)
+            self.sig_img.emit(img)
+            self.sig_qpixmap.emit(new_frame)
+
+        except Exception as e:
+            print(f'Fresh capture failed: {e}')
+            self.sig_no_frame.emit()
+            self.sig_error.emit('Failed to capture fresh frame: {}'.format(e))
+
+    @Slot(Enum_CamCorrectionType, bool, bool)
     def grab_image(self, img_corr:Enum_CamCorrectionType, scalebar:bool, crosshair:bool):
         """
         Updates the video feed, taking in mind Tkinter's single thread.
@@ -650,6 +776,10 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
     
     _sig_go_to_coordinates = Signal(tuple,threading.Event)
     _sig_req_img = Signal(Enum_CamCorrectionType,bool,bool)
+    _sig_req_fresh_img = Signal(Enum_CamCorrectionType,bool,bool)
+    _sig_pause_video_ui = Signal()
+    _sig_resume_video_ui = Signal()
+    _sig_reinit_camera_done = Signal(bool, bool)  # (video_was_running, success)
     
     _sig_req_auto_focus = Signal(float,float,float,int)
     
@@ -690,6 +820,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         self._video_height = ControllerConfigEnum.VIDEOFEED_HEIGHT.value    # Video feed height in pixel
         self._iscapturing = threading.Event()  # A flag to prevent multiple concurrent video capture
         self._flg_pause_video = threading.Event()  # A flag to check if the video feed is running
+        self._flg_img_ready = threading.Event()    # Set each time a new image (or no-frame) is received
         self._time_last_frame = 0.0   # The timestamp of the last frame captured, used to limit the frame rate
         self._time_last_img = 0.0     # The timestamp of the last image received
         self._currentImage:Image.Image|None = None   # The current image to be displayed
@@ -737,14 +868,15 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         self._init_autofocus_worker()
         self._init_autofocus_widgets()
         
-    # >>> Coordinate memory setup <<<
-        self._init_coor_memory_widgets()
-        
     # >>> Status update <<<
         self.sig_statbar_message.connect(self.status_update)
         self.sig_statbar_message.emit('Initialising the motion controllers','yellow')
         self._motion_controller_initialisation()
         self._init_workers()
+
+    # >>> Coordinate memory setup (must be after _init_workers so _worker_gotocoor exists) <<<
+        self._init_coor_memory_widgets()
+
         QTimer.singleShot(10, self.resume_video)
 
     def _init_stageparam_widgets(self):
@@ -901,10 +1033,10 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         
         # > Video controllers
         self._btn_videotoggle = wdg_video.btn_camera_onoff
-        self._btn_reinit_conn = wdg_video.pushButton_2
+        self._btn_reinit_conn = wdg_video.btn_reinitConn
         self._btn_videotoggle.released.connect(lambda: self.resume_video())
-        # self._btn_reinit_conn.released.connect(lambda: self.reinitialise_connection('camera'))
-        self._btn_reinit_conn.setEnabled(False)
+        self._btn_reinit_conn.released.connect(lambda: self.reinitialise_connection('camera'))
+        self._btn_reinit_conn.setEnabled(True)
         self._btn_videotoggle.setStyleSheet('background-color: yellow')
         self._btn_reinit_conn.setStyleSheet('background-color: yellow')
         
@@ -967,6 +1099,9 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
             ctrl_z=self.ctrl_z)
         self._worker_gotocoor.sig_mvmt_started.connect(self._statbar.showMessage)
         self._sig_go_to_coordinates.connect(self._worker_gotocoor.work)
+        self._sig_pause_video_ui.connect(self._pause_video_ui)
+        self._sig_resume_video_ui.connect(self._resume_video_ui)
+        self._sig_reinit_camera_done.connect(self._on_reinit_camera_done)
         
         self._thread_gotocoor = QThread(self)
         self._worker_gotocoor.moveToThread(self._thread_gotocoor)
@@ -1087,29 +1222,45 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         except Exception as e:
             qw.QMessageBox.critical(main_window, 'Error', 'Failed to set exposure time:\n' + str(e))
 
-    # @thread_assign
-    # def reinitialise_connection(self,unit:Literal['xy','z','camera']) -> threading.Thread:
-    #     """
-    #     Reinitialises the connection to the stage or camera
-        
-    #     Args:
-    #         unit (Literal['xy','z','camera']): The unit to reinitialise
-            
-    #     Returns:
-    #         threading.Thread: The thread started
-    #     """
-    #     if unit == 'xy':
-    #         self.ctrl_xy.reinitialise_connection()
-    #         self.signal_statbar_message.emit('XY stage re-initialised', None)
-    #     elif unit == 'z':
-    #         self.ctrl_z.reinitialise_connection()
-    #         self.signal_statbar_message.emit('Z stage re-initialised', None)
-    #     elif unit == 'camera':
-    #         self._camera_ctrl.reinitialise_connection()
-    #         self.signal_statbar_message.emit('Camera re-initialised', None)
-    #     else:
-    #         raise ValueError('Invalid unit for reinitialisation')
-        
+    def reinitialise_connection(self, unit: Literal['xy', 'z', 'camera']) -> None:
+        """
+        Reinitialises the connection to the stage or camera.
+        For 'camera': pauses video, waits for in-flight captures to drain,
+        reinitialises the camera in a background thread, then resumes video.
+        """
+        if unit != 'camera':
+            raise ValueError(f'reinitialise_connection: unsupported unit "{unit}"')
+
+        video_was_running = not self._flg_pause_video.is_set()
+        self.pause_video()
+        self._btn_reinit_conn.setEnabled(False)
+        self._btn_reinit_conn.setStyleSheet('background-color: grey')
+        self.sig_statbar_message.emit('Reinitialising camera connection...', 'yellow')
+
+        def _do_reinit():
+            self.wait_for_capture_drain()
+            try:
+                self._camera_ctrl.reinitialise_connection()
+            except Exception as e:
+                print(f'reinitialise_connection error: {e}')
+            success = self._camera_ctrl.get_initialisation_status()
+            self._sig_reinit_camera_done.emit(video_was_running, success)
+
+        self._thread_reinit = threading.Thread(target=_do_reinit, daemon=True)
+        self._thread_reinit.start()
+
+    @Slot(bool, bool)
+    def _on_reinit_camera_done(self, resume_video: bool, success: bool) -> None:
+        self._btn_reinit_conn.setEnabled(True)
+        if success:
+            self._btn_reinit_conn.setStyleSheet('background-color: yellow')
+            if resume_video:
+                self.resume_video()
+            self.sig_statbar_message.emit('Camera connection re-initialised', 'green')
+        else:
+            self._btn_reinit_conn.setStyleSheet('background-color: red')
+            self.sig_statbar_message.emit('Camera re-initialisation failed — reconnect USB and try again', 'red')
+
     def disable_overlays(self):
         """
         Disables the overlays on the video feed
@@ -1628,6 +1779,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         
         # Connect the signal to request an image capture to the worker's grab_image method
         self._sig_req_img.connect(self._worker_img_capture.grab_image)
+        self._sig_req_fresh_img.connect(self._worker_img_capture.grab_image_fresh)
         self._worker_img_capture.sig_error.connect(lambda msg: print(f'Video worker error: {msg}'))
         self._worker_img_capture.sig_img.connect(self._handle_img_capture)
         self._worker_img_capture.sig_qpixmap.connect(self._handle_qpixmap_capture)
@@ -1647,22 +1799,31 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         return self._worker_img_capture
     
     def pause_video(self):
+        # Set flag immediately (thread-safe) so video_update() stops on the next cycle
         self._flg_pause_video.set()
-        
-        # Turn the button back into a camera on button
+        # UI updates must run on the main thread — queue regardless of caller thread
+        self._sig_pause_video_ui.emit()
+
+    @Slot()
+    def _pause_video_ui(self):
         self._btn_videotoggle.released.disconnect()
         self._btn_videotoggle.setText('Resume video feed')
         self._btn_videotoggle.released.connect(lambda: self.resume_video())
         self._btn_videotoggle.setStyleSheet('background-color: yellow; color: black')
-    
+
     def resume_video(self):
+        # Clear flag immediately (thread-safe) so video_update() resumes
         self._flg_pause_video.clear()
-        
-        # Turn the button into a video stop button
+        # UI updates and timer must run on the main thread
+        self._sig_resume_video_ui.emit()
+
+    @Slot()
+    def _resume_video_ui(self):
         self._btn_videotoggle.released.disconnect()
         self._btn_videotoggle.setText('Pause video feed')
         self._btn_videotoggle.released.connect(lambda: self.pause_video())
         self._btn_videotoggle.setStyleSheet('background-color: red')
+        QTimer.singleShot(0, self.video_update)
     
     def _init_video(self):
         if not self._camera_ctrl.get_initialisation_status(): self._camera_ctrl.__init__()
@@ -1691,6 +1852,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         """
         Handles the case where the camera fails to capture an image.
         """
+        self._flg_img_ready.set()
         self._iscapturing.clear()
         self._trigger_next_video_update()
     
@@ -1725,7 +1887,26 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         if not isinstance(img,Image.Image): return
         self._currentImage = img
         self._time_last_img = time.time()
+        self._flg_img_ready.set()
     
+    def get_img_ready_event(self) -> threading.Event:
+        """
+        Returns the event that is set whenever a new image (or no-frame) is received.
+        Clear it before triggering a capture, then wait on it to know when the result is ready.
+        """
+        return self._flg_img_ready
+
+    def wait_for_capture_drain(self, timeout: float = 2.0) -> None:
+        """
+        Blocks until any currently in-flight capture completes (i.e. _iscapturing clears).
+        Call this after pause_video() to guarantee no stale _handle_img_capture can fire afterwards.
+        """
+        deadline = time.time() + timeout
+        while self._iscapturing.is_set():
+            if time.time() > deadline:
+                break
+            time.sleep(0.01)
+
     @Slot()
     def trigger_img_capture(self):
         request = self._combo_vidcorrection.currentText()
@@ -1733,8 +1914,30 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
             Enum_CamCorrectionType[request],
             self._chkbox_scalebar.isChecked(),
             self._chkbox_crosshair.isChecked())
-        
         self._iscapturing.set()
+
+    @Slot()
+    def trigger_fresh_img_capture(self):
+        """
+        Like trigger_img_capture() but uses a software trigger to guarantee
+        the exposure starts after this call. Use for step-and-capture (tiling).
+        Camera must already be in single-frame trigger mode (call enter_tiling_mode first).
+        Camera must already be in single-frame trigger mode (call enter_tiling_mode first).
+        """
+        request = self._combo_vidcorrection.currentText()
+        self._sig_req_fresh_img.emit(
+            Enum_CamCorrectionType[request],
+            self._chkbox_scalebar.isChecked(),
+            self._chkbox_crosshair.isChecked())
+        self._iscapturing.set()
+
+    def enter_tiling_mode(self) -> None:
+        """Switch the camera to single-frame software trigger mode for tiling."""
+        self._camera_ctrl.set_single_frame_trigger_mode(True)
+
+    def exit_tiling_mode(self) -> None:
+        """Restore the camera to continuous streaming mode after tiling."""
+        self._camera_ctrl.set_single_frame_trigger_mode(False)
         
     def video_update(self):
         """
@@ -1753,10 +1956,236 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
     
     def _init_coor_memory_widgets(self):
         """
-        Initialises the coordinate memory widgets and layouts
+        Initialises the coordinate memory widgets and layouts.
+
+        Expects the following widgets from the UI:
+            tree_memory               - QTreeWidget (2 columns: Name | Coordinate µm)
+            btn_memory_save           - QPushButton "Store current coordinate"
+            btn_memory_goto           - QPushButton "Go to selected coordinate" (toggles to Stop during motion)
+            btn_memory_delete         - QPushButton "Delete selected"
+            btn_memory_save_beamdump  - QPushButton "Set as beam dump coordinate"
+            lbl_beamdump              - QLabel showing the current beam dump coordinate
+
+        All coordinates (including the beam dump) are persisted to the same CSV.
+        The beam dump entry uses the reserved name '__beamdump__' and is never shown in the tree.
+        self.beamdump_coor is None when no beam dump coordinate has been saved.
         """
-        pass
-    
+        MEMORY_CSV_PATH  = os.path.join(r'./autosave/coor - memory/', 'coor_memory.csv')
+        _BEAMDUMP_KEY    = '__beamdump__'
+        _LABEL_GOTO      = 'Go to selected coordinate'
+        _LABEL_STOP      = 'Stop'
+        _COL_NAME        = 0
+        _ROLE_DATA       = qt.ItemDataRole.UserRole
+
+        # Public attribute: None until a beam dump coordinate is stored
+        self.beamdump_coor: tuple[float, float, float] | None = None
+
+        # ── Tree widget setup ──────────────────────────────────────────────
+        self.tree_memory.setColumnCount(2)
+        self.tree_memory.setHeaderLabels(['Name', 'Coordinate (µm)'])
+        self.tree_memory.header().setStretchLastSection(True)
+        self.tree_memory.setSelectionMode(qw.QAbstractItemView.SelectionMode.SingleSelection)
+
+        # ── Beam dump label helper ────────────────────────────────────────
+        def _update_beamdump_label():
+            if self.beamdump_coor is None:
+                self.lbl_beamdump.setText('Beam dump: not set')
+            else:
+                x_um, y_um, z_um = self.beamdump_coor
+                self.lbl_beamdump.setText(
+                    'Beam dump: X:{:.1f} Y:{:.1f} Z:{:.1f} µm'.format(x_um, y_um, z_um))
+
+        # ── CSV helpers ───────────────────────────────────────────────────
+        def _load_csv():
+            self.tree_memory.clear()
+            self.beamdump_coor = None
+            if not os.path.exists(MEMORY_CSV_PATH):
+                _update_beamdump_label()
+                return
+            try:
+                with open(MEMORY_CSV_PATH, newline='', encoding='utf-8') as f:
+                    for row in csv.DictReader(f):
+                        x_um = float(row['x_um'])
+                        y_um = float(row['y_um'])
+                        z_um = float(row['z_um'])
+                        if row['name'] == _BEAMDUMP_KEY:
+                            self.beamdump_coor = (x_um, y_um, z_um)
+                            continue  # not shown in the tree
+                        coor_str = 'X:{:.1f} Y:{:.1f} Z:{:.1f}'.format(x_um, y_um, z_um)
+                        item = qw.QTreeWidgetItem([row['name'], coor_str])
+                        item.setData(_COL_NAME, _ROLE_DATA, (x_um, y_um, z_um))
+                        self.tree_memory.addTopLevelItem(item)
+            except Exception as e:
+                print(f'coor_memory: failed to load CSV: {e}')
+            _update_beamdump_label()
+
+        def _save_csv():
+            try:
+                os.makedirs(os.path.dirname(MEMORY_CSV_PATH), exist_ok=True)
+                with open(MEMORY_CSV_PATH, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=['name', 'x_um', 'y_um', 'z_um'])
+                    writer.writeheader()
+                    for i in range(self.tree_memory.topLevelItemCount()):
+                        item = self.tree_memory.topLevelItem(i)
+                        if item is None: continue
+                        x_um, y_um, z_um = item.data(_COL_NAME, _ROLE_DATA)
+                        writer.writerow({'name': item.text(_COL_NAME),
+                                         'x_um': x_um, 'y_um': y_um, 'z_um': z_um})
+                    # Beam dump entry — always written last with its reserved name
+                    if self.beamdump_coor is not None:
+                        x_um, y_um, z_um = self.beamdump_coor
+                        writer.writerow({'name': _BEAMDUMP_KEY,
+                                         'x_um': x_um, 'y_um': y_um, 'z_um': z_um})
+            except Exception as e:
+                print(f'coor_memory: failed to save CSV: {e}')
+
+        # ── Store current coordinate ──────────────────────────────────────
+        def _store_current_coor():
+            coor = self.get_coordinates_closest_mm()
+            if any(c is None for c in coor):
+                qw.QMessageBox.warning(self, 'Store coordinate',
+                                       'Could not read current stage coordinates.')
+                return
+            x_mm, y_mm, z_mm = coor
+            assert x_mm is not None and y_mm is not None and z_mm is not None
+            x_um, y_um, z_um = x_mm * 1e3, y_mm * 1e3, z_mm * 1e3
+
+            name, ok = qw.QInputDialog.getText(self, 'Store coordinate',
+                                               'Enter a name for this coordinate:')
+            if not ok or not name.strip():
+                return
+            name = name.strip()
+
+            coor_str = 'X:{:.1f} Y:{:.1f} Z:{:.1f}'.format(x_um, y_um, z_um)
+            item = qw.QTreeWidgetItem([name, coor_str])
+            item.setData(_COL_NAME, _ROLE_DATA, (x_um, y_um, z_um))
+            self.tree_memory.addTopLevelItem(item)
+            _save_csv()
+
+        # ── Delete selected coordinate ────────────────────────────────────
+        def _delete_selected():
+            selected = self.tree_memory.selectedItems()
+            if not selected:
+                return
+            idx = self.tree_memory.indexOfTopLevelItem(selected[0])
+            self.tree_memory.takeTopLevelItem(idx)
+            _save_csv()
+
+        # ── Go to / Stop button logic ─────────────────────────────────────
+        self._flg_memory_goto_active = False  # True only while a memory-goto is in flight
+
+        def _set_btn_stop():
+            self.btn_memory_goto.setText(_LABEL_STOP)
+
+        def _set_btn_goto():
+            self.btn_memory_goto.setText(_LABEL_GOTO)
+
+        def _stop_motion():
+            self.ctrl_xy.stop_move()
+            self.ctrl_z.stop_move()
+
+        @Slot(str)
+        def _on_mvmt_started(_: str):
+            if self._flg_memory_goto_active:
+                _set_btn_stop()
+                try:
+                    self.btn_memory_goto.clicked.disconnect()
+                except RuntimeError:
+                    pass
+                self.btn_memory_goto.clicked.connect(_stop_motion)
+
+        @Slot(str)
+        def _on_mvmt_finished(_: str):
+            if self._flg_memory_goto_active:
+                self._flg_memory_goto_active = False
+                _set_btn_goto()
+                try:
+                    self.btn_memory_goto.clicked.disconnect()
+                except RuntimeError:
+                    pass
+                self.btn_memory_goto.clicked.connect(_goto_selected)
+
+        def _goto_selected():
+            selected = self.tree_memory.selectedItems()
+            if not selected:
+                qw.QMessageBox.warning(self, 'Go to coordinate', 'No coordinate selected.')
+                return
+
+            item = selected[0]
+            x_um, y_um, z_um = item.data(_COL_NAME, _ROLE_DATA)
+            name = item.text(_COL_NAME)
+
+            reply = qw.QMessageBox.warning(
+                self,
+                'Go to coordinate — WARNING',
+                (f'You are about to move the stage to:\n\n'
+                 f'  {name}\n'
+                 f'  X: {x_um:.1f}  Y: {y_um:.1f}  Z: {z_um:.1f} µm\n\n'
+                 'WARNING: Moving the stage to a memorised coordinate may crash the '
+                 'objective into the sample if the position is no longer safe.\n\n'
+                 'Make sure the path is clear before proceeding.\n\n'
+                 'Are you sure you want to continue?'),
+                qw.QMessageBox.StandardButton.Yes | qw.QMessageBox.StandardButton.No,
+                qw.QMessageBox.StandardButton.No,
+            )
+            if reply != qw.QMessageBox.StandardButton.Yes:
+                return
+
+            self._flg_memory_goto_active = True
+            self.go_to_coordinates((x_um / 1e3, y_um / 1e3, z_um / 1e3), override_controls=True)
+
+        # ── Store beam dump coordinate ────────────────────────────────────
+        def _store_beamdump():
+            coor = self.get_coordinates_closest_mm()
+            if any(c is None for c in coor):
+                qw.QMessageBox.warning(self, 'Store beam dump coordinate',
+                                       'Could not read current stage coordinates.')
+                return
+            x_mm, y_mm, z_mm = coor
+            assert x_mm is not None and y_mm is not None and z_mm is not None
+            self.beamdump_coor = (x_mm * 1e3, y_mm * 1e3, z_mm * 1e3)
+            _update_beamdump_label()
+            _save_csv()
+
+        # ── Wire up signals ───────────────────────────────────────────────
+        self._worker_gotocoor.sig_mvmt_started.connect(_on_mvmt_started)
+        self._worker_gotocoor.sig_mvmt_finished.connect(_on_mvmt_finished)
+
+        self.btn_memory_save.clicked.connect(_store_current_coor)
+        self.btn_memory_goto.clicked.connect(_goto_selected)
+        if hasattr(self, 'btn_memory_delete'):
+            self.btn_memory_delete.clicked.connect(_delete_selected)
+        if hasattr(self, 'btn_memory_save_beamdump'):
+            self.btn_memory_save_beamdump.clicked.connect(_store_beamdump)
+
+        # Expose helpers for external callers
+        self.store_coor_memory  = _store_current_coor
+        self.store_beamdump_coor = _store_beamdump
+
+        # ── Load persisted coordinates on startup ─────────────────────────
+        _load_csv()
+
+    def go_to_beamdump(self, event_finish: threading.Event | None = None) -> bool:
+        """
+        Moves the stage to the memorised beam dump coordinate (asynchronous).
+
+        Args:
+            event_finish: Optional threading.Event that will be set when motion completes.
+
+        Returns:
+            True  — motion was requested.
+            False — no beam dump coordinate has been stored; stage is not moved.
+        """
+        if self.beamdump_coor is None:
+            return False
+        x_um, y_um, z_um = self.beamdump_coor
+        self.go_to_coordinates(
+            (x_um / 1e3, y_um / 1e3, z_um / 1e3),
+            override_controls=True,
+            event_finish=event_finish,
+        )
+        return True
+
     @Slot(str,str)
     def status_update(self,message=None,bg_colour=None):
         """

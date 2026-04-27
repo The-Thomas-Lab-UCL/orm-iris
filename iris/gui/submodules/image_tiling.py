@@ -11,7 +11,6 @@ from PySide6.QtCore import Signal, Slot, QObject, QThread
 from PIL import Image
 import threading
 import numpy as np
-import time
 
 from copy import deepcopy
 
@@ -24,8 +23,6 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
 
 from iris.utils.general import get_timestamp_us_str
-
-from iris.controllers import ControllerConfigEnum
 
 from iris.gui.motion_video import Wdg_MotionController
 from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
@@ -166,29 +163,25 @@ class ImageProcessor_Worker(QObject):
         
         
         self._motion_ctrl.pause_video()
-        ts_before = self._motion_ctrl.get_latest_image_with_timestamp()[1]
+        self._motion_ctrl.wait_for_capture_drain()  # drain any in-flight capture before the loop
+        self._motion_ctrl.enter_tiling_mode()       # switch camera to single-frame SW trigger mode
         for i,coor in enumerate(meaCoor_mm.mapping_coordinates):
             x, y, z = coor
             if self.flg_stop.is_set():
                 break
-            
+
             flg_mvmt_done = threading.Event()
             self.sig_gotocoor.emit(coor, flg_mvmt_done)
             flg_mvmt_done.wait()
-            
+
+            self._motion_ctrl.get_img_ready_event().clear()
             self.sig_req_img_capture.emit()
-            
-            while True:
-                # print(f'{time.time()}: Waiting for new image to be available for coordinate {coor}')
-                img,ts = self._motion_ctrl.get_latest_image_with_timestamp()
-                if ts == ts_before:
-                    # print(f'{time.time()}: No new image received yet for coordinate {coor}, still waiting...')
-                    time.sleep(ControllerConfigEnum.STAGE_TILING_WAITTIME_SEC.value)  # Allow time for stage to settle
-                else:
-                    ts_before = ts
-                    # print(f'{time.time()}: New image received for coordinate {coor}, proceeding with processing...')
-                    break
-            
+
+            if not self._motion_ctrl.get_img_ready_event().wait(timeout=5.0):
+                print(f'Timeout waiting for image capture at coordinate {coor}')
+                continue
+
+            img, _ = self._motion_ctrl.get_latest_image_with_timestamp()
             if not isinstance(img,Image.Image):
                 print('Error in _take_image: No image received from the controller')
                 continue
@@ -207,6 +200,7 @@ class ImageProcessor_Worker(QObject):
             img = imgUnit.get_image_all_stitched(low_res=True)[0]
             self.sig_ret_image_processed.emit(img)
             
+        self._motion_ctrl.exit_tiling_mode()        # restore continuous streaming
         self._motion_ctrl.resume_video()
         return imgUnit
 
@@ -316,7 +310,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
         self._thread.finished.connect(self._thread.deleteLater)
         self._thread.finished.connect(self._worker.deleteLater)
         
-        self._worker.sig_req_img_capture.connect(self._motion_controller.trigger_img_capture)
+        self._worker.sig_req_img_capture.connect(self._motion_controller.trigger_fresh_img_capture)
         self._worker.sig_ret_image_processed.connect(self._canvas_img.set_image)
         self.sig_req_plot_imgunit.connect(self._worker.get_stitched_image)
         
@@ -353,17 +347,18 @@ class Wdg_HiLvlTiling(qw.QWidget):
         Update the combobox with the ImageUnits stored in the ImageHub
         using the DataHubImage
         """
-        self._combo_imgunits.blockSignals(True)
-        self._combo_imgunits.setEnabled(False)
-        
         hub = self._dataHub_img.get_ImageMeasurement_Hub()
         list_ids = hub.get_list_ImageUnit_ids()
         dict_idToName = hub.get_dict_IDtoName()
         list_names = [dict_idToName[id] for id in list_ids]
-        
-        # Only update when needed
+
+        # Only update when needed — check BEFORE disabling so we don't leave
+        # the combobox stuck in a disabled/blocked state on a no-op call
         if list_names == self._list_imgunit_names: return
-        
+
+        self._combo_imgunits.blockSignals(True)
+        self._combo_imgunits.setEnabled(False)
+
         current_name = self._combo_imgunits.currentText()
         
         self._list_imgunit_names = list_names.copy()
@@ -372,11 +367,11 @@ class Wdg_HiLvlTiling(qw.QWidget):
         
         if current_name in list_names:
             self._combo_imgunits.setCurrentText(current_name)
-        else:
+        elif list_ids:
             self._combo_imgunits.setCurrentIndex(0)
             self.sig_req_plot_imgunit.emit(hub.get_ImageMeasurementUnit(unit_id=list_ids[0]), self._chk_lres.isChecked())
         
-        self._combo_imgunits.setEnabled(True)
+        self._combo_imgunits.setEnabled(bool(list_ids))
         self._combo_imgunits.blockSignals(False)
         
     @Slot(str)
