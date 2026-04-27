@@ -77,73 +77,77 @@ class CameraController_ThorlabsColor(Class_CameraController):
 
     def reinitialise_connection(self) -> None:
         """
-        Reinitialise the camera connection
+        Reinitialise the camera connection, preserving the current exposure time.
+        Fully disposes and recreates the SDK to guarantee a clean hardware state.
         """
+        exposure_time_us = None
+        try: exposure_time_us = self.get_exposure_time_us()
+        except Exception: pass
+
         try: self.camera_termination()
         except Exception as e: print('CameraController_ThorlabsColor reinitialise_connection error:\n{}'.format(e))
-        
+
         try: self._initialisation()
         except Exception as e: print('CameraController_ThorlabsColor reinitialise_connection error:\n{}'.format(e))
+
+        if exposure_time_us is not None:
+            try: self.set_exposure_time_us(exposure_time_us)
+            except Exception as e: print('CameraController_ThorlabsColor reinitialise_connection exposure restore error:\n{}'.format(e))
         
     def _initialisation(self) -> bool:
         """
         Initialise the camera connection
-        
+
         Returns:
             bool: True if the camera is initialised
         """
-        try: self.controller = TLCameraSDK()
-        except Exception as e: print('CameraController_ThorlabsColor initialisation error:\n{}'.format(e))
-        
-        self._lock = mp.Lock()
-        
         self._lock.acquire()
-        
-        available_cameras = self.controller.discover_available_cameras()
-        
-        if len(available_cameras) < 1:
-            print("no cameras detected")
-            return False
-                                        
-        self.camera = self.controller.open_camera(available_cameras[self.camera_index])
-        self.camera.exposure_time_us = ControllerSpecificConfigEnum.THORLABS_CAMERA_EXPOSURE_TIME.value # exposure time in [us]. Default: 10000 (10ms)
-        self.camera.frames_per_trigger_zero_for_unlimited = ControllerSpecificConfigEnum.THORLABS_CAMERA_FRAMEPERTRIGGER.value  # number of frames obtained per trigger, 0 for continuous acquisition mode
-        self.camera.image_poll_timeout_ms = ControllerSpecificConfigEnum.THORLABS_CAMERA_IMAGEPOLL_TIMEOUT.value    # set image polling timeout in [ms]
-        self.camera.gain = int(0)
-        
-        self._colour_processor = TL_MTC()
-        self._clrprc_monoToColour = self._colour_processor.create_mono_to_color_processor(
-            self.camera.camera_sensor_type,
-            self.camera.color_filter_array_phase,
-            self.camera.get_color_correction_matrix(),
-            self.camera.get_default_white_balance_matrix(),
-            self.camera.bit_depth)
-        self._clrprc_monoToColour.color_space = TL_ClrSpc.SRGB  # sRGB color space
-        self._clrprc_monoToColour.output_format = TL_Fmt.RGB_PIXEL  # data is returned as sequential RGB values
-        
-        self._frame_width = self.camera.image_width_pixels
-        self._frame_height = self.camera.image_height_pixels
-        
-        self.camera.arm(2)
-        self.camera.issue_software_trigger()
-        
-        self.status = "video capture initialisation"  # Status message of the class
-        
-        if self._flg_show_preview == True:
-            self.win_name = 'preview'
-            cv2.namedWindow(self.win_name)
-            
-        # Post processing parameters
-        self._mirrorx = ControllerConfigEnum.CAMERA_MIRRORX.value
-        self._mirrory = ControllerConfigEnum.CAMERA_MIRRORY.value
-            
-        self.flg_initialised = True
-        
-        # Set the identifier
-        self._identifier = f"Thorlabs_{self.camera.model}, S/N:{self.camera.serial_number}"
-        
-        self._lock.release()
-        print('>>>>> Thorlabs color camera initialised <<<<<')
+        try:
+            self.controller = TLCameraSDK()
+
+            available_cameras = self.controller.discover_available_cameras()
+            if len(available_cameras) < 1:
+                raise RuntimeError('No Thorlabs cameras detected')
+
+            self.camera = self.controller.open_camera(available_cameras[self.camera_index])
+            self.camera.exposure_time_us = ControllerSpecificConfigEnum.THORLABS_CAMERA_EXPOSURE_TIME.value
+            self.camera.frames_per_trigger_zero_for_unlimited = ControllerSpecificConfigEnum.THORLABS_CAMERA_FRAMEPERTRIGGER.value
+            self.camera.image_poll_timeout_ms = ControllerSpecificConfigEnum.THORLABS_CAMERA_IMAGEPOLL_TIMEOUT.value
+            self.camera.gain = int(0)
+
+            self._colour_processor = TL_MTC()
+            self._clrprc_monoToColour = self._colour_processor.create_mono_to_color_processor(
+                self.camera.camera_sensor_type,
+                self.camera.color_filter_array_phase,
+                self.camera.get_color_correction_matrix(),
+                self.camera.get_default_white_balance_matrix(),
+                self.camera.bit_depth)
+            self._clrprc_monoToColour.color_space = TL_ClrSpc.SRGB
+            self._clrprc_monoToColour.output_format = TL_Fmt.RGB_PIXEL
+
+            self._frame_width = self.camera.image_width_pixels
+            self._frame_height = self.camera.image_height_pixels
+
+            self.camera.arm(2)
+            self.camera.issue_software_trigger()
+
+            self.status = "video capture initialisation"
+
+            if self._flg_show_preview == True:
+                self.win_name = 'preview'
+                cv2.namedWindow(self.win_name)
+
+            self._mirrorx = ControllerConfigEnum.CAMERA_MIRRORX.value
+            self._mirrory = ControllerConfigEnum.CAMERA_MIRRORY.value
+
+            self.flg_initialised = True
+            self._identifier = f"Thorlabs_{self.camera.model}, S/N:{self.camera.serial_number}"
+            print('>>>>> Thorlabs color camera initialised <<<<<')
+        except Exception as e:
+            print('CameraController_ThorlabsColor initialisation error:\n{}'.format(e))
+            self.flg_initialised = False
+        finally:
+            self._lock.release()
         
     def camera_termination(self):
         
@@ -171,7 +175,8 @@ class CameraController_ThorlabsColor(Class_CameraController):
         self.controller = None
         self.camera = None
         self._colour_processor = None
-        
+        self._clrprc_monoToColour = None
+
         time.sleep(3)   # Wait for all terminations to complete
         
         self.flg_initialised = False

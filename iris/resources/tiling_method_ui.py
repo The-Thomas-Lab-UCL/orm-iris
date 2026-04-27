@@ -15,36 +15,47 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QHBoxLayout,
-    QPushButton, QSizePolicy, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDockWidget,
+    QHBoxLayout, QPushButton, QSizePolicy, QVBoxLayout,
+    QWidget)
 
 class Ui_tiling_method(object):
     def setupUi(self, tiling_method):
         if not tiling_method.objectName():
             tiling_method.setObjectName(u"tiling_method")
         tiling_method.resize(679, 656)
-        self.verticalLayoutWidget = QWidget(tiling_method)
-        self.verticalLayoutWidget.setObjectName(u"verticalLayoutWidget")
-        self.verticalLayoutWidget.setGeometry(QRect(20, 10, 645, 631))
-        self.main_layout = QVBoxLayout(self.verticalLayoutWidget)
+        self.verticalLayout_5 = QVBoxLayout(tiling_method)
+        self.verticalLayout_5.setObjectName(u"verticalLayout_5")
+        self.main_layout = QVBoxLayout()
         self.main_layout.setObjectName(u"main_layout")
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.horizontalLayout = QHBoxLayout()
         self.horizontalLayout.setObjectName(u"horizontalLayout")
         self.verticalLayout_2 = QVBoxLayout()
         self.verticalLayout_2.setObjectName(u"verticalLayout_2")
+        self.dockWidget = QDockWidget(tiling_method)
+        self.dockWidget.setObjectName(u"dockWidget")
+        self.dockWidget.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetFloatable|QDockWidget.DockWidgetFeature.DockWidgetMovable)
+        self.dockWidget.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
+        self.dockWidgetContents = QWidget()
+        self.dockWidgetContents.setObjectName(u"dockWidgetContents")
+        self.verticalLayout_4 = QVBoxLayout(self.dockWidgetContents)
+        self.verticalLayout_4.setObjectName(u"verticalLayout_4")
         self.lyt_holder_img = QVBoxLayout()
         self.lyt_holder_img.setObjectName(u"lyt_holder_img")
 
-        self.verticalLayout_2.addLayout(self.lyt_holder_img)
+        self.verticalLayout_4.addLayout(self.lyt_holder_img)
 
-        self.chk_lres = QCheckBox(self.verticalLayoutWidget)
+        self.dockWidget.setWidget(self.dockWidgetContents)
+
+        self.verticalLayout_2.addWidget(self.dockWidget)
+
+        self.chk_lres = QCheckBox(tiling_method)
         self.chk_lres.setObjectName(u"chk_lres")
         self.chk_lres.setChecked(True)
 
         self.verticalLayout_2.addWidget(self.chk_lres)
 
-        self.combo_img = QComboBox(self.verticalLayoutWidget)
+        self.combo_img = QComboBox(tiling_method)
         self.combo_img.setObjectName(u"combo_img")
 
         self.verticalLayout_2.addWidget(self.combo_img)
@@ -72,12 +83,12 @@ class Ui_tiling_method(object):
 
         self.horizontalLayout_2 = QHBoxLayout()
         self.horizontalLayout_2.setObjectName(u"horizontalLayout_2")
-        self.btn_capture = QPushButton(self.verticalLayoutWidget)
+        self.btn_capture = QPushButton(tiling_method)
         self.btn_capture.setObjectName(u"btn_capture")
 
         self.horizontalLayout_2.addWidget(self.btn_capture)
 
-        self.btn_stop = QPushButton(self.verticalLayoutWidget)
+        self.btn_stop = QPushButton(tiling_method)
         self.btn_stop.setObjectName(u"btn_stop")
         self.btn_stop.setStyleSheet(u"background-color:red; color:white")
 
@@ -85,6 +96,9 @@ class Ui_tiling_method(object):
 
 
         self.main_layout.addLayout(self.horizontalLayout_2)
+
+
+        self.verticalLayout_5.addLayout(self.main_layout)
 
         QWidget.setTabOrder(self.chk_lres, self.combo_img)
 
