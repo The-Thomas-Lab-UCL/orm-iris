@@ -313,11 +313,12 @@ def read_update_config_file_section(dict_controllers_default:dict, dict_controll
     """
     Read the config file and automatically add an entry if it does not exist
     based on the given default values (dict form) and returns the read values
-    after the update. Additionally, it will also automatically append comments
-    given by the comments dictionary at the end of each respective key's value
-    in the config file. If the values are already present, it will just read the values.
-    If the config file is not present, it will automatically try to create one.
-    
+    after the update. Comments for existing entries are always updated to stay
+    in sync with the latest descriptions. Entries present in the config file
+    that are no longer in the default dictionary are removed with a printed
+    notification. If the config file is not present, it will automatically
+    try to create one.
+
     Args:
         dict_controllers_default (dict): Dictionary of the default values
         dict_controllers_comments (dict): Dictionary of the comments for each key in the default values
@@ -332,9 +333,7 @@ def read_update_config_file_section(dict_controllers_default:dict, dict_controll
             given by the default values dictionary
     """
     check_and_create_config_file(config_file)
-    
-    # Read the config file and automatically add an entry if it does not exist 
-    # (along with its comments)
+
     updater = ConfigUpdater(allow_no_value=True)
     updater.read(config_file)
 
@@ -342,13 +341,24 @@ def read_update_config_file_section(dict_controllers_default:dict, dict_controll
     commenter = '; '
     list_splitters = [splitter, commenter]
 
+    changed = False
+
     if not updater.has_section(section):
         updater.add_section(section)
-        with open(config_file, 'w') as f:
-            updater.write(f)
+        changed = True
+
+    # Remove obsolete entries (in config but no longer in the default dict)
+    keys_in_section = [key for key, _ in updater.items(section)]
+    for key in keys_in_section:
+        if key not in dict_controllers_default:
+            print(f"[Config] Removing obsolete entry '{key}' from [{section}] in config.ini")
+            updater.remove_option(section, key)
+            changed = True
+
+    current_options = {k: v for k, v in updater.items(section)}
 
     for key in dict_controllers_default.keys():
-        if not updater.has_option(section, key):
+        if key not in current_options:
             if type(dict_controllers_default[key]) != str:
                 updater.set(
                     section=section,
@@ -361,15 +371,33 @@ def read_update_config_file_section(dict_controllers_default:dict, dict_controll
                     option=key,
                     value='"' + str(dict_controllers_default[key]) + '"' + splitter + commenter + dict_controllers_comments[key],
                 )
-            with open(config_file, 'w') as f: updater.write(f)
-        
+            changed = True
+        else:
+            # Update comment while preserving the user's current value
+            current_raw = current_options[key].value
+            actual_val = current_raw
+            for sp in list_splitters:
+                actual_val = actual_val.split(sp)[0]
+            actual_val = actual_val.strip()
+            new_value = actual_val + splitter + commenter + dict_controllers_comments[key]
+            if current_raw.strip() != new_value.strip():
+                old_comment = current_raw.split(commenter, 1)[1].strip() if commenter in current_raw else ''
+                new_comment = dict_controllers_comments[key]
+                print(f"[Config] Updating comment for '{key}' in [{section}]:")
+                print(f"         Before: {old_comment}")
+                print(f"         After:  {new_comment}")
+                updater.set(section=section, option=key, value=new_value)
+                changed = True
+
+    if changed:
+        with open(config_file, 'w') as f:
+            updater.write(f)
+
     dict_controllers_read = {}
-    updater.read(config_file)
     for key,value in updater.items(section):
         if key not in dict_controllers_default.keys(): continue
         def_val_type = type(dict_controllers_default[key])
-        
-        # Process different types of values separately
+
         # note that the splits are to remove the comments
         if def_val_type == bool:
             read_line:str = value.value
@@ -394,7 +422,7 @@ def read_update_config_file_section(dict_controllers_default:dict, dict_controll
                     conv_val = conv_val.split(splitter)[0]
             dict_controllers_read[key] = conv_val
         else: raise NotImplementedError(f"Error: {def_val_type} conversion is not implemented.")
-        
+
     return dict_controllers_read
 
 @thread_assign
