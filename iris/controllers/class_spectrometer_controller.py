@@ -45,7 +45,6 @@ class Class_SpectrometerController():
         # <<<<< Insert the initialisation commands here
         pass
         
-        
     def terminate(self) -> None:
         """
         To terminate the connections to the Raman spectrometers

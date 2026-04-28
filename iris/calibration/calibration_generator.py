@@ -266,10 +266,12 @@ class Wdg_SpectrometerCalibrationGenerator(Ui_spectrometerCalibrator, qw.QWidget
         except Exception as e: print('ERROR _load_calibration file read: ',e); return
         
         try:self._analyse_intensity_calibration_params(calculate_transfunc=False)
-        except Exception as e: qw.QMessageBox.warning(self,'Load calibration error','Error in loading intensity calibration parameters:\n{}'.format(e))
-        
+        except Exception as e:
+            QTimer.singleShot(0, lambda e=e: qw.QMessageBox.warning(self,'Load calibration error','Error in loading intensity calibration parameters:\n{}'.format(str(e))))
+
         try:self._analyse_wavelength_calibration_params(calculate_transfunc=False)
-        except Exception as e: qw.QMessageBox.warning(self,'Load calibration error','Error in loading wavelength calibration parameters:\n{}'.format(e))
+        except Exception as e:
+            QTimer.singleShot(0, lambda e=e: qw.QMessageBox.warning(self,'Load calibration error','Error in loading wavelength calibration parameters:\n{}'.format(str(e))))
         
         # Send the loadpath to the backend
         self._pipe_update.send(self._cal_params)

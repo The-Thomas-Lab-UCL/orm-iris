@@ -8,17 +8,6 @@ no adjustments (aside from the advance features).
 Acknowledgement:
 pylablib as a learning material for the development of this controller, though
 no code from it has been reused in this controller.
-
-Changelog (30Hz patch):
-- Added DLL bindings for GetNumberHSSpeeds, GetHSSpeed, SetHSSpeed
-- Added Python wrappers: getNumberHSSpeeds, getHSSpeed, setHSSpeed
-- SpectrometerController_Andor.__init__: 
-    - Uses getFastestRecommendedVSSpeed() return value (not hardcoded index)
-    - Sets HS speed to index 0 (fastest) on the conventional amplifier (typ=1 for iVac)
-- SpectrometerController_Andor.measure_spectrum:
-    - Switched to RunTillAbort + GetMostRecentImage for sustained throughput
-    - startAcquisition() called once in __init__ / initialisation; measure_spectrum
-      just triggers and retrieves
 """
 #%% Main import
 import os
@@ -49,37 +38,20 @@ from iris.controllers.class_spectrometer_controller import Class_SpectrometerCon
 from iris import DataAnalysisConfigEnum
 from iris.controllers import ControllerSpecificConfigEnum
 
-# ANDOR_SINGLE_TRACK_CENTRE = 128
-# ANDOR_SINGLE_TRACK_HEIGHT = 40
-# ANDOR_READOUT_MODE = 'Single Track'  # Options: 'FVB' or 'Single Track'
-
-ANDOR_SINGLE_TRACK_CENTRE = ControllerSpecificConfigEnum.ANDOR_SINGLE_TRACK_CENTRE.value
-ANDOR_SINGLE_TRACK_HEIGHT = ControllerSpecificConfigEnum.ANDOR_SINGLE_TRACK_HEIGHT.value
-ANDOR_READOUT_MODE = ControllerSpecificConfigEnum.ANDOR_READOUT_MODE.value
-
 # %% Andor dll imports
 # Add the path to the Andor SDK2 DLLs
 path_dll_andor = ControllerSpecificConfigEnum.ANDOR_ATMCD64D_DLL_PATH.value
 path_dll_spectrograph = ControllerSpecificConfigEnum.ANDOR_ATSPECTROGRAPH_DLL_PATH.value
 
-_first_dll_load = 'ANDOR_DLL_INITIALIZED' not in os.environ
-
-_seen_paths: set[str] = set()
-list_dirpath_dll: list[str] = []
-for _p in [os.path.abspath(p) for p in os.environ.get("PATH","").split(os.pathsep) if p] + [
-    os.path.abspath("."),
-    os.path.abspath(os.path.split(path_dll_andor)[0]),
-    os.path.abspath(os.path.split(path_dll_spectrograph)[0]),
-]:
-    if _p not in _seen_paths:
-        _seen_paths.add(_p)
-        list_dirpath_dll.append(_p)
-
+list_dirpath_dll = [os.path.abspath(p) for p in os.environ.get("PATH","").split(os.pathsep) if p]
+list_dirpath_dll.append(os.path.abspath("."))
+list_dirpath_dll.append(os.path.abspath(os.path.split(path_dll_andor)[0]))
+list_dirpath_dll.append(os.path.abspath(os.path.split(path_dll_spectrograph)[0]))
 list_dir_dll = []
-_dll_load_errors: set[str] = set()
+
 for path in list_dirpath_dll:
     try: list_dir_dll.append(os.add_dll_directory(path))
-    except Exception as e: _dll_load_errors.add(str(e))
+    except Exception as e: print(e)
 
 andorDLL = ctypes.cdll.LoadLibrary(path_dll_andor)
 specDLL = ctypes.cdll.LoadLibrary(path_dll_spectrograph)
@@ -87,11 +59,7 @@ specDLL = ctypes.cdll.LoadLibrary(path_dll_spectrograph)
 for dir_dll in list_dir_dll:
     dir_dll.close()
 
-if _first_dll_load:
-    for _err in sorted(_dll_load_errors):
-        print(_err)
-    print("Andor spectrometer: DLLs loaded successfully")
-    os.environ['ANDOR_DLL_INITIALIZED'] = '1'
+print("Andor spectrometer: DLLs loaded successfully")
 
 #%% Andor structures
 class AndorCapabilities(ctypes.Structure):
@@ -148,35 +116,6 @@ GetVSSpeed = andorDLL.GetVSSpeed
 GetVSSpeed.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_float)] # [index to get, speed]
 GetVSSpeed.restype = ctypes.c_uint
 
-SetVSSpeed = andorDLL.SetVSSpeed
-SetVSSpeed.argtypes = [ctypes.c_int] # [index of the speed to set]
-SetVSSpeed.restype = ctypes.c_uint  # DRV_SUCCESS: Vertical speed set., DRV_NOT_INITIALIZED: System not initialized., DRV_NOT_AVAILABLE: Your system does not support this feature., DRV_ACQUIRING: Acquisition in progress., DRV_P1INVALID: Invalid speed index parameter.
-
-SetVSAmplitude = andorDLL.SetVSAmplitude
-SetVSAmplitude.argtypes = [ctypes.c_int] # [state of the amplitude: 0. Low, 1. High]
-SetVSAmplitude.restype = ctypes.c_uint  # DRV_SUCCESS: Amplitude set., DRV_NOT_INITIALIZED: System not initialized., DRV_NOT_AVAILABLE: Your system does not support this feature., DRV_ACQUIRING: Acquisition in progress., DRV_P1INVALID: Invalid amplitude parameter.
-
-# >>> Horizontal shift speed (NEW)
-# unsigned int WINAPI GetNumberHSSpeeds(int channel, int typ, int* speeds)
-GetNumberHSSpeeds = andorDLL.GetNumberHSSpeeds
-GetNumberHSSpeeds.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
-GetNumberHSSpeeds.restype = ctypes.c_uint
-
-# unsigned int WINAPI GetHSSpeed(int channel, int typ, int index, float* speed)
-GetHSSpeed = andorDLL.GetHSSpeed
-GetHSSpeed.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_float)]
-GetHSSpeed.restype = ctypes.c_uint
-
-# unsigned int WINAPI SetHSSpeed(int typ, int index)
-SetHSSpeed = andorDLL.SetHSSpeed
-SetHSSpeed.argtypes = [ctypes.c_int, ctypes.c_int]
-SetHSSpeed.restype = ctypes.c_uint
-
-# unsigned int WINAPI SetShutterEx(int typ, int mode, int closingtime, int openingtime, int extmode)
-SetShutterEx = andorDLL.SetShutterEx
-SetShutterEx.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int] # [type, mode, closing time in ms, opening time in ms, external mode]
-SetShutterEx.restype = ctypes.c_uint # DRV_SUCCESS: Shutter set., DRV_NOT_INITIALIZED: System not initialized., DRV_ACQUIRING: Acquisition in progress., DRV_ERROR_ACK: Unable to communicate with card., DRV_NOT_SUPPORTED: Camera does not support shutter control., DRV_P1INVALID: Invalid TTL type., DRV_P2INVALID: Invalid internal mode., DRV_P3INVALID: Invalid time to close., DRV_P4INVALID: Invalid time to open., DRV_P5INVALID: Invalid external mode.
-
 # >>> Temperature
 GetTemperatureRange = andorDLL.GetTemperatureRange
 GetTemperatureRange.argtypes = [ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)] # Min and max temp
@@ -230,11 +169,6 @@ AbortAcquisition = andorDLL.AbortAcquisition # Aborts acquisition for the RunTil
 AbortAcquisition.argtypes = []
 AbortAcquisition.restype = ctypes.c_uint
 
-# unsigned int WINAPI WaitForAcquisition(void)
-WaitForAcquisition = andorDLL.WaitForAcquisition # Blocks the calling thread until acquisition is complete
-WaitForAcquisition.argtypes = []
-WaitForAcquisition.restype = ctypes.c_uint # DRV_SUCCESS: Acquisition complete., DRV_NOT_INITIALIZED: System not initialized., DRV_NO_NEW_DATA: Non-Acquisition Event occurred.(e.g. CancelWait () called)
-
 WaitForAcquisitionTimeOut  = andorDLL.WaitForAcquisitionTimeOut  # Blocks the calling thread until acquisition is complete
 WaitForAcquisitionTimeOut.argtypes = [ctypes.c_int] # [timeout in milliseconds]
 WaitForAcquisitionTimeOut.restype = ctypes.c_uint
@@ -286,11 +220,6 @@ SetNumberAccumulations.restype = ctypes.c_uint # DRV_SUCCESS: Number of accumula
 GetMostRecentImage = andorDLL.GetMostRecentImage
 GetMostRecentImage.argtypes = [ctypes.POINTER(ctypes.c_long),ctypes.c_ulong] # [array to store the image, sized to the sensor, number of pixels]
 GetMostRecentImage.restype = ctypes.c_uint # DRV_SUCCESS: Image has been copied into array., DRV_NOT_INITIALIZED: System not initialized., DRV_ERROR_ACK: Unable to communicate with card., DRV_P1INVALID: Invalid pointer (i.e. NULL)., DRV_P2INVALID: Array size is incorrect., DRV_NO_NEW_DATA: There is no new data yet.
-
-# unsigned int WINAPI GetAcquiredData(at_32* arr, unsigned long size)
-GetAcquiredData = andorDLL.GetAcquiredData
-GetAcquiredData.argtypes = [ctypes.POINTER(ctypes.c_int32),ctypes.c_ulong] # [array to store the data, sized to the sensor, number of pixels]
-GetAcquiredData.restype = ctypes.c_uint # DRV_SUCCESS: Data has been copied into array., DRV_NOT_INITIALIZED: System not initialized., DRV_ERROR_ACK: Unable to communicate with card., DRV_P1INVALID: Invalid pointer (i.e. NULL)., DRV_P2INVALID: Array size is incorrect., DRV_NO_NEW_DATA: There is no new data yet.
 
 #>>> Save settings <<<
 SaveAsSif = andorDLL.SaveAsSif
@@ -402,7 +331,7 @@ def read_return_message(error_code) -> str|None:
     try: return ErrorCodes(error_code).name
     except ValueError: return "Unknown error"
 
-#%% Function wrappers
+#%% Function wrappers for the functions above
 def initialize(dirpath: str) -> None:
     """
     Initialize the Andor SDK and set the working directory.
@@ -410,6 +339,7 @@ def initialize(dirpath: str) -> None:
     Raises:
         RuntimeError: If initialization fails.
     """
+    # Call the original function
     ret = Initialize(dirpath.encode('utf-8'))
     if read_return_message(ret):
         raise RuntimeError(f"Failed to initialize Andor SDK: {ret}")
@@ -420,6 +350,7 @@ def shutdown() -> None:
     """
     try: abortAcquisition()
     except: pass
+    
     ret = Shutdown()
     if read_return_message(ret):
         raise RuntimeError(f"Failed to shutdown Andor SDK: {ret}")
@@ -450,162 +381,6 @@ def getDetector() -> tuple[int,int]:
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to get detector: {msg}")
     return x_pixel.value, y_pixel.value
-
-def getFastestRecommendedVSSpeed() -> tuple[int, float]:
-    """
-    Get the list of the fastest recommended vertical shift speeds.
-
-    Returns:
-        tuple[int, float]: The index and the fastest recommended vertical shift speed in microseconds.
-    """
-    speed = ctypes.c_float()
-    index = ctypes.c_int()
-    ret = GetFastestRecommendedVSSpeed(ctypes.byref(index), ctypes.byref(speed))
-    msg = read_return_message(ret)
-    if msg: raise RuntimeError(f"Failed to get fastest recommended vertical shift speed: {msg}")
-    return index.value, speed.value
-
-def getNumberVSSpeeds() -> int:
-    """
-    Get the number of available vertical shift speeds.
-
-    Returns:
-        int: The number of available vertical shift speeds.
-    """
-    num_speeds = ctypes.c_int()
-    ret = GetNumberVSSpeeds(ctypes.byref(num_speeds))
-    msg = read_return_message(ret)
-    if msg: raise RuntimeError(f"Failed to get number of vertical shift speeds: {msg}")
-    return num_speeds.value
-
-def getVSSpeed(index: int) -> float:
-    """
-    Get the current vertical shift speed in microseconds per pixel shift for the given index.
-    
-    Args:
-        index (int): The index of the vertical shift speed to get.
-    
-    Returns:
-        float: The current vertical shift speed in microseconds.
-    """
-    speed = ctypes.c_float()
-    ret = GetVSSpeed(ctypes.c_int(index), ctypes.byref(speed))
-    msg = read_return_message(ret)
-    if msg: raise RuntimeError(f"Failed to get vertical shift speed: {msg}")
-    return speed.value
-
-def setVSSpeed(index: int) -> None:
-    """
-    Set the vertical shift speed.
-
-    Args:
-        index (int): The index of the vertical shift speed to set. Refer to getFastestRecommendedVSSpeed() for the list of available speeds and their corresponding indices.
-    """
-    ret = SetVSSpeed(ctypes.c_int(index))
-    msg = read_return_message(ret)
-    if msg: raise RuntimeError(f"Failed to set vertical shift speed: {msg}")
-    
-def setVSAmplitude(level: int) -> None:
-    """
-    Set the vertical shift amplitude. (0 to 4 for +0 to +4 respectively, with 0 for normal amplitude)
-    
-    NOTE: Exercise caution when increasing the amplitude of the vertical clock voltage, since higher
-    clocking voltages may result in increased clock-induced charge (noise) in your signal. In
-    general, only the very highest vertical clocking speeds are likely to benefit from an
-    increased vertical clock voltage amplitude.
-    
-    Args:
-        level (int): The level of the vertical shift amplitude to set.
-    """
-    ret = SetVSAmplitude(ctypes.c_int(level))
-    msg = read_return_message(ret)
-    if msg: raise RuntimeError(f"Failed to set vertical shift amplitude: {msg}")
-
-# >>> Horizontal shift speed wrappers (NEW) <<<
-
-# iVac 416 uses a conventional CCD register (not EMCCD), so typ=1 throughout.
-# channel=0 is the only A/D channel on this camera.
-_HS_CHANNEL = 0
-_HS_TYP     = 0   # For non-EMCCD cameras (iVac, iDus etc.), typ=0 means conventional.
-                  # typ=1 only applies to EMCCD cameras where 0=EM and 1=conventional.
-                  # SDK example: GetNumberHSSpeeds(0, 0, &a) — both args are 0.
-
-def getNumberHSSpeeds(channel: int = _HS_CHANNEL, typ: int = _HS_TYP) -> int:
-    """
-    Return the number of horizontal shift speeds available.
-
-    Args:
-        channel (int): A/D channel index (0 for iVac 416).
-        typ (int): Output amplifier type.
-            For non-EMCCD cameras (iVac, iDus): 0 = conventional (only valid value).
-            For EMCCD cameras (iXon etc.): 0 = EM register, 1 = conventional.
-
-    Returns:
-        int: Number of available horizontal shift speeds.
-    """
-    num_speeds = ctypes.c_int()
-    ret = GetNumberHSSpeeds(ctypes.c_int(channel), ctypes.c_int(typ), ctypes.byref(num_speeds))
-    msg = read_return_message(ret)
-    if msg: raise RuntimeError(f"Failed to get number of HS speeds: {msg}")
-    return num_speeds.value
-
-def getHSSpeed(index: int, channel: int = _HS_CHANNEL, typ: int = _HS_TYP) -> float:
-    """
-    Return the horizontal shift speed for a given index, in MHz.
-
-    Args:
-        index (int): Speed index (0 = fastest).
-        channel (int): A/D channel index (0 for iVac 416).
-        typ (int): Output amplifier type (1 = conventional for iVac).
-
-    Returns:
-        float: Horizontal shift speed in MHz.
-    """
-    speed = ctypes.c_float()
-    ret = GetHSSpeed(ctypes.c_int(channel), ctypes.c_int(typ), ctypes.c_int(index), ctypes.byref(speed))
-    msg = read_return_message(ret)
-    if msg: raise RuntimeError(f"Failed to get HS speed at index {index}: {msg}")
-    return speed.value
-
-def setHSSpeed(index: int, typ: int = _HS_TYP) -> None:
-    """
-    Set the horizontal shift speed by index.
-    Index 0 is always the fastest speed available.
-
-    Args:
-        index (int): Speed index. 0 = fastest (e.g. 100 kHz on iVac 416).
-        typ (int): Output amplifier type (0 = conventional for iVac/non-EMCCD).
-    """
-    ret = SetHSSpeed(ctypes.c_int(typ), ctypes.c_int(index))
-    msg = read_return_message(ret)
-    if msg: raise RuntimeError(f"Failed to set HS speed: {msg}")
-
-def setShutterEx(type: int, mode: int, closing_time: int, opening_time: int, ext_mode: int) -> None:
-    """
-    Set the shutter parameters.
-
-    Args:
-        type (int): TTL signal type to control the shutter (
-            0: Output TTL low signal to open shutter,
-            1: Output TTL high signal to open shutter).
-        mode (int): Shutter mode (
-            0: Fully Auto,
-            1: Permanently Open,
-            2: Permanently Closed,
-            4: Open for FVB series,
-            5: Open for any series).
-        closing_time (int): Time shutter takes to close in milliseconds.
-        opening_time (int): Time shutter takes to open in milliseconds.
-        ext_mode (int): External mode (
-            0: Fully Auto,
-            1: Permanently Open,
-            2: Permanently Closed,
-            4: Open for FVB series,
-            5: Open for any series).
-    """
-    ret = SetShutterEx(ctypes.c_int(type), ctypes.c_int(mode), ctypes.c_int(closing_time), ctypes.c_int(opening_time), ctypes.c_int(ext_mode))
-    msg = read_return_message(ret)
-    if msg: raise RuntimeError(f"Failed to set shutter parameters: {msg}")
 
 def getTemperatureRange() -> tuple[float, float]:
     """
@@ -689,6 +464,7 @@ def setImage(hbin:int, vbin:int, hstart:int, hend:int, vstart:int, vend:int) -> 
         vend (int): End row (inclusive).
     """
     ret = SetImage(ctypes.c_int(hbin), ctypes.c_int(vbin), ctypes.c_int(hstart), ctypes.c_int(hend), ctypes.c_int(vstart), ctypes.c_int(vend))
+    
     if ret == ErrorCodes.DRV_NOT_INITIALIZED.value: raise RuntimeError('System not initialized')
     elif ret == ErrorCodes.DRV_ACQUIRING.value: raise RuntimeError('Acquisition in progress')
     elif ret == ErrorCodes.DRV_P1INVALID.value: raise ValueError('Horizontal binning parameters invalid')
@@ -734,18 +510,6 @@ def abortAcquisition() -> None:
     ret = AbortAcquisition()
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to abort acquisition: {msg}")
-
-def waitForAcquisition() -> bool:
-    """
-    Wait for the acquisition to complete.
-
-    Returns:
-        bool: True if the acquisition completed successfully, False if a non-acquisition event occurred (e.g. CancelWait called).
-    """
-    ret = WaitForAcquisition()
-    if ret == ErrorCodes.DRV_SUCCESS.value: return True
-    elif ret == ErrorCodes.DRV_NO_NEW_DATA.value: return False
-    else: raise RuntimeError(f"Failed to wait for acquisition: {read_return_message(ret)}")
 
 def waitForAcquisitionTimeOut(timeout_ms:int|float) -> bool:
     """
@@ -823,9 +587,13 @@ def setSingleTrack(centre_pixel:int,height_pixel:int) -> None:
     """
     centre_pixel = int(centre_pixel)
     height_pixel = int(height_pixel)
-    ret = SetSingleTrack(ctypes.c_int(centre_pixel), ctypes.c_int(height_pixel))
-    if ret == ErrorCodes.DRV_P1INVALID.value: raise ValueError('Centre row invalid')
-    elif ret == ErrorCodes.DRV_P2INVALID.value: raise ValueError('Track height invalid')
+    centre_pixel_cint = ctypes.c_int(centre_pixel)
+    height_pixel_cint = ctypes.c_int(height_pixel)
+    ret = SetSingleTrack(centre_pixel_cint, height_pixel_cint)
+    if ret == ErrorCodes.DRV_P1INVALID.value:
+        raise ValueError('Centre row invalid')
+    elif ret == ErrorCodes.DRV_P2INVALID.value:
+        raise ValueError('Track height invalid')
 
 def sendSoftwareTrigger() -> None:
     """
@@ -846,9 +614,10 @@ def isTriggerModeAvailable(mode:Literal[ '0. Internal', '1. External', '6. Exter
     """
     mode_idx = int(mode.split('.')[0])
     ret = IsTriggerModeAvailable(ctypes.c_int(mode_idx))
-    if ret == ErrorCodes.DRV_SUCCESS.value: return True
-    elif ret == ErrorCodes.DRV_INVALID_MODE.value: return False
+    if ret == ErrorCodes.DRV_SUCCESS.value: mode_available = True
+    elif ret == ErrorCodes.DRV_INVALID_MODE.value: mode_available = False
     else: raise RuntimeError(f"Failed to check trigger mode availability: {read_return_message(ret)}")
+    return mode_available
 
 def setTriggerMode(mode:Literal[ '0. Internal', '1. External', '6. External Start',
     '7. External Exposure (Bulb)', '9. External FVB EM', '10. Software Trigger',
@@ -879,7 +648,9 @@ def setKineticCycleTime(time_sec: float) -> None:
     """
     Set the kinetic cycle time for the Andor SDK.
     """
-    ret = SetKineticCycleTime(ctypes.c_float(float(time_sec)))
+    time_sec = float(time_sec)
+    time_sec_cfloat = ctypes.c_float(time_sec)
+    ret = SetKineticCycleTime(time_sec_cfloat)
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to set kinetic cycle time: {msg}")
 
@@ -891,11 +662,13 @@ def setNumberAccumulations(num_accum:int) -> None:
     Args:
         num_accum (int): The number of accumulations to set.
     """
-    ret = SetNumberAccumulations(ctypes.c_int(int(num_accum)))
+    num_accum = int(num_accum)
+    num_accum_cint = ctypes.c_int(num_accum)
+    ret = SetNumberAccumulations(num_accum_cint)
     msg = read_return_message(ret)
     if msg: raise RuntimeError(f"Failed to set number of accumulations: {msg}")
     
-def getMostRecentImage(xpixel:int, ypixel:int, total_pixels:int) -> np.ndarray:
+def getMostRecentImage(xpixel:int,ypixel:int,total_pixels:int) -> np.ndarray:
     """
     Get the most recent image from the instrument.
     
@@ -914,43 +687,18 @@ def getMostRecentImage(xpixel:int, ypixel:int, total_pixels:int) -> np.ndarray:
     Returns:
         np.ndarray: The most recent image
     """
-    total_pixels = xpixel * ypixel
+    total_pixels = xpixel*ypixel
     image_array = (ctypes.c_long * total_pixels)()
-    ret = GetMostRecentImage(image_array, ctypes.c_ulong(total_pixels))
+    total_pixels_long = ctypes.c_ulong(total_pixels)
+    
+    ret = GetMostRecentImage(image_array, total_pixels_long)
     if ret == ErrorCodes.DRV_NOT_INITIALIZED.value: raise RuntimeError("Library is not initialised")
     elif ret == ErrorCodes.DRV_ERROR_ACK.value: raise RuntimeError("Unable to communicate with card")
     elif ret == ErrorCodes.DRV_P1INVALID.value: raise SyntaxError("Invalid pointer (i.e. NULL).")
     elif ret == ErrorCodes.DRV_P2INVALID.value: raise ValueError("Array size is incorrect.")
     elif ret == ErrorCodes.DRV_NO_NEW_DATA.value: raise BufferError("There is no new data yet")
+    
     return np.ctypeslib.as_array(image_array).reshape((ypixel, xpixel))
-
-def getAcquiredData(total_pixels:int) -> np.ndarray:
-    """
-    Get the acquired data from the instrument.
-    
-    Args:
-        total_pixels (int): The total number of pixels
-    
-    Raises:
-        RuntimeError("Library is not initialised")
-        RuntimeError("Acquisition in progress")
-        RuntimeError("Unable to communicate with card")
-        SyntaxError("Invalid pointer (i.e. NULL).")
-        ValueError("Array size is incorrect.")
-        BufferError("There is no new data yet")
-    
-    Returns:
-        np.ndarray: The acquired data
-    """
-    data_array = (ctypes.c_int32 * total_pixels)()
-    ret = GetAcquiredData(data_array, ctypes.c_ulong(total_pixels))
-    if ret == ErrorCodes.DRV_NOT_INITIALIZED.value: raise RuntimeError("Library is not initialised")
-    elif ret == ErrorCodes.DRV_ACQUIRING.value: raise RuntimeError("Acquisition in progress")
-    elif ret == ErrorCodes.DRV_ERROR_ACK.value: raise RuntimeError("Unable to communicate with card")
-    elif ret == ErrorCodes.DRV_P1INVALID.value: raise SyntaxError("Invalid pointer (i.e. NULL).")
-    elif ret == ErrorCodes.DRV_P2INVALID.value: raise ValueError("Array size is incorrect.")
-    elif ret == ErrorCodes.DRV_NO_NEW_DATA.value: raise BufferError("There is no new data yet")
-    return np.ctypeslib.as_array(data_array)
 
 def saveAsSif(path: str) -> None:
     """
@@ -965,103 +713,322 @@ def saveAsSif(path: str) -> None:
         ValueError: Invalid filename/path.
         MemoryError: File too large to be generated in memory.
     """
+    
     # Convert python string to bytes for the C function
     path_bytes = path.encode('utf-8')
+    
     ret = SaveAsSif(path_bytes)
-    if ret == ErrorCodes.DRV_SUCCESS.value: return
-    elif ret == ErrorCodes.DRV_NOT_INITIALIZED.value: raise RuntimeError("System not initialized.")
-    elif ret == ErrorCodes.DRV_ACQUIRING.value: raise ChildProcessError("Acquisition in progress.")
-    elif ret == ErrorCodes.DRV_ERROR_ACK.value: raise RuntimeError("Unable to communicate with card.")
-    elif ret == ErrorCodes.DRV_P1INVALID.value: raise ValueError(f"Invalid filename or path: {path}")
-    elif ret == ErrorCodes.DRV_ERROR_PAGELOCK.value: raise MemoryError("File too large to be generated in memory.")
-    else: raise Exception(f"Unknown error occurred. Return code: {ret}")
+    
+    # Error Handling based on documentation provided
+    if ret == ErrorCodes.DRV_SUCCESS.value:
+        return
+    elif ret == ErrorCodes.DRV_NOT_INITIALIZED.value:
+        raise RuntimeError("System not initialized.")
+    elif ret == ErrorCodes.DRV_ACQUIRING.value:
+        raise ChildProcessError("Acquisition in progress.")
+    elif ret == ErrorCodes.DRV_ERROR_ACK.value:
+        raise RuntimeError("Unable to communicate with card.")
+    elif ret == ErrorCodes.DRV_P1INVALID.value:
+        raise ValueError(f"Invalid filename or path: {path}")
+    elif ret == ErrorCodes.DRV_ERROR_PAGELOCK.value:
+        raise MemoryError("File too large to be generated in memory.")
+    else:
+        raise Exception(f"Unknown error occurred. Return code: {ret}")
 
 #%% KEY PARAMETERS
-try: SHUTDOWN_TEMP = int(float(ControllerSpecificConfigEnum.ANDOR_TERMINATION_TEMPERATURE.value))
-except: SHUTDOWN_TEMP = -10     # Temperature above which it is safe for the device to be shut down.
-                                # Any lower temperatures risks DAMAGING the sensor in the long term.
-                                # Naturally, DO NOT MODIFY THIS CONSTANT! Safe temp: -20degC
-assert SHUTDOWN_TEMP >= -20, f"Safe shutdown temperature must be at least -20 degC, but got {SHUTDOWN_TEMP} degC"
+SAFE_SHUTDOWN_TEMP = -10    # Temperature above which it is safe for the device to be shut down.
+                            # Any lower temperatures risks DAMAGING the sensor in the long term.
+                            # Naturally, DO NOT MODIFY THIS CONSTANT! Safe temp: -20degC
+assert SAFE_SHUTDOWN_TEMP >= -20, f"Safe shutdown temperature must be at least -20 degC, but got {SAFE_SHUTDOWN_TEMP} degC"
+
+#%% Test functions (low level)
+def initialisation_and_connection_test():
+    # Library initialisation
+    init_dir = os.path.split(path_dll_andor)[0]
+
+    ret_code_init = Initialize(init_dir.encode('utf-8'))
+    
+    if read_return_message(ret_code_init) is not None: 
+        print(f"Initialisation failed. Error code: {ret_code_init}")
+        return
+    else: print("Initialisation successful. Checking status...")
+
+    status_code = ctypes.c_uint()
+    ret_code_status = Getstatus(ctypes.byref(status_code))
+    
+    if ret_code_status == DRV_SUCCESS and status_code.value == DRV_IDLE:
+        print('Status check successful. The camera is idle and ready')
+    else:
+        print(f'Status check failed. Error code: {ret_code_status}, Status code: {status_code.value}')
+
+def cooler_tests():
+    xpixels = ctypes.c_int()
+    ypixels = ctypes.c_int()
+    ret = GetDetector(ctypes.byref(xpixels), ctypes.byref(ypixels))
+    if ret == DRV_SUCCESS:
+        print("Parameter initialisation tests successful.")
+        print(f"Detector X Pixels: {xpixels.value}")
+        print(f"Detector Y Pixels: {ypixels.value}")
+    else:
+        print(f"Parameter initialisation tests failed. Error code: {ret}")
+        
+    idx = ctypes.c_int()
+    speed = ctypes.c_float()
+    ret = GetFastestRecommendedVSSpeed(ctypes.byref(idx), ctypes.byref(speed))
+    if ret == DRV_SUCCESS:
+        print("GetFastestRecommendedVSSpeed successful.")
+        print(f"Fastest recommended speed index: {idx.value} [idx]")
+        print(f"Fastest recommended speed value: {speed.value} [microsec/pixel shift]")
+    else:
+        print(f"GetFastestRecommendedVSSpeed failed. Error code: {ret}")
+        
+    num_speeds = ctypes.c_int()
+    ret = GetNumberVSSpeeds(ctypes.byref(num_speeds))
+    if ret == DRV_SUCCESS:
+        print("GetNumberVSSpeeds successful.")
+        print(f"Number of VSSpeeds: {num_speeds.value}")
+    else:
+        print(f"GetNumberVSSpeeds failed. Error code: {ret}")
+
+    speed = ctypes.c_float()
+    ret = GetVSSpeed(idx.value, ctypes.byref(speed))
+    if ret == DRV_SUCCESS:
+        print("GetVSSpeed successful.")
+        print(f"VSSpeed: {speed.value} [microsec/pixel shift]")
+    else:
+        print(f"GetVSSpeed failed. Error code: {ret}")
+        # Search for the error message
+        error_message = read_return_message(ret)
+        print(f"Error message: {error_message}")
+
+def capabilities_check():
+    # Check for capabilities
+    caps = AndorCapabilities()
+    caps.ulSize = ctypes.sizeof(AndorCapabilities)
+    ret_code_capabilities = GetCapabilities(ctypes.byref(caps))
+    if ret_code_capabilities == DRV_SUCCESS:
+        print("Capabilities check successful.")
+        print(f'Single Acquisition Mode: {"YES" if caps.ulAcqModes & 2**0 else "NO"}')
+        print(f'Frame Transfer Mode: {"YES" if caps.ulAcqModes & 2**4 else "NO"}')
+
+        print(f'Full image read mode: {"YES" if caps.ulAcqModes & 2**0 else "NO"}')
+        print(f'Single track read mode: {"YES" if caps.ulAcqModes & 2**2 else "NO"}')
+        print(f'Full Vertical Binning (FVB) read mode: {"YES" if caps.ulAcqModes & 2**3 else "NO"}')
+        print(f'Multi track read mode: {"YES" if caps.ulAcqModes & 2**4 else "NO"}')
+
+        print(f'Internal trigger: {"YES" if caps.ulTriggerModes & 2**0 else "NO"}')
+        print(f'External trigger: {"YES" if caps.ulTriggerModes & 2**1 else "NO"}')
+        print(f'Software (continuous) trigger: {"YES" if caps.ulTriggerModes & 2**3 else "NO"}')
+        
+        print(f'Camera: {caps.ulCameraType}')
+        print(f'Camera PDA: {"YES" if caps.ulCameraType == 0 else "NO"}')
+        print(f'Camera iDus: {"YES" if caps.ulCameraType == 7 else "NO"}')
+    else:
+        print(f"Capabilities check failed. Error code: {ret_code_capabilities}")
+
+def device_termination():
+    print("Shutting down...")
+    ret_code_shutdown = Shutdown()
+    if ret_code_shutdown == DRV_SUCCESS:
+        print("Shutdown successful.")
+    else:
+        print(f"Shutdown failed. Error code: {ret_code_shutdown}")
+
+#%% Test functions (Python wrapped)
+def connection_test():
+    print(">>>>> Running initialisation and connection test... <<<<<")
+    initialize(os.path.split(path_dll_andor)[0])
+    
+    serial_number = getCameraSerialNumber()
+    print(f"Camera serial number: {serial_number}")
+
+    sensor_size = getDetector()
+    print(f"Sensor size (X, Y): {sensor_size}")
+    
+    try: abortAcquisition()
+    except: pass
+
+def cooler_tests():
+    print(">>>>> Running cooler tests... <<<<<")
+    target_temp = 0
+    
+    coolerON()
+    setTemperature(target_temp)
+    print(f'Cooler turned ON, target temperature: {target_temp} degC, current temperature: {getTemperature()} degC')
+    for _ in range(60):
+        print(f'Temperature: {getTemperature()}, time: {get_timestamp_us_str()}')
+        time.sleep(1)
+        if checkCoolingStatus(): break
+        
+    termination_temp = 10
+    setTemperature(termination_temp)
+    while not checkCoolingStatus():
+        print(f'Temperature: {getTemperature()}, time: {get_timestamp_us_str()}')
+        time.sleep(1)
+        if getTemperature() >= SAFE_SHUTDOWN_TEMP: break
+
+def acquisition_test_img(integration_time_ms:float=100.0) -> np.ndarray:
+    """
+    Run an image acquisition test with the specified integration time.
+
+    Args:
+        integration_time_ms (float): The integration time for the acquisition in milliseconds. Default is 100.0 ms.
+        
+    Returns:
+        np.ndarray: The acquired image data.
+    """
+    print(">>>>> Running image acquisition test... <<<<<")
+    
+    setAcquisitionMode(mode='1. Single')
+    setReadMode(mode='4. Image')
+    
+    pixelx,pixely = getDetector()
+    print(f"Detector size (X, Y): {pixelx}, {pixely}")
+    
+    setExposureTime(integration_time_ms * 1e-3)
+    setTriggerMode('10. Software Trigger')
+    setNumberAccumulations(1)
+    setKineticCycleTime(0)
+    setImage(1, 1, 1, pixelx, 1, pixely)
+    print(f'Acquisition timings: {getAcquisitionTimings_sec()}')
+    
+    kinetic_cycle_time_sec = getAcquisitionTimings_sec()[2]
+    
+    t1 = time.time()
+    print('Acquiring image')
+    startAcquisition()
+    
+    waitForAcquisitionTimeOut(kinetic_cycle_time_sec*1e3*1.5)
+    print(f'Image acquisition complete. Time taken: {time.time()-t1} sec')
+    
+    img = getMostRecentImage(pixelx,pixely,pixelx*pixely)
+    return img
+
+def plot_img(img:np.ndarray):
+    """
+    Plot the acquired image and its profiles.
+
+    Args:
+        img (np.ndarray): The acquired image data.
+    """
+    profile_x = np.sum(img, axis=0)
+    profile_y = np.sum(img, axis=1)
+    y_pixel_indices = np.arange(len(profile_y))
+
+    plt.figure(figsize=(12.5,7.5))
+
+    plt.subplot(2,2,1)
+    plt.imshow(img, cmap='inferno')
+    plt.title('Acquired Image')
+    plt.gca().invert_yaxis()
+    plt.colorbar()
+    
+    plt.subplot(2,2,2)
+    plt.plot(profile_y, y_pixel_indices)
+    plt.title('Sum Y Profile')
+    plt.xlabel('Intensity')
+    plt.ylabel('Pixel Index')
+    
+    plt.subplot(2,2,3)
+    plt.plot(profile_x)
+    plt.title('Sum X Profile')
+    plt.xlabel('Pixel Index')
+    plt.ylabel('Intensity')
+    
+    plt.show()
+
+def continuous_acquisition_test(integration_time_ms:float=30.0) -> None:
+    """
+    Run a continuous image acquisition test with the specified integration time and plots it.
+
+    Args:
+        integration_time_ms (float): The integration time for the acquisition in milliseconds. Default is 100.0 ms.
+    """
+    print(">>>>> Running continuous image acquisition test... <<<<<")
+    
+    pixelx,pixely = getDetector()
+    print(f"Detector size (X, Y): {pixelx}, {pixely}")
+    
+    setReadMode(mode='4. Image')
+    start_pixel, height_pixel = 0, 255
+    setImage(hbin=1,vbin=height_pixel,hstart=1,hend=pixelx,vstart=start_pixel+1,vend=start_pixel+height_pixel)
+    setKineticCycleTime(0)
+    setAcquisitionMode(mode='5. RunTillAbort')
+
+    setExposureTime(integration_time_ms * 1e-3)
+    
+    res = isTriggerModeAvailable('10. Software Trigger')
+    print(f'Trigger mode available: {res}')
+    setTriggerMode('10. Software Trigger')
+    
+    print(f'Acquisition timings: {getAcquisitionTimings_sec()}')
+
+    kinetic_cycle_time_sec = getAcquisitionTimings_sec()[2]
+    
+    print('Acquiring image')
+    startAcquisition()
+    
+    fig, ax = plt.subplots()
+    ax:Axes
+    fig.show()
+    
+    while True:
+        t1 = time.time()
+        sendSoftwareTrigger()
+        waitForAcquisitionTimeOut(int(kinetic_cycle_time_sec*1e3*1.5))
+        
+        t2 = time.time()
+        img = getMostRecentImage(pixelx,1,pixelx*1)
+        arr = img.reshape(-1)
+        ax.clear()
+        ax.plot(arr)
+        
+        t3 = time.time()
+        print(f'Acquisition time: {t2-t1:.3f} sec, Processing time: {t3-t2:.3f} sec')
+        if fig.waitforbuttonpress(10e-3): break
+        
+    abortAcquisition()
 
 #%% Controller class definition
 from threading import Lock
 
 ANDOR_OPE_TEMP = ControllerSpecificConfigEnum.ANDOR_OPERATIONAL_TEMPERATURE.value
-ANDOR_TEMP_INIT_MARGIN = 5
+ANDOR_TEMP_INIT_MARGIN = 5 # temperature margin for initialization [degC]. If temp < ANDOR_OPE_TEMP + ANDOR_TEMP_INIT_MARGIN, then the initialisation finishes
 
 class SpectrometerController_Andor(Class_SpectrometerController):
     def __init__(self):
         self._lock = Lock()
-        self._acquisition_running = False  # tracks whether RunTillAbort is active
         
     # >>> Device initialisation <<<
         init_dir = os.path.split(path_dll_andor)[0]
         initialize(init_dir)
         
-        # Parameter initialisation
+        # Parameter intialisation
         self._x_pixel, self._y_pixel = getDetector()
         self._total_pixel = self._x_pixel * self._y_pixel
         
-        # Detector ROI and readout mode
-        # Configured via ANDOR_READOUT_MODE ('FVB' or 'Single Track').
-        self._setup_readout_mode()
-
-        # --- Readout speed setup ---
-        # VS speed: use the SDK's own recommended fastest index (not hardcoded).
-        vs_idx, vs_speed_us = getFastestRecommendedVSSpeed()
-        setVSSpeed(vs_idx)
-        print(f"VS speed set to index {vs_idx} ({vs_speed_us:.1f} µs/pixel shift)")
-
-        # HS speed: index 0 is always the fastest available.
-        # For the iVac 416 this corresponds to 100 kHz (per spec sheet).
-        # We enumerate and print all options so the user can verify.
-        n_hs = getNumberHSSpeeds()
-        print(f"Available HS speeds ({n_hs} total):")
-        for i in range(n_hs):
-            spd = getHSSpeed(i)
-            print(f"  index {i}: {spd:.3f} MHz")
-        setHSSpeed(0)   # index 0 = fastest
-        print(f"HS speed set to index 0 ({getHSSpeed(0):.3f} MHz)")
-
-        # --- Acquisition mode: RunTillAbort for lowest per-frame overhead ---
-        # Read mode is already set by _setup_readout_mode() above.
+        # Detector initialisation
+        self._set_ROI_parameters()
+        
+        # Acquisition initialisation
+        setReadMode(mode='4. Image')
         setAcquisitionMode(mode='5. RunTillAbort')
-        setKineticCycleTime(0.0)   # minimum possible cycle time
-        setTriggerMode('0. Internal')
-
+        setKineticCycleTime(0.0)
+        setTriggerMode('10. Software Trigger')
+        
+        if not isTriggerModeAvailable(mode='10. Software Trigger'):
+            raise SyntaxError('Trigger mode not available either due to hardware limitations or incorrect settings.'\
+                '(e.g., Read mode has to be set to 4. Image, and Acquisition mode to 5. RunTillAbort)')
+        
         # Acquisition parameters
+        self._flg_isacquiring = threading.Event()
         self._integration_time_us:int = 0
         self._theoretical_wait_time_sec:float = 0.0
         
-        # Initialise the device (cooler + first timing read)
+        # Initialise the device for acquisition
         self._identifier = None
         self.initialisation()
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _start_continuous_acquisition(self) -> None:
-        """
-        (Re)start the RunTillAbort acquisition loop.
-        Must be called with self._lock held or before lock is needed.
-        """
-        if self._acquisition_running:
-            try: abortAcquisition()
-            except: pass
-        startAcquisition()
-        self._acquisition_running = True
-
-    def _stop_continuous_acquisition(self) -> None:
-        if self._acquisition_running:
-            try: abortAcquisition()
-            except: pass
-            self._acquisition_running = False
         
-    # ------------------------------------------------------------------
-    # Public interface
-    # ------------------------------------------------------------------
-
     def get_identifier(self) -> str:
         """
         Returns the unique identifier of the spectrometer controller.
@@ -1078,37 +1045,18 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         Initialises the spectrometer controller
         """
         self._identifier = f"Andor_{getCameraSerialNumber()}"
+        
         self._initialise_cooler()
         self._integration_time_us = self.get_integration_time_us()
-        self._stop_continuous_acquisition()  # ensure not acquiring before shutter config
-        self._open_ex_shutter()
-        # Start the continuous acquisition loop now that everything is configured.
-        with self._lock:
-            self._start_continuous_acquisition()
+        self._start_acquisition()
         
     def terminate(self):
         """
         Terminates the spectrometer controller according to the manufacturer's protocol
         """
-        with self._lock:
-            self._stop_continuous_acquisition()
-        self._close_ex_shutter()
         self._cooler_shutdown_protocol()
-        
-    def _open_ex_shutter(self):
-        """
-        Open the external shutter if available.
-        """
-        try: setShutterEx(1,1,100,100,5)  # type=1: TTL high = open, ext_mode=5: open for any series
-        except Exception as e: print(f"Failed to open external shutter: {e}")
-            
-    def _close_ex_shutter(self):
-        """
-        Close the external shutter if available.
-        """
-        try: setShutterEx(1,1,100,100,2)  # type=1: TTL high = open
-        except Exception as e: print(f"Failed to close external shutter: {e}")
-        
+        self._stop_acquisition()
+
     def _initialise_cooler(self):
         self._lock.acquire()
         coolerON()
@@ -1142,70 +1090,62 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         self._lock.acquire()
         coolerOFF()
         i=0
-        while getTemperature() < SHUTDOWN_TEMP:
+        while getTemperature() < SAFE_SHUTDOWN_TEMP:
             time.sleep(1)
             i+=1
             if i % 5 == 1:
-                print(f"Shutting down... Current: {getTemperature()} degC. Target: {SHUTDOWN_TEMP} degC")
-        print(f"Shut down target temperature reached. Current temperature: {getTemperature()} degC")
+                print(f"Shutting down... Current: {getTemperature()} degC. Target: {SAFE_SHUTDOWN_TEMP} degC")
+        
         self._lock.release()
         
-    def _setup_readout_mode(self):
+    def _set_ROI_parameters(self):
         """
-        Configure the detector readout mode according to ANDOR_READOUT_MODE.
-
-        'full_vertical_binning':
-            Full Vertical Binning: all rows summed on-chip, fastest
-            readout, no spatial selectivity. Uses _set_ROI_parameters()
-            for column ROI/binning.
-        'single_track':
-            A user-defined horizontal band of rows is summed on-chip
-            before readout. Centre row and height set via
-            ANDOR_SINGLE_TRACK_CENTRE and ANDOR_SINGLE_TRACK_HEIGHT.
-            Uses _set_single_track_parameters().
-        """
-        if ANDOR_READOUT_MODE == 'full_vertical_binning':
-            setReadMode(mode='0. Full Vertical Binning')
-            print(f"Readout mode: Full Vertical Binning")
-        elif ANDOR_READOUT_MODE == 'single_track':
-            setReadMode(mode='3. Single-Track')
-            self._set_single_track_parameters()
-            print(f"Readout mode: Single Track")
-        else:
-            raise ValueError(f"Invalid ANDOR_READOUT_MODE: '{ANDOR_READOUT_MODE}'. "
-                             f"Must be 'FVB' or 'Single Track'.")
-
-    def _set_single_track_parameters(self):
-        """
-        Set the Single Track readout parameters for the detector according to
+        Set the Region of Interest (ROI) parameters for the detector according to
         the user-defined settings in the config.ini file.
-
-        Single Track collapses a user-defined horizontal band of rows on-chip
-        before readout, producing a 1-D spectrum of length x_pixel. The centre
-        row and track height are read from ANDOR_SINGLE_TRACK_CENTRE and
-        ANDOR_SINGLE_TRACK_HEIGHT in ControllerSpecificConfigEnum.
-
-        Only the column ROI / binning parameters (COL_MIN, COL_MAX, BIN_COL)
-        are applied here; row parameters are handled by SetSingleTrack itself.
         """
-        # --- Single Track row parameters ---
-        centre = int(ANDOR_SINGLE_TRACK_CENTRE)
-        height = int(ANDOR_SINGLE_TRACK_HEIGHT)
-
-        assert 1 <= centre <= self._y_pixel, \
-            f"ANDOR_SINGLE_TRACK_CENTRE={centre} is outside the sensor row range [1, {self._y_pixel}]."
-        assert 1 <= height <= self._y_pixel, \
-            f"ANDOR_SINGLE_TRACK_HEIGHT={height} is outside the valid range [1, {self._y_pixel}]."
-
-        # The vstart/vend arguments are ignored by the SDK in Single Track mode;
-        # the row selection is handled exclusively by SetSingleTrack.
-        setSingleTrack(centre_pixel=centre, height_pixel=height)
+        xmin_dev = 1
+        xmax_dev = self._x_pixel
+        ymin_dev = 1
+        ymax_dev = self._y_pixel
         
-        self._y_pixel    = 1   # Single Track always produces a single output row
-        self._total_pixel = self._x_pixel
+        xmin_user = ControllerSpecificConfigEnum.ANDOR_ROI_COL_MIN.value
+        xmax_user = ControllerSpecificConfigEnum.ANDOR_ROI_COL_MAX.value
+        xbin_user = ControllerSpecificConfigEnum.ANDOR_ROI_BIN_COL.value
+        
+        ymin_user = ControllerSpecificConfigEnum.ANDOR_ROI_ROW_MIN.value
+        ymax_user = ControllerSpecificConfigEnum.ANDOR_ROI_ROW_MAX.value
+        ybin_user = ControllerSpecificConfigEnum.ANDOR_ROI_BIN_ROW.value
+        
+        xstart = max(xmin_dev, xmin_user)
+        xend = min(xmax_dev, xmax_user)
+        xbin = min(xbin_user, (xend-xstart+1))
+        assert (xend-xstart+1) % xbin == 0, f"Invalid X ROI parameters: {xstart}, {xend}, {xbin}."\
+            "The bin must divide the range evenly. Either change the bin or the COL MIN/MAX values."
 
-        print(f"Single Track: centre={centre}, height={height}, "
-              f"→ effective pixels: {self._x_pixel}")
+        ystart = max(ymin_dev, ymin_user)
+        yend = min(ymax_dev, ymax_user)
+        ybin = min(ybin_user, (yend-ystart+1))
+
+        assert (yend-ystart+1) % ybin == 0, f"Invalid Y ROI parameters: {ystart}, {yend}, {ybin}."\
+            "The bin must divide the range evenly. Either change the bin or the ROW MIN/MAX values."
+            
+        setImage(hbin=xbin, vbin=ybin, hstart=xstart, hend=xend, vstart=ystart, vend=yend)
+
+        self._x_pixel = int((xend - xstart + 1)/xbin)
+        self._y_pixel = int((yend - ystart + 1)/ybin)
+        self._total_pixel = int(self._x_pixel * self._y_pixel)
+
+        print(f"Binning parameters: xstart={xstart}, xend={xend}, xbin={xbin}, ystart={ystart}, yend={yend}, ybin={ybin}")
+        
+    def _start_acquisition(self):
+        with self._lock:
+            startAcquisition()
+            self._flg_isacquiring.set()
+
+    def _stop_acquisition(self):
+        with self._lock:
+            abortAcquisition()
+            self._flg_isacquiring.clear()
             
     def get_integration_time_us(self) -> int:
         """
@@ -1215,9 +1155,9 @@ class SpectrometerController_Andor(Class_SpectrometerController):
             int: Integration time in microseconds
         """
         with self._lock:
-            exposure_sec, _, kinetic_sec = getAcquisitionTimings_sec()
-        self._integration_time_us = int(exposure_sec * 1e6)
-        self._theoretical_wait_time_sec = kinetic_sec
+            exposure_sec,_,kineticCycle_sec = getAcquisitionTimings_sec()
+        self._integration_time_us = int(exposure_sec * 1e6)  # Convert seconds to microseconds
+        self._theoretical_wait_time_sec = kineticCycle_sec
         return self._integration_time_us
     
     def get_integration_time_limits_us(self):
@@ -1229,64 +1169,51 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         """
         return (10, 1e9, 1)
     
-    def set_integration_time_us(self, integration_time: int) -> int:
-        """
-        Set the integration time.  RunTillAbort is restarted automatically
-        after the exposure time change so the new setting takes effect.
-        """
-        if not isinstance(integration_time, (int, float)):
-            raise ValueError("Integration time must be a number")
-        integration_time = int(integration_time)
+    def set_integration_time_us(self, integration_time:int) -> int:
+        """Sets the integration time of the device
 
-        with self._lock:
-            # Must stop acquisition before changing exposure time
-            self._stop_continuous_acquisition()
-            setExposureTime(integration_time * 1e-6)
-            self._start_continuous_acquisition()
+        Args:
+            integration_time (int): Integration time in [device unit] 
+            (microseconds for the QE Pro)
+
+        Returns:
+            int: Device integrationt time after set up in microseconds
+        """
+        if not isinstance(integration_time,int) and not isinstance(integration_time,float):
+            raise ValueError("Integration time must be an integer")
+        integration_time = int(integration_time)
+        
+        with self._lock: setExposureTime(integration_time * 1e-6)
         
         self._integration_time_us = self.get_integration_time_us()
         return self._integration_time_us
     
     def measure_spectrum(self) -> tuple[pd.DataFrame, int, int]:
-        """
-        Measure a spectrum using the RunTillAbort circular buffer.
-
-        The acquisition loop is started once during initialisation and kept
-        running continuously.  Each call to measure_spectrum simply waits for
-        the next completed frame and retrieves it with GetMostRecentImage,
-        which avoids the per-frame StartAcquisition overhead that was
-        preventing 30 Hz operation.
-
+        """ 
+        A function to measure the spectrum of the Raman spectrometer.
+        
         Returns:
-            tuple[pd.DataFrame, int, int]:
-                - DataFrame with wavelength and intensity columns.
-                - Timestamp of the measurement in microseconds (integer).
-                - Integration time used in microseconds.
+            tuple[pd.DataFrame, int, int]: A tuple containing the following:
+                - pandas.DataFrame: A DataFrame containing the measured spectrum with the wavelength and
+                    intensity columns, from the config file. (as a global constant)
+                - int: The timestamp of the measurement in integer format (microseconds).
+                - int: The integration time used for the measurement in microseconds.
         """
         with self._lock:
             timestamp = get_timestamp_us_int()
-
-            # Wait for one new frame.  Timeout = 1.5× the kinetic cycle time,
-            # but at least 500 ms so a very short exposure never times out too fast.
-            timeout_ms = max(500, int(self._theoretical_wait_time_sec * 1e3 * 1.5))
-            frame_ready = waitForAcquisitionTimeOut(timeout_ms)
-            if not frame_ready:
-                raise TimeoutError(
-                    f"No new frame arrived within {timeout_ms} ms "
-                    f"(kinetic cycle = {self._theoretical_wait_time_sec*1e3:.1f} ms)"
-                )
-
-            # In FVB + RunTillAbort the SDK collapses all rows, so the result
-            # is a 1-D array of length x_pixel stored as a (1 × x_pixel) image.
-            image = getMostRecentImage(self._x_pixel, 1, self._x_pixel)
-            intensity = image.reshape(-1)
-
-        wavelength = np.arange(1, self._x_pixel + 1, dtype=float).tolist()
-        intensity_list = intensity.astype(float).tolist()
-
+            sendSoftwareTrigger()
+            waitForAcquisitionTimeOut(int(self._theoretical_wait_time_sec * 1e3 * 1.5))
+            intensity = getMostRecentImage(self._x_pixel,self._y_pixel,self._total_pixel)
+        
+        intensity = np.sum(intensity, axis=0).reshape(-1).tolist()
+        wavelength = np.arange(1,self._x_pixel+1).tolist()
+        
+        intensity = [float(i) for i in intensity]
+        wavelength = [float(i) for i in wavelength]
+        
         spectra = pd.DataFrame({
             DataAnalysisConfigEnum.WAVELENGTH_LABEL.value: wavelength,
-            DataAnalysisConfigEnum.INTENSITY_LABEL.value: intensity_list,
+            DataAnalysisConfigEnum.INTENSITY_LABEL.value: intensity,
         })
         return (spectra, timestamp, self._integration_time_us)
     
@@ -1300,111 +1227,9 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         with self._lock:
             saveAsSif(path)
 
-    def capture_full_image_for_track_setup(self, integration_time_ms: float = 100.0) -> np.ndarray:
-        """
-        Capture a single full 2-D image of the sensor in Image mode and display
-        it with the current Single Track region overlaid. Intended as a setup
-        utility to help choose ANDOR_SINGLE_TRACK_CENTRE and
-        ANDOR_SINGLE_TRACK_HEIGHT.
-
-        The RunTillAbort acquisition loop is stopped before the image acquisition
-        and restarted afterwards with the original readout mode restored, so normal
-        operation is unaffected after this call returns.
-
-        Args:
-            integration_time_ms (float): Integration time for the image in milliseconds.
-
-        Returns:
-            np.ndarray: The captured full-sensor image (y_pixel × x_pixel).
-        """
-        with self._lock:
-            # --- Stop continuous acquisition ---
-            self._stop_continuous_acquisition()
-
-            # --- Switch temporarily to full Image mode ---
-            x_pixel_full, y_pixel_full = getDetector()
-            setReadMode(mode='4. Image')
-            setAcquisitionMode(mode='1. Single')
-            setImage(hbin=1, vbin=1, hstart=1, hend=x_pixel_full, vstart=1, vend=y_pixel_full)
-            setExposureTime(integration_time_ms * 1e-3)
-            setTriggerMode('0. Internal')
-            setKineticCycleTime(0.0)
-
-            # --- Acquire ---
-            print(f"Capturing full image ({x_pixel_full} x {y_pixel_full}) "
-                  f"at {integration_time_ms:.1f} ms integration...")
-            startAcquisition()
-            waitForAcquisition()
-            img = getAcquiredData(x_pixel_full * y_pixel_full).reshape(y_pixel_full, x_pixel_full)
-
-            # --- Restore original readout mode and restart ---
-            self._setup_readout_mode()
-            setAcquisitionMode(mode='5. RunTillAbort')
-            setKineticCycleTime(0.0)
-            setTriggerMode('0. Internal')
-            setExposureTime(self._integration_time_us * 1e-6)
-            self._start_continuous_acquisition()
-
-        # --- Plot ---
-        centre = ANDOR_SINGLE_TRACK_CENTRE
-        height = ANDOR_SINGLE_TRACK_HEIGHT
-        top    = centre - height // 2 - 1  # convert to 0-indexed for plotting
-        bottom = centre + height // 2 - 1
-
-        fig, axes = plt.subplots(2, 2, figsize=(14, 5),
-                                 gridspec_kw={'width_ratios': [3, 1]})
-
-        # Left: 2-D image with Single Track region overlaid
-        ax_img: Axes = axes[0,0]
-        im = ax_img.imshow(img, cmap='inferno', aspect='auto',
-                           extent=[1, x_pixel_full, y_pixel_full, 1])
-        ax_img.axhline(top,    color='cyan', linewidth=1.5, linestyle='--',
-                       label=f'Track top (row {top+1})')
-        ax_img.axhline(bottom, color='cyan', linewidth=1.5, linestyle='-',
-                       label=f'Track bottom (row {bottom+1})')
-        ax_img.axhline(centre, color='lime', linewidth=1.0, linestyle=':',
-                       label=f'Centre (row {centre})')
-        ax_img.set_xlabel('Column (pixel)')
-        ax_img.set_ylabel('Row (pixel)')
-        ax_img.set_title(f'Full sensor image — Single Track overlay\n'
-                         f'centre={centre}, height={height}')
-        ax_img.legend(fontsize=8, loc='upper right')
-        plt.colorbar(im, ax=ax_img, label='Counts')
-
-        # Right: row sum profile (vertical) to help identify signal band
-        ax_prof: Axes = axes[0,1]
-        row_sum = np.sum(img, axis=1)
-        ax_prof.plot(row_sum, np.arange(1, y_pixel_full + 1))
-        ax_prof.axhline(top + 1,    color='cyan', linewidth=1.5, linestyle='--')
-        ax_prof.axhline(bottom + 1, color='cyan', linewidth=1.5, linestyle='-')
-        ax_prof.axhline(centre,     color='lime', linewidth=1.0, linestyle=':')
-        ax_prof.invert_yaxis()
-        ax_prof.set_xlabel('Summed intensity')
-        ax_prof.set_ylabel('Row (pixel)')
-        ax_prof.set_title('Row sum profile')
-
-        # Bottom: Spectrum obtained by summing the full image over the Single Track rows, to verify it looks correct.
-        ax_spec: Axes = axes[1,0]
-        track_sum = np.sum(img[top:bottom+1, :], axis=0)
-        ax_spec.plot(np.arange(1, x_pixel_full + 1), track_sum)
-        ax_spec.set_xlabel('Column (pixel)')
-        ax_spec.set_ylabel('Summed intensity')
-        ax_spec.set_title('Spectrum from Single Track rows')
-                
-        plt.tight_layout()
-        plt.show()
-
-        print(f"Current Single Track: centre={centre}, height={height} "
-              f"(rows {top+1} – {bottom+1})")
-        print(f"To update: set ANDOR_SINGLE_TRACK_CENTRE and ANDOR_SINGLE_TRACK_HEIGHT "
-              f"at the top of this file.")
-
-        return img
-
-
 #%% Tests
 if __name__ == "__main__":
-    matplotlib.use('TkAgg')
+    # matplotlib.use('TkAgg')
     # try: initialisation_and_connection_test()
     # except Exception as e: print(f"Initialisation and connection test failed: {e}")
 
@@ -1426,57 +1251,30 @@ if __name__ == "__main__":
     # try: img = acquisition_test_img(); plot_img(img)
     # except Exception as e: print(f"Acquisition test failed: {e}")
     
-    # try: controller.capture_full_image_for_track_setup(integration_time_ms=100.0)
-    # except Exception as e: print(f"Track setup image failed: {e}")
-    
     # try: continuous_acquisition_test()
     # except Exception as e: print(f"Continuous acquisition test failed: {e}")
     
     # try: shutdown()
     # except Exception as e: print(f"Shutdown failed: {e}")
     
-    
-    # fig, ax = plt.subplots()
-    # fig.show()
-    
     controller = SpectrometerController_Andor()
+    t1 = time.time()
+    for i in range(20):
+        controller.measure_spectrum()
+    t2 = time.time()
     
-    try:
-        matplotlib.use('TkAgg')
-        controller.capture_full_image_for_track_setup(integration_time_ms=100.0)
-    except Exception as e: print(f"Track setup image failed: {e}")
+    t1 = time.time()
+    for i in range(100):
+        controller.measure_spectrum()
+    t2 = time.time()
+    print(f"Time taken for 100 measurements: {t2 - t1} seconds, time per measurement: {(t2 - t1) / 100} seconds")
     
-    int_time_us = int(100e3)   # 100 ms
-    controller.set_integration_time_us(int_time_us)
-    print(f"Integration time set to {controller.get_integration_time_us()/1e3:.1f} ms")
-
-    # Throughput benchmark
-    fig, ax = plt.subplots()
-    t_start = time.time()
-    count = 0
+    # Save the last measurement as a .sif file
     try:
-        while True:
-            mea, _, _ = controller.measure_spectrum()
-            count += 1
-            elapsed = time.time() - t_start
-            if elapsed >= 1.0:
-                print(f"Time taken: {elapsed / count * 1e3:.1f} ms. Throughput: {count / elapsed:.1f} frames/sec")
-                count = 0
-                t_start = time.time()
-
-            ax.clear()
-            ax.plot(mea[DataAnalysisConfigEnum.WAVELENGTH_LABEL.value],
-                    mea[DataAnalysisConfigEnum.INTENSITY_LABEL.value])
-            fig.canvas.draw()
-            fig.canvas.flush_events()
-            if fig.waitforbuttonpress(1e-3): break
-    except: pass
-
-    # # Save the last measurement as a .sif file
-    # try:
-    #     controller._test_save_last_measurement_as_sif("test_measurement.sif")
-    #     print(f'Saved last measurement as test_measurement.sif')
-    # except Exception as e:
-    #     print(f"Failed to save last measurement as .sif file: {e}")
-
+        controller._stop_acquisition()
+        controller._test_save_last_measurement_as_sif("test_measurement.sif")
+        print(f'Saved last measurement as test_measurement.sif')
+    except Exception as e:
+        print(f"Failed to save last measurement as .sif file: {e}")
+    
     controller.terminate()

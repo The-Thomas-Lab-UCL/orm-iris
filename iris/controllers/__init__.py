@@ -181,12 +181,9 @@ dict_controllerSpecific_default = {
     # > Andor camera parameters <
     'andor_atmcd64d_dll_path': '', # Path to the Andor camera DLL
     'andor_atspectrograph_dll_path': '', # Path to the Andor spectrograph DLL
-    'andor_roi_row_min': 1, # Minimum row index for the region of interest (ROI) for the Andor camera
-    'andor_roi_row_max': 10000, # Maximum row index for the region of interest (ROI) for the Andor camera
-    'andor_roi_col_min': 1, # Minimum column index for the region of interest (ROI) for the Andor camera
-    'andor_roi_col_max': 10000, # Maximum column index for the region of interest (ROI) for the Andor camera
-    'andor_roi_bin_row': 10000, # Binning factor for the row axis for the Andor camera.
-    'andor_roi_bin_col': 1, # Binning factor for the column axis for the Andor camera.
+    'andor_readout_mode': 'single_track', # Readout mode for the Andor camera. 'single_track' or 'full_vertical_binning'. Default: 'full_vertical_binning'
+    'andor_single_track_centre': 1, # Centre of the single track readout mode for the Andor camera in pixel. Required if 'andor_readout_mode' is set to 'single_track'
+    'andor_single_track_height': 1, # Height of the single track readout mode for the Andor camera in pixel. Required if 'andor_readout_mode' is set to 'single_track'
     'andor_operational_temperature': '', # Operational temperature for the Andor camera in degree Celcius. Set it to '' to disable temperature control (default)
     'andor_termination_temperature': '', # Termination temperature for the Andor camera in degree Celcius. Set it to '' to use the default termination temperature (default)
     # > PFM450 stage parameters <
@@ -229,12 +226,9 @@ dict_controllerSpecific_comments = {
     # > Andor camera parameters <
     'andor_atmcd64d_dll_path': 'Path to the Andor camera DLL',
     'andor_atspectrograph_dll_path': 'Path to the Andor spectrograph DLL',
-    'andor_roi_row_min': 'Minimum row index for the region of interest (ROI) for the Andor camera',
-    'andor_roi_row_max': 'Maximum row index for the region of interest (ROI) for the Andor camera',
-    'andor_roi_col_min': 'Minimum column index for the region of interest (ROI) for the Andor camera',
-    'andor_roi_col_max': 'Maximum column index for the region of interest (ROI) for the Andor camera',
-    'andor_roi_bin_row': 'Binning factor for the row axis for the Andor camera',
-    'andor_roi_bin_col': 'Binning factor for the column axis for the Andor camera',
+    'andor_readout_mode': 'Readout mode for the Andor camera. "single_track" or "full_vertical_binning". Default: "full_vertical_binning"',
+    'andor_single_track_centre': 'Centre of the single track readout mode for the Andor camera in pixel. Required if "andor_readout_mode" is set to "single_track"',
+    'andor_single_track_height': 'Height of the single track readout mode for the Andor camera in pixel. Required if "andor_readout_mode" is set to "single_track"',
     'andor_operational_temperature': 'Operational temperature for the Andor camera in degree Celcius. Set it to "" to disable temperature control (default)',
     'andor_termination_temperature': 'Termination temperature for the Andor camera in degree Celcius. Set it to "" to use the default termination temperature (default)',
     # > PFM450 stage parameters <
@@ -286,12 +280,9 @@ class ControllerSpecificConfigEnum(Enum):
     # > Andor camera parameters <
     ANDOR_ATMCD64D_DLL_PATH = dict_controllerSpecific_read['andor_atmcd64d_dll_path']
     ANDOR_ATSPECTROGRAPH_DLL_PATH = dict_controllerSpecific_read['andor_atspectrograph_dll_path']
-    ANDOR_ROI_ROW_MIN = dict_controllerSpecific_read['andor_roi_row_min']
-    ANDOR_ROI_ROW_MAX = dict_controllerSpecific_read['andor_roi_row_max']
-    ANDOR_ROI_COL_MIN = dict_controllerSpecific_read['andor_roi_col_min']
-    ANDOR_ROI_COL_MAX = dict_controllerSpecific_read['andor_roi_col_max']
-    ANDOR_ROI_BIN_ROW = dict_controllerSpecific_read['andor_roi_bin_row']
-    ANDOR_ROI_BIN_COL = dict_controllerSpecific_read['andor_roi_bin_col']
+    ANDOR_READOUT_MODE = dict_controllerSpecific_read['andor_readout_mode']
+    ANDOR_SINGLE_TRACK_CENTRE = dict_controllerSpecific_read['andor_single_track_centre']
+    ANDOR_SINGLE_TRACK_HEIGHT = dict_controllerSpecific_read['andor_single_track_height']
     ANDOR_OPERATIONAL_TEMPERATURE = dict_controllerSpecific_read['andor_operational_temperature']
     ANDOR_TERMINATION_TEMPERATURE = dict_controllerSpecific_read['andor_termination_temperature']
     # > PFM450 stage parameters <
@@ -340,7 +331,7 @@ elif ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'pi_legacy':
 elif ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'pi_dll':
     from .raman_spectrometer_controller_PI_dll import SpectrometerController_PI as Controller_Spectrometer
 elif ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'andor':
-    from .raman_spectrometer_controller_Andor_pylablib import SectrometerController_AndorSDK2 as Controller_Spectrometer
+    from .raman_spectrometer_controller_Andor_dll import SpectrometerController_Andor as Controller_Spectrometer
 elif ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'wasatch_enlighten':
     from .raman_spectrometer_controller_WasatchEnlighten import SpectrometerController_WasatchEnlighten as Controller_Spectrometer
 else:
