@@ -62,15 +62,24 @@ ANDOR_READOUT_MODE = ControllerSpecificConfigEnum.ANDOR_READOUT_MODE.value
 path_dll_andor = ControllerSpecificConfigEnum.ANDOR_ATMCD64D_DLL_PATH.value
 path_dll_spectrograph = ControllerSpecificConfigEnum.ANDOR_ATSPECTROGRAPH_DLL_PATH.value
 
-list_dirpath_dll = [os.path.abspath(p) for p in os.environ.get("PATH","").split(os.pathsep) if p]
-list_dirpath_dll.append(os.path.abspath("."))
-list_dirpath_dll.append(os.path.abspath(os.path.split(path_dll_andor)[0]))
-list_dirpath_dll.append(os.path.abspath(os.path.split(path_dll_spectrograph)[0]))
-list_dir_dll = []
+_first_dll_load = 'ANDOR_DLL_INITIALIZED' not in os.environ
 
+_seen_paths: set[str] = set()
+list_dirpath_dll: list[str] = []
+for _p in [os.path.abspath(p) for p in os.environ.get("PATH","").split(os.pathsep) if p] + [
+    os.path.abspath("."),
+    os.path.abspath(os.path.split(path_dll_andor)[0]),
+    os.path.abspath(os.path.split(path_dll_spectrograph)[0]),
+]:
+    if _p not in _seen_paths:
+        _seen_paths.add(_p)
+        list_dirpath_dll.append(_p)
+
+list_dir_dll = []
+_dll_load_errors: set[str] = set()
 for path in list_dirpath_dll:
     try: list_dir_dll.append(os.add_dll_directory(path))
-    except Exception as e: print(e)
+    except Exception as e: _dll_load_errors.add(str(e))
 
 andorDLL = ctypes.cdll.LoadLibrary(path_dll_andor)
 specDLL = ctypes.cdll.LoadLibrary(path_dll_spectrograph)
@@ -78,7 +87,11 @@ specDLL = ctypes.cdll.LoadLibrary(path_dll_spectrograph)
 for dir_dll in list_dir_dll:
     dir_dll.close()
 
-print("Andor spectrometer: DLLs loaded successfully")
+if _first_dll_load:
+    for _err in sorted(_dll_load_errors):
+        print(_err)
+    print("Andor spectrometer: DLLs loaded successfully")
+    os.environ['ANDOR_DLL_INITIALIZED'] = '1'
 
 #%% Andor structures
 class AndorCapabilities(ctypes.Structure):
@@ -964,10 +977,11 @@ def saveAsSif(path: str) -> None:
     else: raise Exception(f"Unknown error occurred. Return code: {ret}")
 
 #%% KEY PARAMETERS
-SAFE_SHUTDOWN_TEMP = -10    # Temperature above which it is safe for the device to be shut down.
-                            # Any lower temperatures risks DAMAGING the sensor in the long term.
-                            # Naturally, DO NOT MODIFY THIS CONSTANT! Safe temp: -20degC
-assert SAFE_SHUTDOWN_TEMP >= -20, f"Safe shutdown temperature must be at least -20 degC, but got {SAFE_SHUTDOWN_TEMP} degC"
+try: SHUTDOWN_TEMP = int(float(ControllerSpecificConfigEnum.ANDOR_TERMINATION_TEMPERATURE.value))
+except: SHUTDOWN_TEMP = -10     # Temperature above which it is safe for the device to be shut down.
+                                # Any lower temperatures risks DAMAGING the sensor in the long term.
+                                # Naturally, DO NOT MODIFY THIS CONSTANT! Safe temp: -20degC
+assert SHUTDOWN_TEMP >= -20, f"Safe shutdown temperature must be at least -20 degC, but got {SHUTDOWN_TEMP} degC"
 
 #%% Controller class definition
 from threading import Lock
@@ -1128,11 +1142,12 @@ class SpectrometerController_Andor(Class_SpectrometerController):
         self._lock.acquire()
         coolerOFF()
         i=0
-        while getTemperature() < SAFE_SHUTDOWN_TEMP:
+        while getTemperature() < SHUTDOWN_TEMP:
             time.sleep(1)
             i+=1
             if i % 5 == 1:
-                print(f"Shutting down... Current: {getTemperature()} degC. Target: {SAFE_SHUTDOWN_TEMP} degC")
+                print(f"Shutting down... Current: {getTemperature()} degC. Target: {SHUTDOWN_TEMP} degC")
+        print(f"Shut down target temperature reached. Current temperature: {getTemperature()} degC")
         self._lock.release()
         
     def _setup_readout_mode(self):
