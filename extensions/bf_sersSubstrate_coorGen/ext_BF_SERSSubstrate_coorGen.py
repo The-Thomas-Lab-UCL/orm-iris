@@ -377,7 +377,7 @@ class _PlotWorker(QObject):
             f'N={len(r._coor.mapping_coordinates)}',
             fontsize=fs)
         ax['overlay'].axis('off')
-        ax['overlay'].legend(fontsize=fs - 1)
+        # ax['overlay'].legend(fontsize=fs - 1)
 
         sc_arr = np.array(r._coor.mapping_coordinates)
         ax['mea'].scatter(sc_arr[:, 0], sc_arr[:, 1],
@@ -387,7 +387,7 @@ class _PlotWorker(QObject):
         ax['mea'].set_ylabel('Y mea [mm]', fontsize=fs)
         ax['mea'].tick_params(labelsize=fs - 1)
         ax['mea'].set_title('Measurement frame (laser position)', fontsize=fs)
-        ax['mea'].legend(fontsize=fs - 1)
+        # ax['mea'].legend(fontsize=fs - 1)
 
         self.sig_done.emit(fig, r.get_name())
 
@@ -620,6 +620,9 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
         old_fig = self._result_canvas.figure
         self._result_canvas.figure = fig
         fig.set_canvas(self._result_canvas)
+        w, h = self._result_canvas.width(), self._result_canvas.height()
+        if w > 0 and h > 0:
+            fig.set_size_inches(w / fig.dpi, h / fig.dpi, forward=False)
         self._result_canvas.draw_idle()
         import matplotlib.pyplot as plt
         plt.close(old_fig)

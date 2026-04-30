@@ -64,9 +64,9 @@ class MultiTranslator_Worker(QObject):
                 mapping_coordinates=translated_coors
             )
         
-        print(f"Translated {coor.mappingUnit_name} by {translation_mm} mm.")
-        print(f"Original first coordinate: {coor.mapping_coordinates[0]}, Translated first coordinate: {modified_coor.mapping_coordinates[0]}")
-        print(f'New coordinates: {modified_coor.mapping_coordinates[:5]}')
+        # print(f"Translated {coor.mappingUnit_name} by {translation_mm} mm.")
+        # print(f"Original first coordinate: {coor.mapping_coordinates[0]}, Translated first coordinate: {modified_coor.mapping_coordinates[0]}")
+        # print(f'New coordinates: {modified_coor.mapping_coordinates[:5]}')
         
         return modified_coor
 
