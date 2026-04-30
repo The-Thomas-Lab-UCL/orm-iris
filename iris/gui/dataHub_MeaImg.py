@@ -297,7 +297,6 @@ class Image_SaverLoader_Worker(QObject):
             file_path (str): Path to the database file
         """
         try:
-            hub.reset_ImageMeasurementUnits()
             handler = MeaImg_Handler()
             handler.load_ImageMeasurementHub_database(file_path,hub)
             self.finished.emit(self.msg_load_db)
