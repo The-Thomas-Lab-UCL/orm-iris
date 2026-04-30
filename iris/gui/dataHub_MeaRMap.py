@@ -319,7 +319,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         # Widgets to show the stored data
         self._tree = wdg.tree_data
         self._tree.setColumnCount(3)
-        self._tree.setHeaderLabels(["Region of interest name", "Metadata", "Number of points"])
+        self._tree.setHeaderLabels(["Region of interest name", "Measurements", "Metadata"])
         
         # Set up the searchbar
         wdg.ent_searchbar.textChanged.connect(lambda: self.update_tree(keep_selection=False))
@@ -516,7 +516,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         for unit_id in list_matched_ids:
             idx = list_unit_ids.index(unit_id)
             qw.QTreeWidgetItem(self._tree,
-                [list_unit_names[idx], str(list_metadata[idx]), str(list_num_measurements[idx])])
+                [list_unit_names[idx], str(list_num_measurements[idx]), str(list_metadata[idx])])
             
         # Set the selection back to the previous selection
         if keep_selection: self.set_selection_unitID(list_unitID)
