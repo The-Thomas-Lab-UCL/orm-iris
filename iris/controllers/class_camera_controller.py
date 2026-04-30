@@ -178,7 +178,7 @@ class Class_CameraController:
         """
         cv2.imshow(win_name, frame)
     
-    def quit(self,win_name:str=None) -> None:
+    def quit(self,win_name:str|None=None) -> None:
         print('video stopped')
         self.camera_termination()
         if win_name: cv2.destroyWindow(win_name)

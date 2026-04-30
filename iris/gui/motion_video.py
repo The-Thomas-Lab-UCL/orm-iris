@@ -1221,7 +1221,22 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
             qw.QMessageBox.information(main_window, 'Exposure time set', 'Exposure time set to {} ms'.format(self._camera_ctrl.get_exposure_time_us()/1e3))
         except Exception as e:
             qw.QMessageBox.critical(main_window, 'Error', 'Failed to set exposure time:\n' + str(e))
+            
+    def get_camera_exposure_ms(self) -> float|None:
+        """
+        Gets the camera exposure time in milliseconds
 
+        Returns:
+            float|None: The camera exposure time in milliseconds, or None if failed to get
+        """
+        try:
+            exposure_time_ms = self._camera_ctrl.get_exposure_time_us()
+            if exposure_time_ms is None: raise ValueError('Failed to get current exposure time from the camera')
+            return exposure_time_ms/1e3
+        except Exception as e:
+            qw.QMessageBox.critical(self, 'Error', 'Failed to get exposure time:\n' + str(e))
+            return None
+            
     def reinitialise_connection(self, unit: Literal['xy', 'z', 'camera']) -> None:
         """
         Reinitialises the connection to the stage or camera.

@@ -54,7 +54,7 @@ class MeaImg_Unit():
         
     """
     def __init__(self,unit_name:str|None=None,calibration:ImgMea_Cal|None=None,
-                 reconstruct:bool=False):
+                 reconstruct:bool=False,exposure_time_ms:float=-1.0):
         """
         Initialises the image measurement class
         
@@ -74,8 +74,9 @@ class MeaImg_Unit():
         self._unitName:str = unit_name if unit_name != None else get_timestamp_us_str()
         self._unitID:str = uuid.uuid4().hex
         self._calibration:ImgMea_Cal|None = calibration
-        
-        self._list_metadata_keys = ['id','name','calibration_id','calibration_dict']
+        self._exposure_time_ms:float = float(exposure_time_ms)
+
+        self._list_metadata_keys = ['id','name','calibration_id','calibration_dict','exposure_time_ms']
         
         # Stitched image parameters
         self._flg_mat_calculated:bool = False    # Flag to check if the rotation correction matrix is calculated
@@ -109,6 +110,7 @@ class MeaImg_Unit():
             'name':str,
             'calibration_id':str,
             'calibration_dict':dict,
+            'exposure_time_ms':float,
         }
         
         self._idname_keys = ['id','name']   # Keys for the ID and name to access the metadata
@@ -120,7 +122,8 @@ class MeaImg_Unit():
                 'id':self._unitID,
                 'name':self._unitName,
                 'calibration_id':self._calibration.id,
-                'calibration_dict':self._calibration.get_calibration_asdict()
+                'calibration_dict':self._calibration.get_calibration_asdict(),
+                'exposure_time_ms':self._exposure_time_ms,
             }
             assert set(self._metadata.keys()) == set(self._metadata_types.keys()), 'Metadata keys must match the metadata types'
         
@@ -135,6 +138,13 @@ class MeaImg_Unit():
         self._unitName = unit_name
         self._metadata['name'] = unit_name
         
+    def get_exposure_time_ms(self) -> float:
+        return self._exposure_time_ms
+
+    def set_exposure_time_ms(self, exposure_time_ms: float) -> None:
+        self._exposure_time_ms = float(exposure_time_ms)
+        self._metadata['exposure_time_ms'] = self._exposure_time_ms
+
     def get_dict_measurement_types(self) -> dict:
         """
         Returns the measurements dictionary types
@@ -178,8 +188,10 @@ class MeaImg_Unit():
         Args:
             dict_meta (dict): Metadata dictionary
         """
-        assert all([key in dict_meta.keys() for key in set(self._metadata.keys())]), 'Metadata keys must match the metadata types'
-        
+        # For backward compatibility, the exposure_time_ms key is not required in the metadata dictionary, but if it is present, it will be used to set the exposure time of the unit. This is because the exposure time is an important parameter that should be stored in the metadata for future reference, but it was not included in the initial implementation of the MeaImg_Unit class.
+        required_keys = {k for k in self._metadata_types if k != 'exposure_time_ms'}
+        assert required_keys.issubset(dict_meta.keys()), 'Metadata keys must match the metadata types'
+
         self._unitID = dict_meta['id']
         self._unitName = dict_meta['name']
         
@@ -188,7 +200,8 @@ class MeaImg_Unit():
         
         self._calibration = cal
         self._flg_mat_calculated = False
-        
+        self._exposure_time_ms = float(dict_meta.get('exposure_time_ms', 0.0))
+
         self.refresh_metadata()
         
     def refresh_metadata(self):
@@ -200,7 +213,8 @@ class MeaImg_Unit():
             'id':self._unitID,
             'name':self._unitName,
             'calibration_id':self._calibration.id,
-            'calibration_dict':self._calibration.get_calibration_asdict()
+            'calibration_dict':self._calibration.get_calibration_asdict(),
+            'exposure_time_ms':self._exposure_time_ms,
         }
         
     def get_metadata_types(self) -> dict:
@@ -259,6 +273,7 @@ class MeaImg_Unit():
             'name': unit_name,
             'calibration_id': cal_scaled.id,
             'calibration_dict': cal_scaled.get_calibration_asdict(),
+            'exposure_time_ms': self._exposure_time_ms,
         })
 
         dict_mea_orig = self.get_dict_measurement()
@@ -307,6 +322,7 @@ class MeaImg_Unit():
             'name': unit_name,
             'calibration_id': self._calibration.id,
             'calibration_dict': self._calibration.get_calibration_asdict(),
+            'exposure_time_ms': self._exposure_time_ms,
         })
         
         new_unit.set_dict_measurement_fromfile({

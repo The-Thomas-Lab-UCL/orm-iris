@@ -97,6 +97,11 @@ class Ui_tiling_method(object):
 
         self.main_layout.addLayout(self.horizontalLayout_2)
 
+        self.btn_quickCapture = QPushButton(tiling_method)
+        self.btn_quickCapture.setObjectName(u"btn_quickCapture")
+
+        self.main_layout.addWidget(self.btn_quickCapture)
+
 
         self.verticalLayout_5.addLayout(self.main_layout)
 
@@ -112,5 +117,6 @@ class Ui_tiling_method(object):
         self.chk_lres.setText(QCoreApplication.translate("tiling_method", u"Show low-resolution image (faster processing)", None))
         self.btn_capture.setText(QCoreApplication.translate("tiling_method", u"Perform image tiling", None))
         self.btn_stop.setText(QCoreApplication.translate("tiling_method", u"Stop", None))
+        self.btn_quickCapture.setText(QCoreApplication.translate("tiling_method", u"Quick-capture current camera feed", None))
     # retranslateUi
 

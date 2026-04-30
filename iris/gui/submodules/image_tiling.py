@@ -276,8 +276,10 @@ class Wdg_HiLvlTiling(qw.QWidget):
         
         self._combo_imgunits.currentIndexChanged.connect(self._plot_imgunit_combobox)
         self._btn_takeImages = wdg.btn_capture
+        self._btn_quickCapture = wdg.btn_quickCapture
         self._btn_stop = wdg.btn_stop
         self._btn_takeImages.clicked.connect(self._take_image)
+        self._btn_quickCapture.clicked.connect(self._quick_capture)
         self._flg_stop_capture = threading.Event()
         self._btn_stop.clicked.connect(self._flg_stop_capture.set)
         
@@ -425,6 +427,79 @@ class Wdg_HiLvlTiling(qw.QWidget):
         id = dict_nameToID[name]
         return hub.get_ImageMeasurementUnit(unit_id=id)
         
+    def _quick_capture(self):
+        """
+        Capture the current camera frame at the current stage position and save it
+        as a new ImageUnit in the image hub.
+        """
+        cal = deepcopy(self._getter_calibration())
+        if not isinstance(cal, ImgMea_Cal) or not cal.check_calibration_set():
+            qw.QMessageBox.warning(self, 'Error', 'No calibration found')
+            return
+
+        img = self._motion_controller.get_current_image()
+        if not isinstance(img, Image.Image):
+            qw.QMessageBox.warning(self, 'Error', 'No image received from the controller')
+            return
+
+        coords = self._motion_controller.get_coordinates_closest_mm()
+        x, y, z = coords
+        if x is None or y is None or z is None:
+            qw.QMessageBox.warning(self, 'Error', 'Could not retrieve current stage coordinates')
+            return
+
+        list_unavailable_names = self._dataHub_img.get_ImageMeasurement_Hub().get_list_ImageUnit_names()
+        while True:
+            imgname, ok = qw.QInputDialog.getText(
+                self,
+                'Quick Capture',
+                'Enter a name for the captured image:',
+                qw.QLineEdit.Normal,  # pyright: ignore[reportAttributeAccessIssue]
+                ''
+            )
+            if not ok:
+                return
+            if not imgname:
+                qw.QMessageBox.warning(self, 'Error', 'Image name cannot be empty')
+                continue
+            if imgname in list_unavailable_names:
+                retry = qw.QMessageBox.question(
+                    self,
+                    'Name already exists',
+                    'Image name already exists. Please enter a different name.',
+                    qw.QMessageBox.Retry | qw.QMessageBox.Cancel,  # pyright: ignore[reportAttributeAccessIssue]
+                    qw.QMessageBox.Retry  # pyright: ignore[reportAttributeAccessIssue]
+                )
+                if retry == qw.QMessageBox.Cancel:  # pyright: ignore[reportAttributeAccessIssue]
+                    return
+                continue
+            break
+
+        raw_exp_ms = self._motion_controller.get_camera_exposure_ms()
+        exposure_ms = float(raw_exp_ms) if raw_exp_ms is not None else -1.0
+        imgUnit = MeaImg_Unit(unit_name=imgname, calibration=cal, exposure_time_ms=exposure_ms)
+        imgUnit.add_measurement(
+            timestamp=get_timestamp_us_str(),
+            x_coor=x,
+            y_coor=y,
+            z_coor=z,
+            image=img
+        )
+
+        try:
+            self._dataHub_img.get_ImageMeasurement_Hub().append_ImageMeasurementUnit(imgUnit)
+        except Exception as e:
+            qw.QMessageBox.warning(self, 'Error saving ImageUnit', f'Error saving the captured ImageUnit: {e}')
+            return
+
+        try:
+            self._combo_imgunits.setCurrentText(imgUnit.get_IdName()[1])
+        except Exception as e:
+            qw.QMessageBox.warning(self, 'Error updating combobox', f'Error updating the combobox: {e}')
+
+        self._canvas_img.set_image(img)
+        self._statbar.showMessage(f'Quick capture saved as "{imgname}"')
+
     def _take_image(self):
         """
         Take images and tile them into a single image
@@ -491,6 +566,9 @@ class Wdg_HiLvlTiling(qw.QWidget):
         cal.id += f'_{cropx_ratio_red}X,{cropy_ratio_red}Ycrop'
         
         # > Prep the image storage <
+        raw_exp_ms = self._motion_controller.get_camera_exposure_ms()
+        exposure_ms = float(raw_exp_ms) if raw_exp_ms is not None else -1.0
+
         list_imgUnit = []
         for meaCoor_mm in list_meaCoor_mm:
             list_unavailable_names = self._dataHub_img.get_ImageMeasurement_Hub().get_list_ImageUnit_names()
@@ -519,7 +597,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
                         return
                     else: continue
                 break
-            list_imgUnit.append(MeaImg_Unit(unit_name=imgname,calibration=cal))
+            list_imgUnit.append(MeaImg_Unit(unit_name=imgname,calibration=cal,exposure_time_ms=exposure_ms))
             list_unavailable_names.append(imgname) # To prevent duplicate names in the next iterations
         
         # > Send the coordinates to the worker for the image capture <
