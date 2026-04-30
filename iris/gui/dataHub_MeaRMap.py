@@ -5,7 +5,7 @@ A class that stores the all the measurement data in the current experiment.
 - Allows the user to delete data from the table
 """
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication
+from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplication, Qt
 
 import os
 import psutil
@@ -31,10 +31,32 @@ from iris.data import SaveParamsEnum
 
 from iris.resources.dataHub_Raman_ui import Ui_DataHub_mapping
 from iris.resources.dataHubPlus_Raman_ui import Ui_DataHubPlus_mapping
+from iris.resources.dataHub_Raman_partialLoad_ui import Ui_dataHub_Raman_partialLoad
 
 DATAHUBPLUS_MAX_FREQ_HZ = 1.0 # Maximum update frequency for the DataHubPlus treeview in Hertz
 DATAHUB_OFFLOADCHECK_INTERVAL_SEC = 10.0  # Minimum interval between offload checks in seconds
 DATAHUB_OFFLOAD_MINMEMORY_GB = 1.0  # Minimum available memory in GB, under which offloading is triggered
+
+class Dlg_PartialLoad(qw.QDialog, Ui_dataHub_Raman_partialLoad):
+    """Dialog that lists all mapping units from a .db file as checkable items."""
+
+    def __init__(self, dict_id_to_name: dict[str, str], parent=None):
+        super().__init__(parent)
+        self.setupUi(self)
+        self.setWindowTitle("Select units to load")
+
+        self.tree_viewer.setHeaderLabel("Unit name")
+        self.tree_viewer.setSelectionMode(qw.QAbstractItemView.SelectionMode.ExtendedSelection)
+
+        for unit_id, unit_name in dict_id_to_name.items():
+            item = qw.QTreeWidgetItem(self.tree_viewer, [unit_name])
+            item.setData(0, Qt.ItemDataRole.UserRole, unit_id)
+
+        self.tree_viewer.selectAll()
+
+    def get_selected_unit_names(self) -> list[str]:
+        return [item.text(0) for item in self.tree_viewer.selectedItems()]
+
 
 class DataHub_Worker(QObject):
     
@@ -203,6 +225,18 @@ class DataHub_Worker(QObject):
             self.sig_saveload_done.emit(self.load_success)
         except Exception as e:
             self.sig_saveload_done.emit(self.load_error + str(e))
+
+    @Slot(str, list)
+    def load_database_partial(self, loadpath: str, unit_names: list[str]) -> None:
+        """
+        Load only the selected units from a database file.
+        """
+        try:
+            self._handler.load_MappingMeasurementHub_database(
+                self._mappinghub, loadpath=loadpath, flg_readraw=True, unit_names=unit_names)
+            self.sig_saveload_done.emit(self.load_success)
+        except Exception as e:
+            self.sig_saveload_done.emit(self.load_error + str(e))
     
     def set_MappingHub(self, mappingHub:MeaRMap_Hub):
         """
@@ -245,6 +279,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
     sig_autosave_db = Signal(str,str)   # Emitted to autosave the MappingMeasurement_Hub to the database
     sig_autoOffload_db = Signal(str,str) # Emitted to autosave and offload the MappingMeasurement_Hub to the database
     sig_load_db = Signal(str)           # Emitted to load the MappingMeasurement_Hub from the database
+    sig_load_db_partial = Signal(str, list)  # Emitted to partially load the MappingMeasurement_Hub from the database
     
     sig_autosave_db_delete = Signal(str, threading.Event)  # Emitted to delete the autosaved database file
 
@@ -284,7 +319,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         # Widgets to show the stored data
         self._tree = wdg.tree_data
         self._tree.setColumnCount(3)
-        self._tree.setHeaderLabels(["Region of interest name", "Metadata", "Number of samplings"])
+        self._tree.setHeaderLabels(["Region of interest name", "Measurements", "Metadata"])
         
         # Set up the searchbar
         wdg.ent_searchbar.textChanged.connect(lambda: self.update_tree(keep_selection=False))
@@ -325,6 +360,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self.sig_autosave_db.connect(self._worker.autosave_database)
         self.sig_autosave_db_delete.connect(self._worker.autosave_database_delete)
         self.sig_load_db.connect(self._worker.load_database)
+        self.sig_load_db_partial.connect(self._worker.load_database_partial)
         
         # Delete unit connection setup
         self._sig_req_delte_unit.connect(self._worker.delete_unit)
@@ -480,7 +516,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         for unit_id in list_matched_ids:
             idx = list_unit_ids.index(unit_id)
             qw.QTreeWidgetItem(self._tree,
-                [list_unit_names[idx], str(list_metadata[idx]), str(list_num_measurements[idx])])
+                [list_unit_names[idx], str(list_num_measurements[idx]), str(list_metadata[idx])])
             
         # Set the selection back to the previous selection
         if keep_selection: self.set_selection_unitID(list_unitID)
@@ -682,19 +718,42 @@ class Wdg_DataHub_Mapping(qw.QWidget):
     @Slot()
     def _load_hub_database(self) -> None:
         """
-        Load a MappingMeasurement_Hub from a database file
+        Load a MappingMeasurement_Hub from a database file.
+        Opens a selection dialog so the user can choose which units to load.
         """
         self._btn_load_db.setEnabled(False)
         self._btn_load_db.setText("Loading...")
-        
+
         loadpath = qw.QFileDialog.getOpenFileName(
             None,
             "Load Mapping Hub database...",
             "",
             "Database files (*.db)"
         )[0]
-        
-        self.sig_load_db.emit(loadpath)
+
+        if not loadpath:
+            self._reset_reenable_saveload_buttons()
+            return
+
+        try:
+            dict_id_to_name = MeaRMap_Handler().get_MappingUnitNames_from_database(loadpath)
+        except Exception as e:
+            qw.QMessageBox.critical(self, "Load error", f"Could not read database metadata:\n{e}")
+            self._reset_reenable_saveload_buttons()
+            return
+
+        dlg = Dlg_PartialLoad(dict_id_to_name, parent=self)
+        if dlg.exec() != qw.QDialog.DialogCode.Accepted:
+            self._reset_reenable_saveload_buttons()
+            return
+
+        selected_names = dlg.get_selected_unit_names()
+        if not selected_names:
+            qw.QMessageBox.warning(self, "No units selected", "No units were selected to load.")
+            self._reset_reenable_saveload_buttons()
+            return
+
+        self.sig_load_db_partial.emit(loadpath, selected_names)
 
     @Slot()
     def _disable_saveload_buttons(self):

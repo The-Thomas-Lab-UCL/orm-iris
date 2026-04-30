@@ -6,6 +6,8 @@ import platform
 
 import os
 import gc
+import shutil
+import tempfile
 import numpy as np
 import pandas as pd
 import bisect
@@ -1880,61 +1882,101 @@ class MeaRMap_Handler():
         
         return mappingUnit
             
-    def load_MappingMeasurementHub_database(self,hub:MeaRMap_Hub,loadpath:str,
-        flg_readraw:bool=True) -> MeaRMap_Hub:
+    def _resolve_meta_table(self, loadpath:str) -> tuple[sql.Connection, str]:
+        """
+        Opens a database connection and resolves the metadata table name, also setting
+        ``_table_prefix_load`` for subsequent load calls.
+
+        Args:
+            loadpath (str): path to the .db file
+
+        Returns:
+            tuple: (conn, db_tableName_meta)
+        """
+        assert os.path.exists(loadpath) and os.path.isfile(loadpath), \
+            '_resolve_meta_table: The input loadpath is not correct. Expected a valid file path.'
+        assert loadpath[-3:] == '.db', \
+            '_resolve_meta_table: The input loadpath is not correct. Expected a valid database file.'
+
+        conn:sql.Connection = sql.connect(loadpath)
+        conn.row_factory = sql.Row
+        cursor = conn.cursor()
+
+        acceptable_metaTableNames = [
+            self._dict_default_save_parameters['meta_table'],
+            self._table_prefix + self._dict_default_save_parameters['meta_table'],
+        ]
+        cursor.execute("SELECT name FROM sqlite_schema WHERE type='table';")
+        found_tableNames = [row[0] for row in cursor.fetchall()]
+        found_metaTableNames = [t for t in acceptable_metaTableNames if t in found_tableNames]
+        assert len(found_metaTableNames) == 1, (
+            '_resolve_meta_table: The database does not contain the mapping metadata '
+            'table OR more than 1 mapping metadata table found. Metadata table(s) found: {}'.format(found_metaTableNames))
+
+        db_tableName_meta:str = found_metaTableNames[0]
+        self._table_prefix_load = self._table_prefix if db_tableName_meta.startswith(self._table_prefix) else ''
+        return conn, db_tableName_meta
+
+    def get_MappingUnitNames_from_database(self, loadpath:str) -> dict[str, str]:
+        """
+        Reads only the metadata table from a .db save file and returns the available
+        mapping unit names without loading any measurement data.
+
+        Args:
+            loadpath (str): path to the .db file
+
+        Returns:
+            dict[str, str]: mapping of unit_id -> unit_name for every unit stored in the file
+        """
+        conn, db_tableName_meta = self._resolve_meta_table(loadpath)
+        cursor = conn.cursor()
+
+        dict_unit_id_to_name: dict[str, str] = {}
+        cursor.execute('SELECT * FROM {}'.format(db_tableName_meta))
+        for row in cursor.fetchall():
+            row: sql.Row
+            dict_unit_id_to_name[row[self._unit_id_key]] = row[self._unit_name_key]
+
+        conn.close()
+        return dict_unit_id_to_name
+
+    def load_MappingMeasurementHub_database(self, hub:MeaRMap_Hub, loadpath:str,
+        flg_readraw:bool=True, unit_names:list[str]|None=None) -> MeaRMap_Hub:
         """
         Loads the mapping measurement data from a database.
-        
+
         Args:
             hub (MappingMeasurement_Hub): mapping_measurement_hub object to be loaded into
             loadpath (str): path to load the data
-            flg_readraw (bool): flag to read the raw data (in addition to the averaged spectrum). Defaults to False.
-        
+            flg_readraw (bool): flag to read the raw data (in addition to the averaged spectrum). Defaults to True.
+            unit_names (list[str] | None): optional list of unit names to load. When provided,
+                only units whose name appears in this list are loaded. Unrecognised names are
+                silently ignored. When None (default), all units are loaded.
+
         Returns:
             mapping_measurement_new: mapping_measurement object
         """
-        assert os.path.exists(loadpath) and os.path.isfile(loadpath), 'load_mappingMeasurement_database: The input loadpath is not correct. Expected a valid file path.'
-        assert loadpath[-3:] == '.db', 'load_mappingMeasurement_database: The input loadpath is not correct. Expected a valid database file.'
-        
-        # Connect to the database
-        conn:sql.Connection = sql.connect(loadpath)
-        conn.row_factory = sql.Row  # To access the column names
+        conn, db_tableName_meta = self._resolve_meta_table(loadpath)
         cursor = conn.cursor()
-        
-        # Query the sqlite_schema table to get table names
-        # Check if the any of the metadata table names exist (check for with and without prefix)
-        acceptable_metaTableNames = []
-        acceptable_metaTableNames.append(self._dict_default_save_parameters['meta_table'])
-        acceptable_metaTableNames.append(self._table_prefix + self._dict_default_save_parameters['meta_table'])
-        
-        cursor.execute("SELECT name FROM sqlite_schema WHERE type='table';")
-        found_tableNames = [row[0] for row in cursor.fetchall()]
-        found_metaTableNames = [table_name for table_name in acceptable_metaTableNames if table_name in found_tableNames]
-        assert len(found_metaTableNames) == 1, ('load_mappingMeasurement_database: The database does not contain the mapping metadata '
-            'table OR more than 1 mapping metadata table found. Metadata table(s) found: {}'.format(found_metaTableNames))
-        db_tableName_meta:str = found_metaTableNames[0]
-        self._table_prefix_load = self._table_prefix if db_tableName_meta.startswith(self._table_prefix) else ''
-        
+
         # Get the metadata table and store it as a dictionary
-        dict_unit_id_to_name = {}
+        dict_unit_id_to_name: dict[str, str] = {}
         cursor.execute('SELECT * FROM {}'.format(db_tableName_meta))
-        rows = cursor.fetchall()
-        for row in rows:
+        for row in cursor.fetchall():
             row: sql.Row
             unit_id = row[self._unit_id_key]
             unit_name = row[self._unit_name_key]
-            dict_unit_id_to_name[unit_id] = unit_name
-        
+            if unit_names is None or unit_name in unit_names:
+                dict_unit_id_to_name[unit_id] = unit_name
+
         # Load the metadata and measurement data
-        # mapping_measurement = MappingMeasurement_Hub()
         mapping_measurement = hub
-        for unit_id in dict_unit_id_to_name.keys():
-            table_name = self._table_prefix + unit_id
-            unit_name = dict_unit_id_to_name[unit_id]
-            mappingUnit = MeaRMap_Unit(unit_name=unit_name,unit_id=unit_id)
-            mappingUnit = self._load_MappingMeasurementUnit_metadata_database(unit_id,conn,mappingUnit)
-            mappingUnit = self._load_MappingMeasurementUnit_measurement_database(unit_id,conn,loadpath,mappingUnit,flg_readraw)
+        for unit_id, unit_name in dict_unit_id_to_name.items():
+            mappingUnit = MeaRMap_Unit(unit_name=unit_name, unit_id=unit_id)
+            mappingUnit = self._load_MappingMeasurementUnit_metadata_database(unit_id, conn, mappingUnit)
+            mappingUnit = self._load_MappingMeasurementUnit_measurement_database(unit_id, conn, loadpath, mappingUnit, flg_readraw)
             mapping_measurement.append_mapping_unit(mappingUnit)
+        conn.close()
         return mapping_measurement
     
     def load_MappingMeasurement_pickle(self,hub:MeaRMap_Hub,loadpath:str) -> MeaRMap_Hub:
@@ -2394,9 +2436,51 @@ def test_handler():
     handler = MeaRMap_Handler()
     handler.test_database_save_load(hub)
     
+def test_load_partial():
+    handler = MeaRMap_Handler()
+    tmpdir = tempfile.mkdtemp()
+    savename = 'test_partial'
+    savepath = os.path.join(tmpdir, savename + '.db')
+
+    try:
+        print('>>>>> Creating dummy hub <<<<<')
+        hub = MeaRMap_Hub()
+        hub.test_generate_dummy()
+
+        print('>>>>> Saving to temporary file: {} <<<<<'.format(savepath))
+        thread = handler.save_MappingHub_database(hub, savedirpath=tmpdir, savename=savename)
+        thread.join()
+
+        print('\n>>>>> Scanning metadata (no measurement data loaded) <<<<<')
+        dict_id_to_name = handler.get_MappingUnitNames_from_database(savepath)
+        unit_names = list(dict_id_to_name.values())
+        for i, name in enumerate(unit_names):
+            print('  [{}] {}'.format(i, name))
+
+        print('\nEnter the start index (inclusive): ', end='', flush=True)
+        start = int(input())
+        print('Enter the end index (inclusive): ', end='', flush=True)
+        end = int(input())
+        selected_names = unit_names[start:end+1]
+        print('Loading units: {}'.format(selected_names))
+
+        loaded_hub = MeaRMap_Hub()
+        handler.load_MappingMeasurementHub_database(loaded_hub, savepath, unit_names=selected_names)
+
+        print('\n>>>>> Units loaded into hub <<<<<')
+        for uid in loaded_hub.get_list_MappingUnit_ids():
+            unit = loaded_hub.get_MappingUnit(uid)
+            print('  id={} | name={} | n_measurements={}'.format(
+                uid, unit.get_unit_name(), unit.get_numMeasurements()))
+
+    finally:
+        shutil.rmtree(tmpdir)
+        print('\n>>>>> Temporary files deleted <<<<<')
+
 if __name__ == '__main__':
     pass
-    test_handler()
+    test_load_partial()
+    # test_handler()
     
     # test_datasaveload_system()
     # test_datasaveload_system_txt()
