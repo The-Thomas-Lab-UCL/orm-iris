@@ -113,6 +113,10 @@ class CameraController_Thorlabs(Class_CameraController):
             # SENSOR_TYPE.MONOCHROME == 0; SENSOR_TYPE.BAYER == 1
             self._is_color = (self.camera.camera_sensor_type == SENSOR_TYPE.BAYER)
 
+            # Ensure pipeline state reflects the newly connected camera type.
+            self._colour_processor = None
+            self._clrprc_monoToColour = None
+
             if self._is_color:
                 self.camera.gain = int(0)
                 self._colour_processor = TL_MTC()
@@ -243,8 +247,8 @@ class CameraController_Thorlabs(Class_CameraController):
             image_array = self._clrprc_monoToColour.transform_to_24(
                 image_1d, self._frame_width, self._frame_height)
             image_array = image_array.reshape(self._frame_height, self._frame_width, 3)
-        elif not self._is_color:
-            print('Thorlabs camera controller: Captured monochrome frame, but mono-to-color processor is not properly initialised.')
+        elif self._is_color:
+            print('Thorlabs camera controller: Captured colour frame, but mono-to-color processor is not properly initialised.')
             return None
         else:
             image_array = image_1d.reshape(self._frame_height, self._frame_width)
