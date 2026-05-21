@@ -23,6 +23,7 @@ from iris.data.calibration_objective import ImgMea_Cal, ImgMea_Cal_Hub
 from iris.resources.dataHub_image_ui import Ui_dataHub_image
 from iris.resources.objectives_ui import Ui_wdg_objectives
 from iris.resources.dialog_save_img_ui import Ui_dialog_save_imghub
+from iris.gui.dataHub_MeaRMap import Dlg_MultiRename
 
 class DataHub_Image_Design(Ui_dataHub_image,qw.QWidget):
     def __init__(self,parent):
@@ -604,29 +605,35 @@ class Wdg_DataHub_Image(qw.QWidget):
     @Slot()
     def rename_selected_ImageMeasurementUnit(self):
         """
-        Rename the selected ImageMeasurementUnit in the ImageMeasurement_Hub.
+        Rename the selected ImageMeasurementUnit(s) in the ImageMeasurement_Hub.
+        Single selection: simple text input. Multiple selection: multi-rename dialog.
         """
         selections = self._tree.selectedItems()
 
         if len(selections) == 0:
             qw.QMessageBox.warning(self, 'Error', 'No entry selected.'); return
-        if len(selections) > 1:
-            qw.QMessageBox.warning(self, 'Error', 'Please select only one unit to rename.'); return
-
-        unit_id = selections[0].text(0)
-        current_name = self.ImageHub.get_ImageMeasurementUnit(unit_id=unit_id).get_IdName()[1]
-
-        new_name, ok = qw.QInputDialog.getText(
-            self, 'Rename', 'Enter the new name:', text=current_name
-        )
-        if not ok: return
-
-        if not new_name:
-            qw.QMessageBox.warning(self, 'Error', 'Name cannot be empty.'); return
 
         try:
-            self.ImageHub.rename_ImageMeasurementUnit(unit_id, new_name)
-            self._flg_issaved = False
+            if len(selections) == 1:
+                unit_id = selections[0].text(0)
+                current_name = self.ImageHub.get_ImageMeasurementUnit(unit_id=unit_id).get_IdName()[1]
+                new_name, ok = qw.QInputDialog.getText(
+                    self, 'Rename', 'Enter the new name:', text=current_name)
+                if not ok: return
+                if not new_name:
+                    qw.QMessageBox.warning(self, 'Error', 'Name cannot be empty.'); return
+                self.ImageHub.rename_ImageMeasurementUnit(unit_id, new_name)
+                self._flg_issaved = False
+            else:
+                unit_ids = [item.text(0) for item in selections]
+                names = [item.text(1) for item in selections]
+                dlg = Dlg_MultiRename(names, parent=self)
+                if dlg.exec() != qw.QDialog.DialogCode.Accepted:
+                    return
+                new_names = dlg.get_new_names()
+                for unit_id, new_name in zip(unit_ids, new_names):
+                    self.ImageHub.rename_ImageMeasurementUnit(unit_id, new_name)
+                self._flg_issaved = False
         except AssertionError as e:
             qw.QMessageBox.warning(self, 'Error', str(e))
 

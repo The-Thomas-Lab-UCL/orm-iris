@@ -14,6 +14,7 @@ if __name__ == '__main__':
 from iris.data.measurement_coordinates import MeaCoor_mm, List_MeaCoor_Hub
 
 from iris.resources.dataHub_coor_ui import Ui_dataHub_coor
+from iris.gui.dataHub_MeaRMap import Dlg_MultiRename
 
 class DataHub_Coor_UiDesign(qw.QWidget, Ui_dataHub_coor):
     def __init__(self, parent):
@@ -279,27 +280,37 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
     
     def rename_MappingCoordinate(self):
         """
-        Renames the selected mapping coordinate in the list.
+        Renames the selected mapping coordinate(s) in the list.
+        Single selection: simple text input. Multiple selection: multi-rename dialog.
         """
         list_names = [item.text(1) for item in self._tree.selectedItems()]
-        
+
         if len(list_names) == 0:
             qw.QMessageBox.information(self, 'No selection', 'No mapping coordinates have been selected.')
-        elif len(list_names) > 1:
-            qw.QMessageBox.information(self, 'Multiple selection', 'Please select only one mapping coordinate to rename at a time.')
             return
-        
-        init_name = list_names[0]
-        while True:
-            try:
-                new_name,ok = qw.QInputDialog.getText(self, 'Rename mapping coordinate',
-                    f'Enter the new name for the mapping coordinate for\n"{init_name}":',
-                    text=init_name)
-                if not ok: return
-                self._mappingCoorHub.rename_mappingCoor(init_name, new_name)
-                break
-            except ValueError as e:
-                qw.QMessageBox.warning(self, 'Error',f"Invalid unit name: {e}")
+
+        if len(list_names) == 1:
+            init_name = list_names[0]
+            while True:
+                try:
+                    new_name, ok = qw.QInputDialog.getText(self, 'Rename mapping coordinate',
+                        f'Enter the new name for the mapping coordinate for\n"{init_name}":',
+                        text=init_name)
+                    if not ok: return
+                    self._mappingCoorHub.rename_mappingCoor(init_name, new_name)
+                    break
+                except ValueError as e:
+                    qw.QMessageBox.warning(self, 'Error', f"Invalid unit name: {e}")
+        else:
+            dlg = Dlg_MultiRename(list_names, parent=self)
+            if dlg.exec() != qw.QDialog.DialogCode.Accepted:
+                return
+            new_names = dlg.get_new_names()
+            for old_name, new_name in zip(list_names, new_names):
+                try:
+                    self._mappingCoorHub.rename_mappingCoor(old_name, new_name)
+                except ValueError as e:
+                    qw.QMessageBox.warning(self, 'Error', f"Invalid unit name: {e}")
     
     def _remove_selected_mapping_coordinate(self):
         """

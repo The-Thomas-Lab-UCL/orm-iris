@@ -32,6 +32,7 @@ from iris.data import SaveParamsEnum
 from iris.resources.dataHub_Raman_ui import Ui_DataHub_mapping
 from iris.resources.dataHubPlus_Raman_ui import Ui_DataHubPlus_mapping
 from iris.resources.dataHub_Raman_partialLoad_ui import Ui_dataHub_Raman_partialLoad
+from iris.resources.dialog_multiRename_ui import Ui_Dialog_MultiRename
 
 DATAHUBPLUS_MAX_FREQ_HZ = 1.0 # Maximum update frequency for the DataHubPlus treeview in Hertz
 DATAHUB_OFFLOADCHECK_INTERVAL_SEC = 10.0  # Minimum interval between offload checks in seconds
@@ -56,6 +57,39 @@ class Dlg_PartialLoad(qw.QDialog, Ui_dataHub_Raman_partialLoad):
 
     def get_selected_unit_names(self) -> list[str]:
         return [item.text(0) for item in self.tree_viewer.selectedItems()]
+
+
+class Dlg_MultiRename(qw.QDialog, Ui_Dialog_MultiRename):
+    """Dialog for renaming multiple mapping units at once (prefix, suffix, find/replace)."""
+
+    def __init__(self, names: list[str], parent=None):
+        super().__init__(parent)
+        self.setupUi(self)
+        self.setWindowTitle("Rename multiple units")
+        self._names = names
+
+        self.ent_prefix.textChanged.connect(self._update_preview)
+        self.ent_suffix.textChanged.connect(self._update_preview)
+        self.ent_replace_ori.textChanged.connect(self._update_preview)
+        self.ent_replace_with.textChanged.connect(self._update_preview)
+        self._update_preview()
+
+    def _apply_rename(self, name: str) -> str:
+        prefix = self.ent_prefix.text()
+        suffix = self.ent_suffix.text()
+        find = self.ent_replace_ori.text()
+        replace_with = self.ent_replace_with.text()
+        result = name.replace(find, replace_with) if find else name
+        return prefix + result + suffix
+
+    def _update_preview(self):
+        if self._names:
+            self.lbl_example.setText(self._apply_rename(self._names[0]))
+        else:
+            self.lbl_example.setText("N/A")
+
+    def get_new_names(self) -> list[str]:
+        return [self._apply_rename(name) for name in self._names]
 
 
 class DataHub_Worker(QObject):
@@ -603,27 +637,40 @@ class Wdg_DataHub_Mapping(qw.QWidget):
     @Slot()
     def rename_unit(self):
         """
-        Rename the selected MappingMeasurement_Unit in the MappingMeasurement_Hub
+        Rename the selected MappingMeasurement_Unit(s) in the MappingMeasurement_Hub.
+        Single selection: simple text input. Multiple selection: multi-rename dialog.
         """
         try:
             selections = self._tree.selectedItems()
-            
+
             if len(selections) == 0:
                 qw.QErrorMessage().showMessage("No unit selected")
                 return
-            elif len(selections) > 1:
-                qw.QErrorMessage().showMessage("Multiple units selected. Please select only one unit to rename")
-                return
-            
-            unit_name = selections[0].text(0)
-            unit = self._MappingHub.get_MappingUnit(unit_name=unit_name)
-            unit_id = unit.get_unit_id()
-            new_name, ok = qw.QInputDialog.getText(None, "Rename Mapping Unit", "Enter the new name for the selected Mapping Unit:",
-                                                    text=unit.get_unit_name())
-            if ok: self._MappingHub.rename_mapping_unit(unit_id, new_name)
-            self._flg_issaved_db = False
-        except Exception as e: qw.QMessageBox.warning(None, "Rename error", f"Error in renaming the Mapping Unit:\n{e}")
-        finally: self._sig_req_update_tree.emit()
+
+            if len(selections) == 1:
+                unit_name = selections[0].text(0)
+                unit = self._MappingHub.get_MappingUnit(unit_name=unit_name)
+                new_name, ok = qw.QInputDialog.getText(
+                    None, "Rename Mapping Unit",
+                    "Enter the new name for the selected Mapping Unit:",
+                    text=unit.get_unit_name())
+                if ok:
+                    self._MappingHub.rename_mapping_unit(unit.get_unit_id(), new_name)
+                    self._flg_issaved_db = False
+            else:
+                names = [item.text(0) for item in selections]
+                dlg = Dlg_MultiRename(names, parent=self)
+                if dlg.exec() != qw.QDialog.DialogCode.Accepted:
+                    return
+                new_names = dlg.get_new_names()
+                for unit_name, new_name in zip(names, new_names):
+                    unit = self._MappingHub.get_MappingUnit(unit_name=unit_name)
+                    self._MappingHub.rename_mapping_unit(unit.get_unit_id(), new_name)
+                self._flg_issaved_db = False
+        except Exception as e:
+            qw.QMessageBox.warning(None, "Rename error", f"Error in renaming the Mapping Unit:\n{e}")
+        finally:
+            self._sig_req_update_tree.emit()
     
     @Slot()
     def delete_unit(self):
