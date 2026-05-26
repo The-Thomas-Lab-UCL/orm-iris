@@ -1437,9 +1437,23 @@ class MeaImg_Handler():
         
         # Insert the measurements into the table
         keys = list(dict_mea.keys())
-        for i in range(len(dict_mea[keys[0]])):
-            # Generate a unique id
-            unique_id = '{}_{}'.format(unitName,uuid.uuid4().hex)
+        n_rows = len(dict_mea[keys[0]])
+        single_image = (n_rows == 1)
+
+        # Pre-check for path conflicts when saving a single image without UUID suffix
+        if single_image:
+            image_keys = [k for k in dict_mea.keys() if dict_mea_types[k] == Image.Image]
+            if image_keys:
+                subdirpath = os.path.join(saveDirPath, self._save_parameters['folder_sublevel'])
+                for key in image_keys:
+                    candidate = os.path.join(subdirpath, '{}.png'.format(unitName))
+                    if os.path.exists(candidate):
+                        raise FileExistsError(
+                            'Image file already exists at: {}'.format(candidate))
+
+        for i in range(n_rows):
+            # Use plain unit name for single-image units; add UUID suffix for multi-image units
+            unique_id = unitName if single_image else '{}_{}'.format(unitName,uuid.uuid4().hex)
             list_values = []
             for key in dict_mea.keys():
                 if dict_mea_types[key] in [int,float]:
