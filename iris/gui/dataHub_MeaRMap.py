@@ -330,10 +330,10 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         """
         super().__init__(parent)
         # Main GUI setup
-        lyt = qw.QVBoxLayout()
-        self.setLayout(lyt)
+        self._layout = qw.QVBoxLayout()
+        self.setLayout(self._layout)
         self._widget = Wdg_DataHub_Mapping_Ui(self)
-        lyt.addWidget(self._widget)
+        self._layout.addWidget(self._widget)
         wdg = self._widget
         
         # Storage to store the data
@@ -965,9 +965,9 @@ class Wdg_DataHubPlus_Mapping_Ui(qw.QWidget, Ui_DataHubPlus_mapping):
     def __init__(self, parent: Any) -> None:
         super().__init__(parent)
         self.setupUi(self)
-        lyt = qw.QVBoxLayout()
-        self.setLayout(lyt)
-        
+        self._layout = qw.QVBoxLayout()
+        self.setLayout(self._layout)
+
 class Dict_TreeviewUpdate(TypedDict):
     list_measurement_id: list[str]
     list_coorx: list[float]
@@ -1063,9 +1063,9 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         
         # Main widget
         self._widget = Wdg_DataHubPlus_Mapping_Ui(self)
-        lyt = qw.QVBoxLayout()
-        self.setLayout(lyt)
-        lyt.addWidget(self._widget)
+        self._layout = qw.QVBoxLayout()
+        self.setLayout(self._layout)
+        self._layout.addWidget(self._widget)
         wdg = self._widget
         
         # Storage parameters setup

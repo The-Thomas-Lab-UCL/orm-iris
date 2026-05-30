@@ -188,9 +188,9 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         self._lbl_coordinates = wdg.lbl_clickedcoor
         self._lbl_coordinates_ori = wdg.lbl_clickedcoor.text()
         
-        lineedit_specpos = self._combo_plot_SpectralPosition.lineEdit()
-        assert isinstance(lineedit_specpos, qw.QLineEdit), "lineedit_specpos must be a QLineEdit"
-        lineedit_specpos.editingFinished.connect(lambda: self._set_combobox_closest_value(lineedit_specpos.text()))
+        self._lineedit_specpos = self._combo_plot_SpectralPosition.lineEdit()
+        assert isinstance(self._lineedit_specpos, qw.QLineEdit), "lineedit_specpos must be a QLineEdit"
+        self._lineedit_specpos.editingFinished.connect(lambda: self._set_combobox_closest_value(self._lineedit_specpos.text()))
         
         # Set the callbacks - defer to prevent signals during initialization
         QTimer.singleShot(0, lambda: self._mappingHub.add_observer(lambda:
