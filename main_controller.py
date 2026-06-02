@@ -289,6 +289,9 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         self._hilvl_coorGen.initialise()
         self._hilvl_raman.initialise()
         print('>>>>> IRIS: INITIALISATIONS COMPLETE <<<<<')
+
+        # > Load previously autosaved coordinates <
+        self._coorHub.load_autosave_dir()
         
     def closeEvent(self, event: QCloseEvent) -> None:
         close_confirm_map = self._dataHub_map.check_safeToTerminate()

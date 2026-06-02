@@ -423,191 +423,189 @@ class Motion_GoToCoor_Worker(QObject):
 
 class AutoFocus_Worker(QObject):
     """
-    A worker to perform autofocus by moving the z stage and evaluating the focus metric.
-    To be used in conjunction with the video feed worker to get the images for focus evaluation.
-    The video feed worker has to continuously emit the captured images, and this worker will process them when it is waiting for an image to be captured.
-    Otherwise this autofocus worker will continue to be idle, waiting for the next image to be captured.
+    Autofocus worker using a continuous Z sweep.
+    Moves the stage from start_z to end_z in one commanded move, timestamps every
+    incoming camera frame during the sweep, then correlates each timestamp to a Z
+    position via the DataStreamer interpolator and scores all frames at once.
     """
-    sig_started = Signal()  # Signal to indicate autofocus has started
-    sig_finished = Signal(float)  # Signal to emit the coordinates with the best focus score
-    sig_error = Signal(str)  # Signal to emit an error message
-        
-    def __init__(self, ctrl_z:Controller_Z, flg_stop:threading.Event):
+    sig_started = Signal()
+    sig_finished = Signal(float)
+    sig_error = Signal(str)
+
+    def __init__(self, ctrl_z: Controller_Z, stageHub: DataStreamer_StageCam, flg_stop: threading.Event):
         super().__init__()
         self.ctrl_z = ctrl_z
+        self._stageHub = stageHub
         self.flg_stop = flg_stop
-
-        self._is_waiting_for_img = threading.Event()
-        self._img_counter = 0
         self._kernel_size = AUTOFOCUS_BLUR_KERNEL_SIZE
-
-        # Scan state
-        self._current_z: float = 0.0
+        self._phase = 'idle'            # 'scanning' | 'idle'
+        self._full_start_z_mm = 0.0
+        self._full_end_z_mm = 0.0
         self._step_size_mm: float = 0.0
-        self._step_dir: int = 1          # +1 towards end, -1 towards start
-        self._phase: str = 'idle'        # 'dir1' | 'dir2' | 'idle'
-        self._no_improve_count: int = 0
-        self._best_score: float = -1.0
-        self._best_z: float = 0.0
-        self._full_start_z_mm: float = 0.0
-        self._full_end_z_mm: float = 0.0
+        self._collected_frames: list[tuple[int, Image.Image]] = []
+        self._lock_frames = threading.Lock()
+        self._sweep_start_time_us: int = 0
+        self._sweep_thread: threading.Thread = threading.Thread()
 
-        # All visited (z, score) pairs — used for parabola fitting at the end
-        self._visited_z: list[float] = []
-        self._visited_scores: list[float] = []
-
-    @Slot(float,float,float,int)
-    def start(self, start_z_mm:float, end_z_mm:float, step_size_mm:float, kernel_size:int):
+    @Slot(float, float, float, int)
+    def start(self, start_z_mm: float, end_z_mm: float, _step_size_mm: float, kernel_size: int):
         """
-        Performs autofocus by moving the z stage and evaluating the focus metric.
-
-        Starts at the centre of [start_z_mm, end_z_mm], moves towards end_z_mm
-        (direction 1), reverses when AUTOFOCUS_NO_IMPROVE_STEPS consecutive
-        non-improving images are seen, then sweeps towards start_z_mm (direction 2)
-        until the stopping criterion is met again.  A parabola is fit to all
-        collected (z, score) pairs for sub-step precision.
-
-        Args:
-            start_z_mm (float): One end of the search range in mm
-            end_z_mm (float): The other end of the search range in mm
-            step_size_mm (float): Step size in mm
-            kernel_size (int): Pre-blur kernel size (odd int; 1 = no blur)
+        Sweep from start_z_mm to end_z_mm in a single continuous move, collecting
+        timestamped frames along the way.  _step_size_mm is unused (kept for signal
+        compatibility).
         """
         try:
-            assert isinstance(kernel_size,int) and kernel_size > 0 and kernel_size % 2 == 1, \
+            assert isinstance(kernel_size, int) and kernel_size > 0 and kernel_size % 2 == 1, \
                 'Kernel size must be a positive odd integer'
             self._kernel_size = kernel_size
             self.flg_stop.clear()
+            self._phase = 'idle'  # stop any stale collection
 
             self._full_start_z_mm = min(start_z_mm, end_z_mm)
             self._full_end_z_mm   = max(start_z_mm, end_z_mm)
-            self._step_size_mm    = abs(step_size_mm)
-            self._step_dir        = 1     # first sweep towards end_z_mm
-            self._phase           = 'dir1'
-            self._no_improve_count = 0
-            self._best_score      = -1.0
-            self._best_z          = (start_z_mm + end_z_mm) / 2.0
-            self._current_z       = self._best_z
-            self._visited_z.clear()
-            self._visited_scores.clear()
-            self._img_counter     = 0
+            self._step_size_mm    = abs(_step_size_mm)
 
-            print(f'Starting autofocus: centre={self._current_z:.4f} mm, '
-                  f'step={self._step_size_mm:.4f} mm, '
-                  f'range=[{self._full_start_z_mm:.4f}, {self._full_end_z_mm:.4f}] mm, '
-                  f'no-improve threshold={AUTOFOCUS_NO_IMPROVE_STEPS}')
+            with self._lock_frames:
+                self._collected_frames.clear()
 
-            self.ctrl_z.move_direct(self._current_z)
-            self._is_waiting_for_img.set()
+            # Move to start and wait until settled
+            print(f'Autofocus: moving to start {self._full_start_z_mm:.4f} mm...')
+            self.ctrl_z.move_direct(self._full_start_z_mm)
+            self._wait_for_z(self._full_start_z_mm)
+
+            print(f'Autofocus: stepping [{self._full_start_z_mm:.4f}, {self._full_end_z_mm:.4f}] mm '
+                  f'in {self._step_size_mm:.4f} mm steps')
+            self._sweep_start_time_us = get_timestamp_us_int()
+            self._phase = 'scanning'
             self.sig_started.emit()
-        except Exception as e:
-            self.sig_error.emit('Invalid autofocus parameters: {}'.format(e))
 
-    @Slot()
-    def _force_stop(self):
-        self._visited_z.clear()
-        self._visited_scores.clear()
-        self._is_waiting_for_img.clear()
-        self._phase = 'idle'
+            # Step through positions in a background thread; this QThread's event
+            # loop stays free to collect timestamped frames throughout
+            self._sweep_thread = threading.Thread(target=self._run_steps, daemon=True)
+            self._sweep_thread.start()
+            threading.Thread(target=self._monitor_sweep, daemon=True).start()
+
+        except Exception as e:
+            self._phase = 'idle'
+            self.sig_error.emit(f'Autofocus start error: {e}')
+
+    def _wait_for_z(self, target_z: float, tolerance: float = 0.005, timeout: float = 30.0):
+        """Block until the stage is within tolerance of target_z AND stable across 3 consecutive polls."""
+        t0 = time.time()
+        stable_count = 0
+        prev_z = None
+        while time.time() - t0 < timeout:
+            if self.flg_stop.is_set():
+                return
+            coor = self._stageHub.get_coordinates_interpolate(get_timestamp_us_int())
+            if coor is not None:
+                z = coor[2]
+                if abs(z - target_z) < tolerance:
+                    if prev_z is not None and abs(z - prev_z) < 0.001:
+                        stable_count += 1
+                        if stable_count >= 3:
+                            return
+                    else:
+                        stable_count = 0
+                else:
+                    stable_count = 0
+                prev_z = z
+            time.sleep(0.05)
+
+    def _run_steps(self):
+        """Step through positions using move_direct; frames are collected in the background."""
+        z = self._full_start_z_mm + self._step_size_mm
+        while z <= self._full_end_z_mm + 1e-9:
+            if self.flg_stop.is_set():
+                return
+            self.ctrl_z.move_direct(z)
+            z += self._step_size_mm
+
+    def _monitor_sweep(self):
+        """Wait for the sweep thread (move_direct) to finish, then score frames."""
+        while self._sweep_thread.is_alive():
+            if self.flg_stop.is_set():
+                self._phase = 'idle'
+                self.ctrl_z.stop_move()
+                self.sig_error.emit('Autofocus stopped by user')
+                return
+            time.sleep(0.02)
+
+        if self._phase == 'scanning':
+            self._phase = 'idle'
+            self._finish()
+
+    @Slot(object, Image.Image)
+    def process_image(self, timestamp_us: int, img: Image.Image):
+        if not isinstance(img, Image.Image): return
+        if self._phase != 'scanning': return
+        if timestamp_us < self._sweep_start_time_us: return  # discard stale frames queued before sweep started
+        with self._lock_frames:
+            self._collected_frames.append((timestamp_us, img.copy()))
 
     def _calculate_focus_score(self, image, blur):
         if blur > 1:
             image = cv.medianBlur(image, blur)
         sx = cv.Sobel(image, cv.CV_64F, 1, 0, ksize=3)
         sy = cv.Sobel(image, cv.CV_64F, 0, 1, ksize=3)
-        return float((sx**2 + sy**2).mean())
+        magnitude = sx**2 + sy**2
+        threshold = np.percentile(magnitude, 90)
+        return float(magnitude[magnitude >= threshold].mean())
 
-    def _estimate_peak_z(self) -> float:
-        """
-        Fit a parabola to all visited (z, score) pairs and return the vertex.
-        Falls back to argmax if fewer than 3 points or if the parabola opens upward.
-        Result is clamped to the original scan range.
-        """
-        z      = np.array(self._visited_z)
-        scores = np.array(self._visited_scores)
-        if len(z) < 3:
-            return float(z[int(np.argmax(scores))])
+    def _estimate_peak_z(self, z_arr: np.ndarray, scores_arr: np.ndarray) -> float:
+        if len(z_arr) < 4:
+            return float(z_arr[int(np.argmax(scores_arr))])
         try:
-            a, b, _ = np.polyfit(z, scores, 2)
-            if a >= 0:
-                return float(z[int(np.argmax(scores))])
-            peak_z = -b / (2.0 * a)
-            return float(np.clip(peak_z, self._full_start_z_mm, self._full_end_z_mm))
+            from scipy.optimize import curve_fit
+            def _gaussian(z, A, mu, sigma, c):
+                return A * np.exp(-(z - mu)**2 / (2 * sigma**2)) + c
+            p0 = [scores_arr.max() - scores_arr.min(), z_arr[int(np.argmax(scores_arr))],
+                  (z_arr[-1] - z_arr[0]) / 4, scores_arr.min()]
+            bounds = ([0, z_arr[0], 1e-6, -np.inf], [np.inf, z_arr[-1], z_arr[-1] - z_arr[0], np.inf])
+            popt, _ = curve_fit(_gaussian, z_arr, scores_arr, p0=p0, bounds=bounds, maxfev=5000)
+            return float(np.clip(popt[1], self._full_start_z_mm, self._full_end_z_mm))
         except Exception:
-            return float(z[int(np.argmax(scores))])
-
-    @Slot(Image.Image)
-    def process_image(self, img:Image.Image):
-        if not isinstance(img, Image.Image): return
-        if not self._is_waiting_for_img.is_set(): return
-        if self._img_counter % 2 == 0: self._img_counter += 1; return  # skip every other frame to let the stage settle
-
-        self._img_counter = 0
-        self._is_waiting_for_img.clear()
-
-        try:
-            img_gray = cv.cvtColor(np.array(img), cv.COLOR_RGB2GRAY)
-            score = self._calculate_focus_score(img_gray, blur=self._kernel_size)
-            self._visited_z.append(self._current_z)
-            self._visited_scores.append(score)
-            self._advance(score)
-        except Exception as e:
-            self.sig_error.emit('Error processing image: {}'.format(e))
-
-    def _advance(self, score: float):
-        """Decide the next z position based on the latest score."""
-        # Update best
-        if score > self._best_score:
-            self._best_score = score
-            self._best_z     = self._current_z
-            self._no_improve_count = 0
-        else:
-            self._no_improve_count += 1
-
-        # print(f'[AF] z={self._current_z:.4f} score={score:.1f} best={self._best_score:.1f} no_improve={self._no_improve_count} phase={self._phase}')
-
-        if self.flg_stop.is_set():
-            self._force_stop()
-            self.sig_error.emit('Autofocus stopped by user')
-            return
-
-        next_z = self._current_z + self._step_dir * self._step_size_mm
-        out_of_bounds  = next_z < self._full_start_z_mm or next_z > self._full_end_z_mm
-        should_reverse = self._no_improve_count >= AUTOFOCUS_NO_IMPROVE_STEPS or out_of_bounds
-
-        if should_reverse:
-            if self._phase == 'dir1':
-                # Reverse towards start_z_mm
-                self._phase = 'dir2'
-                self._step_dir = -1
-                self._no_improve_count = 0
-                print(f'[AF] Reversing direction at z={self._current_z:.4f} mm (best so far: {self._best_z:.4f} mm)')
-                next_z = self._current_z + self._step_dir * self._step_size_mm
-                if next_z < self._full_start_z_mm or next_z > self._full_end_z_mm:
-                    self._finish()
-                    return
-            else:
-                # dir2 exhausted — done
-                self._finish()
-                return
-
-        self._current_z = next_z
-        self.ctrl_z.move_direct(next_z)
-        self._is_waiting_for_img.set()
+            return float(z_arr[int(np.argmax(scores_arr))])
 
     def _finish(self):
-        if not self._visited_scores:
-            self.sig_error.emit('No focus scores calculated')
+        with self._lock_frames:
+            frames = list(self._collected_frames)
+            self._collected_frames.clear()
+
+        if not frames:
+            self.sig_error.emit('No frames collected during autofocus sweep')
             return
-        best_z    = self._estimate_peak_z()
-        best_score = max(self._visited_scores)
+
+        z_list, score_list = [], []
+
+        for ts, img in frames:
+            coor = self._stageHub.get_coordinates_interpolate(ts)
+            if coor is None:
+                continue
+            z = coor[2]
+            if not (self._full_start_z_mm <= z <= self._full_end_z_mm):
+                continue
+            try:
+                img_gray = cv.cvtColor(np.array(img), cv.COLOR_RGB2GRAY)
+                score = self._calculate_focus_score(img_gray, self._kernel_size)
+                z_list.append(z)
+                score_list.append(score)
+            except Exception as e:
+                print(f'Error scoring frame at z={z:.4f}: {e}')
+
+        if not z_list:
+            self.sig_error.emit('No valid frames after Z correlation')
+            return
+
+        pairs = sorted(zip(z_list, score_list))
+        z_arr     = np.array([p[0] for p in pairs])
+        scores_arr = np.array([p[1] for p in pairs])
+
+        best_z = self._estimate_peak_z(z_arr, scores_arr)
         self.ctrl_z.move_direct(best_z)
         print(f'Autofocus finished. Best Z: {best_z:.4f} mm '
-              f'(score: {best_score:.2f}, {len(self._visited_scores)} positions measured)')
+              f'(score: {scores_arr.max():.2f}, {len(z_list)} frames scored)')
         self.sig_finished.emit(best_z)
-        self._visited_z.clear()
-        self._visited_scores.clear()
-        self._phase = 'idle'
         
         
 class ImageCapture_Worker(QObject):
@@ -615,7 +613,8 @@ class ImageCapture_Worker(QObject):
     A worker to continuously update the video feed by capturing frames from the camera and applying corrections
     """
     sig_qpixmap = Signal(QPixmap)  # Signal to emit the new frame as a QPixmap
-    sig_img = Signal(Image.Image)  # Signal to emit the new frame as a PIL Image
+    sig_img = Signal(Image.Image)  # Signal to emit the new frame as a PIL Image (with overlays)
+    sig_raw_img = Signal(object, Image.Image)  # Signal to emit (timestamp_us, raw frame) before any overlays (for focus scoring)
     sig_no_frame = Signal()  # Signal to emit when no frame is captured
     sig_error = Signal(str)  # Signal to emit an error message
     
@@ -707,6 +706,8 @@ class ImageCapture_Worker(QObject):
             if img_corr != Enum_CamCorrectionType.RAW:
                 img = self._stageHub.apply_correction(img, img_corr)
 
+            self.sig_raw_img.emit(get_timestamp_us_int(), img)
+
             img = self._overlay_scalebar(img) if scalebar else img
             if crosshair: img = self._draw_crosshair(img)
 
@@ -743,11 +744,13 @@ class ImageCapture_Worker(QObject):
                 return
             
             # Add a scalebar to it
+            self.sig_raw_img.emit(get_timestamp_us_int(), img)
+
             img = self._overlay_scalebar(img) if scalebar else img
             if crosshair: img = self._draw_crosshair(img)
-            
+
             new_frame:QPixmap = ImageQt.toqpixmap(img)
-            
+
             self.sig_img.emit(img)
             self.sig_qpixmap.emit(new_frame)
             
@@ -1687,7 +1690,11 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
             AutoFocus_Worker: The autofocus worker to perform the autofocus function.
         """
         return self._worker_autofocus
-        
+
+    def stop_autofocus(self):
+        """Signals the autofocus worker to abort the current operation."""
+        self._flg_autofocus_stop.set()
+
     def perform_autofocus(self, bypass_confirmation:bool=False, start_mm:float|None=None, end_mm:float|None=None,
                           step_mm:float|None=None):
         if not bypass_confirmation:
@@ -1727,6 +1734,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         self._flg_autofocus_stop = threading.Event()
         self._worker_autofocus = AutoFocus_Worker(
             ctrl_z=self.ctrl_z,
+            stageHub=self._stageHub,
             flg_stop=self._flg_autofocus_stop,
         )
         self._thread_autofocus = QThread(self)
@@ -1736,7 +1744,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         QTimer.singleShot(0, self._thread_autofocus.start)
         
         # Connect the signal to allow the autofocus worker to get the images from the video worker
-        self._worker_img_capture.sig_img.connect(self._worker_autofocus.process_image)
+        self._worker_img_capture.sig_raw_img.connect(self._worker_autofocus.process_image)
         self._sig_req_auto_focus.connect(self._worker_autofocus.start)
         self._worker_autofocus.sig_finished.connect(self._reset_autofocus_buttons)
         self._worker_autofocus.sig_started.connect(self._set_autofocus_running_buttons)

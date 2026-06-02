@@ -353,6 +353,30 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
         list_mapCoor = [self[idx] for idx in range(len(self)) if self[idx].mappingUnit_name in list_unitNames]
         return list_mapCoor
     
+    def load_autosave_dir(self):
+        """
+        Loads all coordinates from the autosave directory into the hub.
+        Skips entries whose names are already present. Notifies observers once after loading.
+        """
+        temp_dir = SaveParamsEnum.AUTOSAVE_DIRPATH_COOR.value
+        if not os.path.exists(temp_dir):
+            return
+        loaded_count = 0
+        for filename in os.listdir(temp_dir):
+            if not filename.endswith('.csv'):
+                continue
+            filepath = os.path.join(temp_dir, filename)
+            try:
+                mapcoor = MeaCoor_mm(loadpath=filepath)
+                if self.search_mappingCoor(mapcoor.mappingUnit_name) is None:
+                    super().append(mapcoor)
+                    loaded_count += 1
+            except Exception as e:
+                print(f"Error loading autosaved coordinate {filename}: {e}")
+        if loaded_count > 0:
+            self._notify_observers()
+            print(f"Loaded {loaded_count} coordinate(s) from autosave directory")
+
     def generate_dummy_data(self, num_units:int=5, num_coords:int=10):
         """
         Generates dummy data for testing purposes.

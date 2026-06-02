@@ -597,13 +597,14 @@ class StageComm_Worker(QObject):
     """
     sig_gotocoor = Signal(tuple, threading.Event)
     sig_setspeed = Signal(float, float, threading.Event)
-        
+    sig_goto_finished = Signal()
+
     def __init__(self, ctrl_motion_video: Wdg_MotionController):
         super().__init__()
         self._controller = ctrl_motion_video
         self.sig_gotocoor.connect(ctrl_motion_video.get_goto_worker().work)
         self.sig_setspeed.connect(ctrl_motion_video.set_vel_relative)
-        
+
     @Slot(tuple, bool)
     def goto_coordinate(self, coor_mm: tuple, maxspeed:bool):
         try:
@@ -612,15 +613,17 @@ class StageComm_Worker(QObject):
                 event_finish_speed = threading.Event()
                 self.sig_setspeed.emit(100.0, -1.0, event_finish_speed) # Set to max speed (example values, adjust as needed)
                 event_finish_speed.wait()
-            
+
             event_finish = threading.Event()
             self.sig_gotocoor.emit(coor_mm, event_finish)
             event_finish.wait()
-            
+
             if maxspeed:
                 self._controller.set_vel_relative(*current_speed)
-                
+
         except Exception as e: print(f"Error in goto_coordinate: {e}")
+        finally:
+            self.sig_goto_finished.emit()
         
         
 class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
@@ -680,23 +683,37 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
         
     # >>> Autofocus setup <<<
         self._init_autofocus_workers()
-        self.btn_autofocus.clicked.connect(self._start_autofocus)
-        
+        self.btn_autofocus.clicked.connect(self._toggle_autofocus)
+
     # >>> Others <<<
         self._programmatic_close = False
-        
+
     def _init_goto_worker(self):
         self._thread_goto = QThread()
         self._goto_worker = StageComm_Worker(self._ctrl_motion_video)
         self._sig_gotocoor.connect(self._goto_worker.goto_coordinate)
+        self._goto_worker.sig_goto_finished.connect(self._on_goto_finished)
         self._goto_worker.moveToThread(self._thread_goto)
         self._thread_goto.start()
-        
+        self._autofocus_running = False
+
     def _init_autofocus_workers(self):
         self._autofocus_worker = self._ctrl_motion_video.get_autofocus_worker()
         self._autofocus_worker.sig_finished.connect(self._handle_autofocus_finished)
-        
-    def _start_autofocus(self):
+
+    def _set_autofocus_button_state(self, running: bool):
+        if running:
+            self.btn_autofocus.setText("Stop Autofocus")
+        else:
+            self.btn_autofocus.setText("Autofocus All")
+
+    @Slot()
+    def _toggle_autofocus(self):
+        if self._autofocus_running:
+            self._autofocus_running = False
+            self._set_autofocus_button_state(False)
+            return
+
         confirm = qw.QMessageBox.question(
             self,
             "Confirm Autofocus",
@@ -708,31 +725,56 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
         )
         if confirm != qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue] ; pyqt5 vs PySide6 difference
             return
-        
+
+        self._autofocus_running = True
+        self._set_autofocus_button_state(True)
         self._perform_autofocus()
-        
+
+    def _stop_autofocus(self):
+        """Clears the running flag, resets the button, and aborts any active hardware scan."""
+        self._autofocus_running = False
+        self._set_autofocus_button_state(False)
+        self._ctrl_motion_video.stop_autofocus()
+
     @Slot(float)
     def _handle_autofocus_finished(self, coor_z_mm: float):
+        if not self._autofocus_running:
+            return
         self._update_coordinate_withGivenZCoor(coor_z_mm)
+        # Check if we're already at the last unit before trying to advance
+        result = self._get_selected_mappingCoor(suppress_warning=True)
+        if not result or result[0] == len(self._list_mapping_coor) - 1:
+            self._stop_autofocus()
+            return
+        # Advance to next unit and move the stage; autofocus fires from _on_goto_finished
         self._go_to_nextMappingCoor()
-        self._perform_autofocus()
-        
+
+    @Slot()
+    def _on_goto_finished(self):
+        """Called after the stage finishes moving; continues autofocus if active."""
+        if self._autofocus_running:
+            self._perform_autofocus()
+
     @Slot()
     def _perform_autofocus(self):
         result = self._get_selected_mappingCoor()
-        if not result: return
-        
+        if not result:
+            self._stop_autofocus()
+            return
+
         idx, mapping_coor = result
-        if idx == len(self._list_mapping_coor) - 1: return
-        
+        if idx == len(self._list_mapping_coor) - 1:
+            self._stop_autofocus()
+            return
+
         target_coor_mm = self._calculate_target_coordinate(mapping_coor)
         target_coor_mm = target_coor_mm.astype(float)
         target_coor_mm = (target_coor_mm[0], target_coor_mm[1], target_coor_mm[2])
-        
+
         range_mm = self.spin_range_um.value() / 1e3
         start_mm = target_coor_mm[2] - range_mm/2
         end_mm = target_coor_mm[2] + range_mm/2
-        
+
         self._ctrl_motion_video.perform_autofocus(start_mm=start_mm, end_mm=end_mm, bypass_confirmation=True)
         
     @Slot()
@@ -1007,6 +1049,12 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
         """
         Terminates the video feed and closes the window
         """
+        self._stop_autofocus()
+        try:
+            self._autofocus_worker.sig_finished.disconnect(self._handle_autofocus_finished)
+        except Exception:
+            pass
+
         if self._programmatic_close:
             event.accept()
             return super().closeEvent(event)
