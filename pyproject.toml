@@ -42,6 +42,10 @@ thorlabs = [
     "pythonnet~=3.0.3"
 ]
 
+dev = [
+    "pytest>=8.0",
+]
+
 docs = [
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.7.1",
@@ -49,6 +53,9 @@ docs = [
     "mkdocs-gen-files>=0.6.0",
     "mkdocs-literate-nav>=0.6.2",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 where = ["."]

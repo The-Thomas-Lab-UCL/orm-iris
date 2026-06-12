@@ -1151,12 +1151,16 @@ class MeaRMap_Hub():
         """
         with self._lock:
             assert unit_id in self._dict_mappingMeasurementUnits[self._unit_id_key], 'rename_mapping_measurement_unit: The measurement ID does not exist.'
-            assert new_name not in self._dict_mappingUnit_NameID, 'rename_mapping_measurement_unit: The new name already exists.'
-            
+
             unit_idx = self._dict_mappingMeasurementUnits[self._unit_id_key].index(unit_id)
             unit:MeaRMap_Unit = self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx]
-            
             old_name = unit.get_unit_name()
+
+            if new_name == old_name:
+                return
+
+            assert new_name not in self._dict_mappingUnit_NameID, 'rename_mapping_measurement_unit: The new name already exists.'
+
             unit.set_unitName(new_name)
             self._dict_mappingUnit_NameID[new_name] = unit_id
             del self._dict_mappingUnit_NameID[old_name]
