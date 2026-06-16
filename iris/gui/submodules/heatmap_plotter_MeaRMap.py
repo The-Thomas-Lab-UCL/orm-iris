@@ -126,6 +126,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         parent,
         mappingHub:MeaRMap_Hub,
         layout:qw.QLayout|None = None,
+        auto_plot_interval_ms:int = 1000,
         ):
         """
         Initialise the plot_mapping_measurements class
@@ -138,6 +139,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
             layout (qw.QLayout|None): Optional layout to set for this widget.
         """
         assert isinstance(mappingHub,MeaRMap_Hub),'mappingHub must be an instance of MappingMeasurement_Hub'
+        assert isinstance(auto_plot_interval_ms,int) and auto_plot_interval_ms > 10, 'auto_plot_interval_ms must be a positive integer greater than 10'
         
         super().__init__(parent)
         self._mappingHub:MeaRMap_Hub = mappingHub
@@ -203,18 +205,18 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         # self._sig_request_update_plot.connect(lambda: self.plot_heatmap())
         self.sig_request_update_plot.connect(self.request_plot_heatmap)
         self._timer_plot = QTimer(self)
-        self._timer_plot.setInterval(1000)
+        self._timer_plot.setInterval(auto_plot_interval_ms)
         self._timer_plot.timeout.connect(self._process_plot_request)
         self.destroyed.connect(self._timer_plot.stop)
         # Defer timer start until after event loop is running
         QTimer.singleShot(0, self._timer_plot.start)
-        
+
         # Combobox update timer
         # self._sig_request_update_comboboxes.connect(lambda: self._update_comboboxes())
         self._mappingHub.add_observer(self._sig_request_update_comboboxes.emit)
         self._sig_request_update_comboboxes.connect(lambda: self.request_combobox_update())
         self._timer_combobox = QTimer(self)
-        self._timer_combobox.setInterval(1000)
+        self._timer_combobox.setInterval(auto_plot_interval_ms)
         self._timer_combobox.timeout.connect(self._process_combobox_request)
         self.destroyed.connect(self._timer_combobox.stop)
         # Defer timer start until after event loop is running
