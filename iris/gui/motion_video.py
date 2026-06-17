@@ -447,12 +447,11 @@ class AutoFocus_Worker(QObject):
         self._sweep_start_time_us: int = 0
         self._sweep_thread: threading.Thread = threading.Thread()
 
-    @Slot(float, float, float, int)
-    def start(self, start_z_mm: float, end_z_mm: float, _step_size_mm: float, kernel_size: int):
+    @Slot(float, float, float, int, bool)
+    def start(self, start_z_mm: float, end_z_mm: float, _step_size_mm: float, kernel_size: int, is_continuous: bool = False):
         """
-        Sweep from start_z_mm to end_z_mm in a single continuous move, collecting
-        timestamped frames along the way.  _step_size_mm is unused (kept for signal
-        compatibility).
+        Scan from start_z_mm to end_z_mm collecting timestamped frames.
+        is_continuous=True: single move_direct to end_z (sweep); False: step-by-step via move_direct.
         """
         try:
             assert isinstance(kernel_size, int) and kernel_size > 0 and kernel_size % 2 == 1, \
@@ -473,15 +472,14 @@ class AutoFocus_Worker(QObject):
             self.ctrl_z.move_direct(self._full_start_z_mm)
             self._wait_for_z(self._full_start_z_mm)
 
-            print(f'Autofocus: stepping [{self._full_start_z_mm:.4f}, {self._full_end_z_mm:.4f}] mm '
-                  f'in {self._step_size_mm:.4f} mm steps')
+            mode = 'continuous sweep' if is_continuous else f'discrete steps ({self._step_size_mm:.4f} mm)'
+            print(f'Autofocus: [{self._full_start_z_mm:.4f}, {self._full_end_z_mm:.4f}] mm — {mode}')
             self._sweep_start_time_us = get_timestamp_us_int()
             self._phase = 'scanning'
             self.sig_started.emit()
 
-            # Step through positions in a background thread; this QThread's event
-            # loop stays free to collect timestamped frames throughout
-            self._sweep_thread = threading.Thread(target=self._run_steps, daemon=True)
+            target = self._run_sweep if is_continuous else self._run_steps
+            self._sweep_thread = threading.Thread(target=target, daemon=True)
             self._sweep_thread.start()
             threading.Thread(target=self._monitor_sweep, daemon=True).start()
 
@@ -520,6 +518,10 @@ class AutoFocus_Worker(QObject):
                 return
             self.ctrl_z.move_direct(z)
             z += self._step_size_mm
+
+    def _run_sweep(self):
+        """Single move_direct to end_z; frames are collected continuously in the background."""
+        self.ctrl_z.move_direct(self._full_end_z_mm)
 
     def _monitor_sweep(self):
         """Wait for the sweep thread (move_direct) to finish, then score frames."""
@@ -784,7 +786,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
     _sig_resume_video_ui = Signal()
     _sig_reinit_camera_done = Signal(bool, bool)  # (video_was_running, success)
     
-    _sig_req_auto_focus = Signal(float,float,float,int)
+    _sig_req_auto_focus = Signal(float,float,float,int,bool)
     
     def __init__(
         self,
@@ -1713,7 +1715,8 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         end = end_mm if end_mm is not None else self.spin_end_autofocus.value()/1e3
         step = step_mm if step_mm is not None else self.spin_step_autofocus.value()/1e3
         kernel = self.spin_kernelsize.value()
-        self._sig_req_auto_focus.emit(start,end,step,kernel)
+        is_continuous = self.rad_continuous.isChecked()
+        self._sig_req_auto_focus.emit(start, end, step, kernel, is_continuous)
         
     def _set_autofocus_running_buttons(self):
         self.btn_perform_autofocus.setEnabled(False)
