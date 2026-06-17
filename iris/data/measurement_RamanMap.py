@@ -231,6 +231,43 @@ class MeaRMap_Unit():
         else:
             return self._dict_measurement
         
+    def get_arr_measurements(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Returns the measurement data as four numpy arrays.
+        
+        The first array contains the coordinates (timestamp, x, y, z) for each measurement,
+        and the second array contains the spectra (intensity values) for each measurement.
+        
+        The row index of the first and second array corresponds to the same measurement,
+        and the column index of the second array corresponds to the same wavelength/Raman shift
+        across all measurements provided in the third and fourth array.
+
+        Returns:
+            tuple:
+                coords (N, 4): float64 array of [timestamp, x, y, z] per measurement
+                spectra (N, W): float64 array of intensities — one row per spatial position,
+                    one column per wavelength channel
+                wavenumbers (W,): float64 array of wavenumber values (Raman shift) (shared axis)
+                wavelengths (W,): float64 array of wavelength values (shared axis)
+        """
+        with self._lock_measurement:
+            coords = np.array([
+                self._dict_measurement[self._label_ts],
+                self._dict_measurement[self._label_x],
+                self._dict_measurement[self._label_y],
+                self._dict_measurement[self._label_z],
+            ], dtype=np.float64).T  # (N, 4)
+            
+            wavelengths = np.array(self.get_list_wavelengths(), dtype=np.float64)  # (W,)
+            wavenumbers = np.array(self.get_list_Raman_shift(), dtype=np.float64)  # (W,)
+            
+            spectra = np.array([
+                df[self._dflabel_intensity].to_numpy(dtype=np.float64)
+                for df in self._dict_measurement[self._label_avemea]
+            ])  # (N, W)
+
+        return coords, spectra, wavenumbers, wavelengths
+        
     def get_dict_types(self) -> tuple[dict,dict]:
         """
         Returns the dictionary of the data types stored in the class
@@ -1114,12 +1151,16 @@ class MeaRMap_Hub():
         """
         with self._lock:
             assert unit_id in self._dict_mappingMeasurementUnits[self._unit_id_key], 'rename_mapping_measurement_unit: The measurement ID does not exist.'
-            assert new_name not in self._dict_mappingUnit_NameID, 'rename_mapping_measurement_unit: The new name already exists.'
-            
+
             unit_idx = self._dict_mappingMeasurementUnits[self._unit_id_key].index(unit_id)
             unit:MeaRMap_Unit = self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx]
-            
             old_name = unit.get_unit_name()
+
+            if new_name == old_name:
+                return
+
+            assert new_name not in self._dict_mappingUnit_NameID, 'rename_mapping_measurement_unit: The new name already exists.'
+
             unit.set_unitName(new_name)
             self._dict_mappingUnit_NameID[new_name] = unit_id
             del self._dict_mappingUnit_NameID[old_name]
