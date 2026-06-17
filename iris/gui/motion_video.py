@@ -431,6 +431,7 @@ class AutoFocus_Worker(QObject):
     sig_started = Signal()
     sig_finished = Signal(float)
     sig_error = Signal(str)
+    sig_peak_not_in_range = Signal()  # emitted when Gaussian peak falls outside the scan range
 
     def __init__(self, ctrl_z: Controller_Z, stageHub: DataStreamer_StageCam, flg_stop: threading.Event):
         super().__init__()
@@ -554,7 +555,8 @@ class AutoFocus_Worker(QObject):
         threshold = np.percentile(magnitude, 90)
         return float(magnitude[magnitude >= threshold].mean())
 
-    def _estimate_peak_z(self, z_arr: np.ndarray, scores_arr: np.ndarray) -> float:
+    def _estimate_peak_z(self, z_arr: np.ndarray, scores_arr: np.ndarray) -> float | None:
+        """Returns estimated peak Z in mm, or None if the Gaussian peak lies outside the scan range."""
         if len(z_arr) < 4:
             return float(z_arr[int(np.argmax(scores_arr))])
         try:
@@ -563,9 +565,13 @@ class AutoFocus_Worker(QObject):
                 return A * np.exp(-(z - mu)**2 / (2 * sigma**2)) + c
             p0 = [scores_arr.max() - scores_arr.min(), z_arr[int(np.argmax(scores_arr))],
                   (z_arr[-1] - z_arr[0]) / 4, scores_arr.min()]
-            bounds = ([0, z_arr[0], 1e-6, -np.inf], [np.inf, z_arr[-1], z_arr[-1] - z_arr[0], np.inf])
+            # mu is unbounded so we can detect peaks outside the scan range
+            bounds = ([0, -np.inf, 1e-6, -np.inf], [np.inf, np.inf, z_arr[-1] - z_arr[0], np.inf])
             popt, _ = curve_fit(_gaussian, z_arr, scores_arr, p0=p0, bounds=bounds, maxfev=5000)
-            return float(np.clip(popt[1], self._full_start_z_mm, self._full_end_z_mm))
+            mu = float(popt[1])
+            if not (self._full_start_z_mm <= mu <= self._full_end_z_mm):
+                return None  # peak is outside the scanned range
+            return mu
         except Exception:
             return float(z_arr[int(np.argmax(scores_arr))])
 
@@ -604,6 +610,14 @@ class AutoFocus_Worker(QObject):
         scores_arr = np.array([p[1] for p in pairs])
 
         best_z = self._estimate_peak_z(z_arr, scores_arr)
+        if best_z is None:
+            msg = (f'Focus peak not found within scan range '
+                   f'[{self._full_start_z_mm:.4f}, {self._full_end_z_mm:.4f}] mm. '
+                   f'The best focus may be outside the scanned region.')
+            print(f'Autofocus: {msg}')
+            self.sig_peak_not_in_range.emit()
+            self.sig_error.emit(msg)
+            return
         self.ctrl_z.move_direct(best_z)
         print(f'Autofocus finished. Best Z: {best_z:.4f} mm '
               f'(score: {scores_arr.max():.2f}, {len(z_list)} frames scored)')
