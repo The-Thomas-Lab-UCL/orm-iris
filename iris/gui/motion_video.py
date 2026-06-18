@@ -431,6 +431,7 @@ class AutoFocus_Worker(QObject):
     sig_started = Signal()
     sig_finished = Signal(float)
     sig_error = Signal(str)
+    sig_peak_not_in_range = Signal(str)  # emitted when Gaussian peak falls outside the scan range
 
     def __init__(self, ctrl_z: Controller_Z, stageHub: DataStreamer_StageCam, flg_stop: threading.Event):
         super().__init__()
@@ -447,12 +448,11 @@ class AutoFocus_Worker(QObject):
         self._sweep_start_time_us: int = 0
         self._sweep_thread: threading.Thread = threading.Thread()
 
-    @Slot(float, float, float, int)
-    def start(self, start_z_mm: float, end_z_mm: float, _step_size_mm: float, kernel_size: int):
+    @Slot(float, float, float, int, bool)
+    def start(self, start_z_mm: float, end_z_mm: float, _step_size_mm: float, kernel_size: int, is_continuous: bool = False):
         """
-        Sweep from start_z_mm to end_z_mm in a single continuous move, collecting
-        timestamped frames along the way.  _step_size_mm is unused (kept for signal
-        compatibility).
+        Scan from start_z_mm to end_z_mm collecting timestamped frames.
+        is_continuous=True: single move_direct to end_z (sweep); False: step-by-step via move_direct.
         """
         try:
             assert isinstance(kernel_size, int) and kernel_size > 0 and kernel_size % 2 == 1, \
@@ -473,15 +473,14 @@ class AutoFocus_Worker(QObject):
             self.ctrl_z.move_direct(self._full_start_z_mm)
             self._wait_for_z(self._full_start_z_mm)
 
-            print(f'Autofocus: stepping [{self._full_start_z_mm:.4f}, {self._full_end_z_mm:.4f}] mm '
-                  f'in {self._step_size_mm:.4f} mm steps')
+            mode = 'continuous sweep' if is_continuous else f'discrete steps ({self._step_size_mm:.4f} mm)'
+            print(f'Autofocus: [{self._full_start_z_mm:.4f}, {self._full_end_z_mm:.4f}] mm — {mode}')
             self._sweep_start_time_us = get_timestamp_us_int()
             self._phase = 'scanning'
             self.sig_started.emit()
 
-            # Step through positions in a background thread; this QThread's event
-            # loop stays free to collect timestamped frames throughout
-            self._sweep_thread = threading.Thread(target=self._run_steps, daemon=True)
+            target = self._run_sweep if is_continuous else self._run_steps
+            self._sweep_thread = threading.Thread(target=target, daemon=True)
             self._sweep_thread.start()
             threading.Thread(target=self._monitor_sweep, daemon=True).start()
 
@@ -521,6 +520,10 @@ class AutoFocus_Worker(QObject):
             self.ctrl_z.move_direct(z)
             z += self._step_size_mm
 
+    def _run_sweep(self):
+        """Single move_direct to end_z; frames are collected continuously in the background."""
+        self.ctrl_z.move_direct(self._full_end_z_mm)
+
     def _monitor_sweep(self):
         """Wait for the sweep thread (move_direct) to finish, then score frames."""
         while self._sweep_thread.is_alive():
@@ -552,7 +555,8 @@ class AutoFocus_Worker(QObject):
         threshold = np.percentile(magnitude, 90)
         return float(magnitude[magnitude >= threshold].mean())
 
-    def _estimate_peak_z(self, z_arr: np.ndarray, scores_arr: np.ndarray) -> float:
+    def _estimate_peak_z(self, z_arr: np.ndarray, scores_arr: np.ndarray) -> float | None:
+        """Returns estimated peak Z in mm, or None if the Gaussian peak lies outside the scan range."""
         if len(z_arr) < 4:
             return float(z_arr[int(np.argmax(scores_arr))])
         try:
@@ -561,9 +565,13 @@ class AutoFocus_Worker(QObject):
                 return A * np.exp(-(z - mu)**2 / (2 * sigma**2)) + c
             p0 = [scores_arr.max() - scores_arr.min(), z_arr[int(np.argmax(scores_arr))],
                   (z_arr[-1] - z_arr[0]) / 4, scores_arr.min()]
-            bounds = ([0, z_arr[0], 1e-6, -np.inf], [np.inf, z_arr[-1], z_arr[-1] - z_arr[0], np.inf])
+            # mu is unbounded so we can detect peaks outside the scan range
+            bounds = ([0, -np.inf, 1e-6, -np.inf], [np.inf, np.inf, z_arr[-1] - z_arr[0], np.inf])
             popt, _ = curve_fit(_gaussian, z_arr, scores_arr, p0=p0, bounds=bounds, maxfev=5000)
-            return float(np.clip(popt[1], self._full_start_z_mm, self._full_end_z_mm))
+            mu = float(popt[1])
+            if not (self._full_start_z_mm <= mu <= self._full_end_z_mm):
+                return None  # peak is outside the scanned range
+            return mu
         except Exception:
             return float(z_arr[int(np.argmax(scores_arr))])
 
@@ -602,6 +610,13 @@ class AutoFocus_Worker(QObject):
         scores_arr = np.array([p[1] for p in pairs])
 
         best_z = self._estimate_peak_z(z_arr, scores_arr)
+        if best_z is None:
+            msg = (f'Focus peak not found within scan range '
+                   f'[{self._full_start_z_mm:.4f}, {self._full_end_z_mm:.4f}] mm. '
+                   f'The best focus may be outside the scanned region.')
+            print(f'Autofocus: {msg}')
+            self.sig_peak_not_in_range.emit(msg)
+            return
         self.ctrl_z.move_direct(best_z)
         print(f'Autofocus finished. Best Z: {best_z:.4f} mm '
               f'(score: {scores_arr.max():.2f}, {len(z_list)} frames scored)')
@@ -784,7 +799,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
     _sig_resume_video_ui = Signal()
     _sig_reinit_camera_done = Signal(bool, bool)  # (video_was_running, success)
     
-    _sig_req_auto_focus = Signal(float,float,float,int)
+    _sig_req_auto_focus = Signal(float,float,float,int,bool)
     
     def __init__(
         self,
@@ -1713,7 +1728,8 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         end = end_mm if end_mm is not None else self.spin_end_autofocus.value()/1e3
         step = step_mm if step_mm is not None else self.spin_step_autofocus.value()/1e3
         kernel = self.spin_kernelsize.value()
-        self._sig_req_auto_focus.emit(start,end,step,kernel)
+        is_continuous = self.rad_continuous.isChecked()
+        self._sig_req_auto_focus.emit(start, end, step, kernel, is_continuous)
         
     def _set_autofocus_running_buttons(self):
         self.btn_perform_autofocus.setEnabled(False)
@@ -1726,6 +1742,19 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
     def _handle_autofocus_error(self,msg:str):
         qw.QMessageBox.critical(self, 'Autofocus error', f'An error occurred during autofocus:\n{msg}')
         self._reset_autofocus_buttons()
+
+    def suppress_peak_not_found_error(self, suppress: bool):
+        """Disconnect or reconnect the peak-not-in-range error dialog (used by gridify batch autofocus)."""
+        if suppress:
+            try:
+                self._worker_autofocus.sig_peak_not_in_range.disconnect(self._handle_autofocus_error)
+            except RuntimeError:
+                pass
+        else:
+            try:
+                self._worker_autofocus.sig_peak_not_in_range.connect(self._handle_autofocus_error)
+            except RuntimeError:
+                pass
         
     def _init_autofocus_worker(self):
         """
@@ -1749,6 +1778,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         self._worker_autofocus.sig_finished.connect(self._reset_autofocus_buttons)
         self._worker_autofocus.sig_started.connect(self._set_autofocus_running_buttons)
         self._worker_autofocus.sig_error.connect(self._handle_autofocus_error)
+        self._worker_autofocus.sig_peak_not_in_range.connect(self._handle_autofocus_error)
         
         # Connect the GUI
         self.btn_perform_autofocus.clicked.connect(self.perform_autofocus)

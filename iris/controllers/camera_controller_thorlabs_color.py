@@ -257,7 +257,7 @@ class CameraController_ThorlabsColor(Class_CameraController):
             # Issue trigger → fresh exposure starts now (stage is already stationary)
             self.camera.issue_software_trigger()
             # Wait for the frame: exposure_time + a fixed margin (no artificial floor)
-            self.camera.image_poll_timeout_ms = int(self.camera.exposure_time_us // 1000) + 500
+            self.camera.image_poll_timeout_ms = max(100, round(self.camera.exposure_time_us / 1000) + 50)
             frame = self.camera.get_pending_frame_or_null()
             self.camera.image_poll_timeout_ms = old_timeout
 

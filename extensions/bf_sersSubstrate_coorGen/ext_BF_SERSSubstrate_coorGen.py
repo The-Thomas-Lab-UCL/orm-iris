@@ -33,7 +33,7 @@ from extensions.bf_sersSubstrate_coorGen.masking.basic_image_processing import (
     Params_Centre_Estimation, Params_Edge_Detection,
     estimate_centre_blurring, detect_edge_Sobel,
 )
-from extensions.bf_sersSubstrate_coorGen.masking.image_preprocessing import convert_img2gray_s_channel
+from extensions.bf_sersSubstrate_coorGen.masking.image_preprocessing import convert_img2gray_hsv_projection
 from extensions.bf_sersSubstrate_coorGen.utils import generate_mask  # noqa: F401  (available for future overlay use)
 
 
@@ -47,11 +47,13 @@ class ProcessResult:
                  boundary_px_x: np.ndarray, boundary_px_y: np.ndarray,
                  boundary_stage_mm: np.ndarray, boundary_stage_mm_expanded: np.ndarray,
                  scan_pts_stage: np.ndarray, scan_pts_mea: np.ndarray,
-                 expansion_mm: float, step_size_x_mm: float, step_size_y_mm: float):
+                 expansion_mm: float, step_size_x_mm: float, step_size_y_mm: float,
+                 hsv_channels: str = 'S'):
         self._img_unit = img_unit
         self._coor = coor
         self._arr = arr
         self._S = S
+        self._hsv_channels = hsv_channels
         self._cx_est = cx_est
         self._cy_est = cy_est
         self._ellipse_sobel = ellipse_sobel
@@ -128,7 +130,8 @@ class _PipelineParams:
                  ransac_trials: int,
                  step_size_x_mm: float,
                  step_size_y_mm: float,
-                 expansion_mm: float):
+                 expansion_mm: float,
+                 hsv_channels: str = 'S'):
         self.params_centre = params_centre
         self.params_edge = params_edge
         self.params_smooth = params_smooth
@@ -137,6 +140,7 @@ class _PipelineParams:
         self.step_size_x_mm = step_size_x_mm
         self.step_size_y_mm = step_size_y_mm
         self.expansion_mm = expansion_mm
+        self.hsv_channels = hsv_channels
 
 
 class _ProcessWorker(QObject):
@@ -162,7 +166,7 @@ class _ProcessWorker(QObject):
         arr = np.array(img_stitched.convert('RGB'))
 
         # Pipeline
-        S = convert_img2gray_s_channel(arr)
+        S = convert_img2gray_hsv_projection(arr, channels=p.hsv_channels)
         cx_est, cy_est = estimate_centre_blurring(S, params=p.params_centre)
         ellipse_sobel = detect_edge_Sobel(S, cx_est, cy_est, params=p.params_edge)
         ellipse_fit = fit_ellipse_ransac(
@@ -242,6 +246,7 @@ class _ProcessWorker(QObject):
             expansion_mm=p.expansion_mm,
             step_size_x_mm=p.step_size_x_mm,
             step_size_y_mm=p.step_size_y_mm,
+            hsv_channels=p.hsv_channels,
         )
 
     @staticmethod
@@ -311,8 +316,9 @@ class _PlotWorker(QObject):
         ax['rgb'].set_title('RGB input', fontsize=fs)
         ax['rgb'].axis('off')
 
+        ch_label = r._hsv_channels if len(r._hsv_channels) == 1 else f'{r._hsv_channels} → PCA'
         ax['s_ch'].imshow(r._S, cmap='gray')
-        ax['s_ch'].set_title('S channel', fontsize=fs)
+        ax['s_ch'].set_title(ch_label, fontsize=fs)
         ax['s_ch'].axis('off')
 
         S_blurred = skfilters.gaussian(r._S, sigma=40)
@@ -476,6 +482,13 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
             lyt.addRow(label, spin)
             return spin
 
+        lyt.addRow(_make_section_label('Image preprocessing'))
+        self._combo_hsv_channels = qw.QComboBox()
+        self._combo_hsv_channels.setSizePolicy(sp_expand)
+        for opt in ['S', 'H', 'V', 'HS', 'HV', 'SV', 'HSV']:
+            self._combo_hsv_channels.addItem(opt)
+        lyt.addRow('HSV channels', self._combo_hsv_channels)
+
         lyt.addRow(_make_section_label('Centre estimation'))
         self._spin_ce_sigma      = _add_spin('Blur sigma [px]',   50,    1,  500, 1)
         self._spin_ce_percentile = _add_spin('Blob percentile',   70,    1,   99, 1, ' %')
@@ -524,6 +537,7 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
             step_size_x_mm=self._spin_step_x_um.value() / 1000.0,  # µm → mm
             step_size_y_mm=self._spin_step_y_um.value() / 1000.0,  # µm → mm
             expansion_mm=self._spin_expansion_um.value() / 1000.0,  # µm → mm
+            hsv_channels=self._combo_hsv_channels.currentText(),
         )
 
     # ── Result tab: plot canvas + buttons ─────────────────────────────────

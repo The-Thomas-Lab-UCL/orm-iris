@@ -239,10 +239,11 @@ class Canvas_Image_Annotations(QGraphicsView):
         y2 = (y2/scale_val)
         
         # Ignore the coordinates outside the canvas
+        img_w, img_h = self._img_size if self._img_size else self.size_pixel
         x1 = max(0,x1)
         y1 = max(0,y1)
-        x2 = min(self.size_pixel[0],x2)
-        y2 = min(self.size_pixel[1],y2)
+        x2 = min(img_w, x2)
+        y2 = min(img_h, y2)
         
         # print(f'Drawing rectangle at ({x1}, {y1}) to ({x2}, {y2}) on canvas')
         
@@ -321,35 +322,31 @@ class Canvas_Image_Annotations(QGraphicsView):
         Sets the image to be displayed on the canvas
         """
         assert isinstance(img, Image.Image), 'Image must be a PIL Image object'
-        
-        img_scale = max(img.size[0]/self.size_pixel[0],img.size[1]/self.size_pixel[1])
-        img_resized = img.resize((int(img.size[0]/img_scale),int(img.size[1]/img_scale)),Image.LANCZOS) # pyright: ignore[reportAttributeAccessIssue] ; LANCOZOS is supported
-        
-        qimg_resized = ImageQt.ImageQt(img_resized)
-        pixmap = QPixmap.fromImage(qimg_resized)
-        
-        if qimg_resized != self._image_item:
-            # Double buffer: Create a new image item on the canvas, but don't display it yet
-            canvas_newImage = QGraphicsPixmapItem(pixmap)
-            canvas_newImage.setZValue(-1)  # Set the image item to be at the back
-            canvas_newImage.setVisible(False)  # Hide the new image item initially
-            self._scene.addItem(canvas_newImage)
-            # Now that the new image item is created, we can remove the old one
-            if self._image_item is not None:
-                self._scene.removeItem(self._image_item)
-            # Finally, display the new image item
-            canvas_newImage.setVisible(True)
-            
-            # Update the annotations to be on top of the image
-            [annotation.setZValue(0) for annotation in self._annotations]
-            
-            self._img_ori = img
-            self._image_item = canvas_newImage
-            self._img_size = img.size
-            self._img_scale = img_scale
 
-            self._scene.setSceneRect(0, 0, pixmap.width(), pixmap.height())
-            self.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        qimg = ImageQt.ImageQt(img)
+        pixmap = QPixmap.fromImage(qimg)
+
+        # Double buffer: Create a new image item on the canvas, but don't display it yet
+        canvas_newImage = QGraphicsPixmapItem(pixmap)
+        canvas_newImage.setZValue(-1)  # Set the image item to be at the back
+        canvas_newImage.setVisible(False)  # Hide the new image item initially
+        self._scene.addItem(canvas_newImage)
+        # Now that the new image item is created, we can remove the old one
+        if self._image_item is not None:
+            self._scene.removeItem(self._image_item)
+        # Finally, display the new image item
+        canvas_newImage.setVisible(True)
+
+        # Update the annotations to be on top of the image
+        [annotation.setZValue(0) for annotation in self._annotations]
+
+        self._img_ori = img
+        self._image_item = canvas_newImage
+        self._img_size = img.size
+        self._img_scale = 1.0  # Scene is at original image resolution; fitInView handles display scaling
+
+        self._scene.setSceneRect(0, 0, pixmap.width(), pixmap.height())
+        self.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
 def test():
     app = qw.QApplication()

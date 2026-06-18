@@ -660,6 +660,7 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
         
     # >>> Initialise the parameters <<<
         self._list_mod = [False] * len(self._list_mapping_coor)  # List to track modified coordinates
+        self._list_autofocus_status: list[str] = [''] * len(self._list_mapping_coor)
         
     # >>> Layout setup <<<
         self._init_finetune_widgets()
@@ -700,6 +701,7 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
     def _init_autofocus_workers(self):
         self._autofocus_worker = self._ctrl_motion_video.get_autofocus_worker()
         self._autofocus_worker.sig_finished.connect(self._handle_autofocus_finished)
+        self._autofocus_worker.sig_peak_not_in_range.connect(self._handle_peak_not_in_range)
 
     def _set_autofocus_button_state(self, running: bool):
         if running:
@@ -728,12 +730,14 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
 
         self._autofocus_running = True
         self._set_autofocus_button_state(True)
+        self._ctrl_motion_video.suppress_peak_not_found_error(True)
         self._perform_autofocus()
 
     def _stop_autofocus(self):
         """Clears the running flag, resets the button, and aborts any active hardware scan."""
         self._autofocus_running = False
         self._set_autofocus_button_state(False)
+        self._ctrl_motion_video.suppress_peak_not_found_error(False)
         self._ctrl_motion_video.stop_autofocus()
 
     @Slot(float)
@@ -741,12 +745,29 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
         if not self._autofocus_running:
             return
         self._update_coordinate_withGivenZCoor(coor_z_mm)
-        # Check if we're already at the last unit before trying to advance
         result = self._get_selected_mappingCoor(suppress_warning=True)
+        if result:
+            self._list_autofocus_status[result[0]] = 'Found'
+            self._update_treeview()
+        # Check if we're already at the last unit before trying to advance
         if not result or result[0] == len(self._list_mapping_coor) - 1:
             self._stop_autofocus()
             return
         # Advance to next unit and move the stage; autofocus fires from _on_goto_finished
+        self._go_to_nextMappingCoor()
+
+    @Slot(str)
+    def _handle_peak_not_in_range(self, _msg: str = ''):
+        """Peak was outside the scan range — mark the ROI and continue to the next one."""
+        result = self._get_selected_mappingCoor(suppress_warning=True)
+        if result:
+            self._list_autofocus_status[result[0]] = 'Not Found'
+            self._update_treeview()
+        if not self._autofocus_running:
+            return
+        if not result or result[0] == len(self._list_mapping_coor) - 1:
+            self._stop_autofocus()
+            return
         self._go_to_nextMappingCoor()
 
     @Slot()
@@ -796,8 +817,8 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
     def _init_finetune_widgets(self):
         """Initializes the fine-tune widgets for the gridified coordinates"""
         # >>> Create a treeview widget to display the gridified coordinates <<<
-        self.tree_roi.setColumnCount(5)
-        self.tree_roi.setHeaderLabels(['Row', 'Col', 'Name', 'Center coor [μm]', 'Modified'])
+        self.tree_roi.setColumnCount(6)
+        self.tree_roi.setHeaderLabels(['Row', 'Col', 'Name', 'Center coor [μm]', 'Modified', 'Autofocus'])
         
         # Bind double-click event to the treeview
         self.tree_roi.doubleClicked.connect(self._on_treeview_double_click)
@@ -833,7 +854,8 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
             row, col = self._list_loc[i]
             name = mapping_coor.mappingUnit_name
             modified = 'Yes' if self._list_mod[i] else 'No'
-            item = qw.QTreeWidgetItem([str(row+1), str(col+1), name, center_coor_str, modified])
+            autofocus_status = self._list_autofocus_status[i]
+            item = qw.QTreeWidgetItem([str(row+1), str(col+1), name, center_coor_str, modified, autofocus_status])
             self.tree_roi.addTopLevelItem(item)
             
         # Restore the selection
