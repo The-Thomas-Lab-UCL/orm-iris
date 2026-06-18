@@ -38,14 +38,28 @@
           </widget>
          </item>
          <item>
-          <widget class="QCheckBox" name="chk_lres">
-           <property name="text">
-            <string>Show low-resolution image (faster processing)</string>
-           </property>
-           <property name="checked">
-            <bool>true</bool>
-           </property>
-          </widget>
+          <layout class="QHBoxLayout" name="horizontalLayout_3">
+           <item>
+            <widget class="QCheckBox" name="chk_lres">
+             <property name="text">
+              <string>Show low-resolution image (faster processing)</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QCheckBox" name="chk_liveView">
+             <property name="text">
+              <string>Tiling live view</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+          </layout>
          </item>
          <item>
           <widget class="QComboBox" name="combo_img"/>
@@ -97,7 +111,6 @@
   </layout>
  </widget>
  <tabstops>
-  <tabstop>chk_lres</tabstop>
   <tabstop>combo_img</tabstop>
  </tabstops>
  <resources/>

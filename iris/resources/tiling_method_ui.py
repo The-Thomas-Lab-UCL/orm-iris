@@ -49,11 +49,22 @@ class Ui_tiling_method(object):
 
         self.verticalLayout_2.addWidget(self.dockWidget)
 
+        self.horizontalLayout_3 = QHBoxLayout()
+        self.horizontalLayout_3.setObjectName(u"horizontalLayout_3")
         self.chk_lres = QCheckBox(tiling_method)
         self.chk_lres.setObjectName(u"chk_lres")
         self.chk_lres.setChecked(True)
 
-        self.verticalLayout_2.addWidget(self.chk_lres)
+        self.horizontalLayout_3.addWidget(self.chk_lres)
+
+        self.chk_liveView = QCheckBox(tiling_method)
+        self.chk_liveView.setObjectName(u"chk_liveView")
+        self.chk_liveView.setChecked(True)
+
+        self.horizontalLayout_3.addWidget(self.chk_liveView)
+
+
+        self.verticalLayout_2.addLayout(self.horizontalLayout_3)
 
         self.combo_img = QComboBox(tiling_method)
         self.combo_img.setObjectName(u"combo_img")
@@ -105,7 +116,6 @@ class Ui_tiling_method(object):
 
         self.verticalLayout_5.addLayout(self.main_layout)
 
-        QWidget.setTabOrder(self.chk_lres, self.combo_img)
 
         self.retranslateUi(tiling_method)
 
@@ -115,6 +125,7 @@ class Ui_tiling_method(object):
     def retranslateUi(self, tiling_method):
         tiling_method.setWindowTitle(QCoreApplication.translate("tiling_method", u"Form", None))
         self.chk_lres.setText(QCoreApplication.translate("tiling_method", u"Show low-resolution image (faster processing)", None))
+        self.chk_liveView.setText(QCoreApplication.translate("tiling_method", u"Tiling live view", None))
         self.btn_capture.setText(QCoreApplication.translate("tiling_method", u"Perform image tiling", None))
         self.btn_stop.setText(QCoreApplication.translate("tiling_method", u"Stop", None))
         self.btn_quickCapture.setText(QCoreApplication.translate("tiling_method", u"Quick-capture current camera feed", None))

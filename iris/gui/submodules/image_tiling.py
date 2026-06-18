@@ -16,6 +16,8 @@ from copy import deepcopy
 
 from dataclasses import dataclass
 
+from typing import Callable
+
 if __name__ == '__main__':
     import sys
     import os
@@ -88,10 +90,12 @@ class ImageProcessor_Worker(QObject):
     msg_error = 'Error in ImageTiling_Worker: '
     msg_stopped = 'Image capture stopped by user'
     
-    def __init__(self, motion_controller:Wdg_MotionController, flg_stop:threading.Event):
+    def __init__(self, motion_controller:Wdg_MotionController, flg_stop:threading.Event,
+                 getter_liveview:Callable[[], bool] = lambda: True):
         super().__init__()
         self._motion_ctrl = motion_controller
         self.flg_stop = flg_stop
+        self._getter_liveview = getter_liveview
         
         self.sig_gotocoor.connect(self._motion_ctrl.get_goto_worker().work)
         
@@ -197,8 +201,9 @@ class ImageProcessor_Worker(QObject):
                 )
                 
             self.sig_statbar_update.emit('Taking images: {} of {}'.format(i+1,totalcoor))
-            img = imgUnit.get_image_all_stitched(low_res=True)[0]
-            self.sig_ret_image_processed.emit(img)
+            if self._getter_liveview():
+                img = imgUnit.get_image_all_stitched(low_res=True)[0]
+                self.sig_ret_image_processed.emit(img)
             
         self._motion_ctrl.exit_tiling_mode()        # restore continuous streaming
         self._motion_ctrl.resume_video()
@@ -269,6 +274,8 @@ class Wdg_HiLvlTiling(qw.QWidget):
             )
         wdg.lyt_holder_img.addWidget(self._canvas_img)
         self._chk_lres = wdg.chk_lres
+        self._chk_liveview = wdg.chk_liveView
+        self._chk_lres.toggled.connect(lambda _: self._plot_imgunit_combobox())
         
     # >>> Image control frame <<<
         self._list_imgunit_names = []
@@ -305,7 +312,11 @@ class Wdg_HiLvlTiling(qw.QWidget):
         """
         # >>> Worker setup <<<
         self._thread = QThread()
-        self._worker = ImageProcessor_Worker(self._motion_controller, flg_stop=self._flg_stop_capture)
+        self._worker = ImageProcessor_Worker(
+            self._motion_controller,
+            flg_stop=self._flg_stop_capture,
+            getter_liveview=lambda: self._chk_liveview.isChecked(),
+        )
         self._worker.moveToThread(self._thread)
         self._thread.start()
         self.destroyed.connect(self._thread.quit)
