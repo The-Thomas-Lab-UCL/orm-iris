@@ -431,7 +431,7 @@ class AutoFocus_Worker(QObject):
     sig_started = Signal()
     sig_finished = Signal(float)
     sig_error = Signal(str)
-    sig_peak_not_in_range = Signal()  # emitted when Gaussian peak falls outside the scan range
+    sig_peak_not_in_range = Signal(str)  # emitted when Gaussian peak falls outside the scan range
 
     def __init__(self, ctrl_z: Controller_Z, stageHub: DataStreamer_StageCam, flg_stop: threading.Event):
         super().__init__()
@@ -615,8 +615,7 @@ class AutoFocus_Worker(QObject):
                    f'[{self._full_start_z_mm:.4f}, {self._full_end_z_mm:.4f}] mm. '
                    f'The best focus may be outside the scanned region.')
             print(f'Autofocus: {msg}')
-            self.sig_peak_not_in_range.emit()
-            self.sig_error.emit(msg)
+            self.sig_peak_not_in_range.emit(msg)
             return
         self.ctrl_z.move_direct(best_z)
         print(f'Autofocus finished. Best Z: {best_z:.4f} mm '
@@ -1743,6 +1742,19 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
     def _handle_autofocus_error(self,msg:str):
         qw.QMessageBox.critical(self, 'Autofocus error', f'An error occurred during autofocus:\n{msg}')
         self._reset_autofocus_buttons()
+
+    def suppress_peak_not_found_error(self, suppress: bool):
+        """Disconnect or reconnect the peak-not-in-range error dialog (used by gridify batch autofocus)."""
+        if suppress:
+            try:
+                self._worker_autofocus.sig_peak_not_in_range.disconnect(self._handle_autofocus_error)
+            except RuntimeError:
+                pass
+        else:
+            try:
+                self._worker_autofocus.sig_peak_not_in_range.connect(self._handle_autofocus_error)
+            except RuntimeError:
+                pass
         
     def _init_autofocus_worker(self):
         """
@@ -1766,6 +1778,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         self._worker_autofocus.sig_finished.connect(self._reset_autofocus_buttons)
         self._worker_autofocus.sig_started.connect(self._set_autofocus_running_buttons)
         self._worker_autofocus.sig_error.connect(self._handle_autofocus_error)
+        self._worker_autofocus.sig_peak_not_in_range.connect(self._handle_autofocus_error)
         
         # Connect the GUI
         self.btn_perform_autofocus.clicked.connect(self.perform_autofocus)

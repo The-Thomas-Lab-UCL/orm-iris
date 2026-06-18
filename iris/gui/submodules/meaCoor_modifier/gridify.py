@@ -730,12 +730,14 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
 
         self._autofocus_running = True
         self._set_autofocus_button_state(True)
+        self._ctrl_motion_video.suppress_peak_not_found_error(True)
         self._perform_autofocus()
 
     def _stop_autofocus(self):
         """Clears the running flag, resets the button, and aborts any active hardware scan."""
         self._autofocus_running = False
         self._set_autofocus_button_state(False)
+        self._ctrl_motion_video.suppress_peak_not_found_error(False)
         self._ctrl_motion_video.stop_autofocus()
 
     @Slot(float)
@@ -754,8 +756,8 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
         # Advance to next unit and move the stage; autofocus fires from _on_goto_finished
         self._go_to_nextMappingCoor()
 
-    @Slot()
-    def _handle_peak_not_in_range(self):
+    @Slot(str)
+    def _handle_peak_not_in_range(self, _msg: str = ''):
         """Peak was outside the scan range — mark the ROI and continue to the next one."""
         result = self._get_selected_mappingCoor(suppress_warning=True)
         if result:
