@@ -299,7 +299,7 @@ class CameraController_Thorlabs(Class_CameraController):
             while self.camera.get_pending_frame_or_null() is not None:
                 pass
             self.camera.issue_software_trigger()
-            self.camera.image_poll_timeout_ms = int(self.camera.exposure_time_us // 1000) + 500
+            self.camera.image_poll_timeout_ms = max(100, round(self.camera.exposure_time_us / 1000) + 50)
             frame = self.camera.get_pending_frame_or_null()
             self.camera.image_poll_timeout_ms = old_timeout
 
