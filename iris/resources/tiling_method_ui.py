@@ -16,8 +16,8 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDockWidget,
-    QHBoxLayout, QPushButton, QSizePolicy, QVBoxLayout,
-    QWidget)
+    QHBoxLayout, QLabel, QPushButton, QSizePolicy,
+    QVBoxLayout, QWidget)
 
 class Ui_tiling_method(object):
     def setupUi(self, tiling_method):
@@ -113,6 +113,11 @@ class Ui_tiling_method(object):
 
         self.main_layout.addWidget(self.btn_quickCapture)
 
+        self.lbl_statusbar = QLabel(tiling_method)
+        self.lbl_statusbar.setObjectName(u"lbl_statusbar")
+
+        self.main_layout.addWidget(self.lbl_statusbar)
+
 
         self.verticalLayout_5.addLayout(self.main_layout)
 
@@ -129,5 +134,6 @@ class Ui_tiling_method(object):
         self.btn_capture.setText(QCoreApplication.translate("tiling_method", u"Perform image tiling", None))
         self.btn_stop.setText(QCoreApplication.translate("tiling_method", u"Stop", None))
         self.btn_quickCapture.setText(QCoreApplication.translate("tiling_method", u"Quick-capture current camera feed", None))
+        self.lbl_statusbar.setText(QCoreApplication.translate("tiling_method", u"Ready", None))
     # retranslateUi
 
