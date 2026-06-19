@@ -1093,6 +1093,7 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
         if confirmation != qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue]
             self.btn_cancel.setEnabled(True)
             self.btn_finish.setEnabled(True)
+            event.ignore()
             return
 
         self._flg_video_feed.clear()
