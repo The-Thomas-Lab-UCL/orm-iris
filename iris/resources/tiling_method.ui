@@ -106,6 +106,13 @@
        </property>
       </widget>
      </item>
+     <item>
+      <widget class="QLabel" name="lbl_statusbar">
+       <property name="text">
+        <string>Ready</string>
+       </property>
+      </widget>
+     </item>
     </layout>
    </item>
   </layout>

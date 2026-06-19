@@ -10,6 +10,7 @@ from PySide6.QtCore import Signal, Slot, QObject, QThread
 
 from PIL import Image
 import threading
+import time
 import numpy as np
 
 from copy import deepcopy
@@ -114,6 +115,12 @@ class ImageProcessor_Worker(QObject):
         except Exception as e:
             print('Error in get_stitched_image:', e)
     
+    @staticmethod
+    def _fmt_elapsed(seconds: float) -> str:
+        m, s = divmod(int(seconds), 60)
+        h, m = divmod(m, 60)
+        return f'{h:02d}:{m:02d}:{s:02d}' if h else f'{m:02d}:{s:02d}'
+
     @Slot(list,list,ImageTiling_Params)
     def take_list_image(self, list_meaCoor_mm:list[MeaCoor_mm], list_imgUnit:list[MeaImg_Unit],
                         tiling_params:ImageTiling_Params) -> None:
@@ -126,46 +133,61 @@ class ImageProcessor_Worker(QObject):
             tiling_params (ImageTiling_Params): Parameters for tiling
         """
         self.flg_stop.clear()
-        
-        for meaCoor_mm, imgUnit in zip(list_meaCoor_mm, list_imgUnit):
+        total_units = len(list_meaCoor_mm)
+        start_time = time.time()
+
+        for unit_idx, (meaCoor_mm, imgUnit) in enumerate(zip(list_meaCoor_mm, list_imgUnit)):
             if self.flg_stop.is_set():
+                elapsed = time.time() - start_time
+                self.sig_statbar_update.emit(
+                    f'Stopped — {unit_idx}/{total_units} units | Elapsed: {self._fmt_elapsed(elapsed)}')
                 self.sig_finished_msg.emit(self.msg_stopped)
                 return
-            new_imgUnit = self._take_image(meaCoor_mm, imgUnit, tiling_params)
-            
+            new_imgUnit = self._take_image(meaCoor_mm, imgUnit, tiling_params,
+                                           unit_idx + 1, total_units, start_time)
+
             if not isinstance(new_imgUnit, MeaImg_Unit):
                 self.sig_finished_msg.emit(self.msg_error + 'Image capture failed')
                 return
             self.sig_finished_unit.emit(new_imgUnit)
-            
+
+        elapsed = time.time() - start_time
+        self.sig_statbar_update.emit(
+            f'Done — {total_units} unit(s) captured | Elapsed: {self._fmt_elapsed(elapsed)}')
         self.sig_finished_msg.emit(self.msg_all_finished)
-    
+
     def _take_image(self, meaCoor_mm:MeaCoor_mm, imgUnit:MeaImg_Unit,
-        tiling_params:ImageTiling_Params) -> MeaImg_Unit|None:
+        tiling_params:ImageTiling_Params,
+        unit_idx:int = 1, total_units:int = 1,
+        start_time:float|None = None) -> MeaImg_Unit|None:
         """
         Take an image at the given measurement coordinates and store it in the given image unit.
-        
+
         Args:
             meaCoor_mm (MeaCoor_mm): Measurement coordinates
             imgUnit (MeaImg_Unit): Image unit to store the captured image
             tiling_params (ImageTiling_Params): Parameters for tiling
+            unit_idx (int): 1-based index of the current unit in the session
+            total_units (int): Total number of units in the session
+            start_time (float|None): Session start time from time.time(); None uses now
         """
         # Check that all tiling parameters are valid
         try: tiling_params.check_validity()
         except Exception as e: print(e); return
-        
+
+        if start_time is None:
+            start_time = time.time()
+
         # Extract tiling parameters
         shape = tiling_params.shape
         cropx_pixel = tiling_params.cropx_pixel
         cropy_pixel = tiling_params.cropy_pixel
         cropx_mm = tiling_params.cropx_mm
         cropy_mm = tiling_params.cropy_mm
-        
+
         totalcoor = len(meaCoor_mm.mapping_coordinates)
         self.flg_stop.clear()
-        self.sig_statbar_update.emit('Taking images: {} of {}'.format(1,totalcoor))
-        
-        
+
         self._motion_ctrl.pause_video()
         self._motion_ctrl.wait_for_capture_drain()  # drain any in-flight capture before the loop
         self._motion_ctrl.enter_tiling_mode()       # switch camera to single-frame SW trigger mode
@@ -173,6 +195,10 @@ class ImageProcessor_Worker(QObject):
             x, y, z = coor
             if self.flg_stop.is_set():
                 break
+
+            elapsed = time.time() - start_time
+            self.sig_statbar_update.emit(
+                f'Unit {unit_idx}/{total_units} | Tile {i+1}/{totalcoor} | Elapsed: {self._fmt_elapsed(elapsed)}')
 
             flg_mvmt_done = threading.Event()
             self.sig_gotocoor.emit(coor, flg_mvmt_done)
@@ -189,9 +215,9 @@ class ImageProcessor_Worker(QObject):
             if not isinstance(img,Image.Image):
                 print('Error in _take_image: No image received from the controller')
                 continue
-            
+
             img = img.crop((cropx_pixel,cropy_pixel,shape[0]-cropx_pixel,shape[1]-cropy_pixel))
-            
+
             imgUnit.add_measurement(
                     timestamp=get_timestamp_us_str(),
                     x_coor=x-cropx_mm,
@@ -199,12 +225,11 @@ class ImageProcessor_Worker(QObject):
                     z_coor=z,
                     image=img
                 )
-                
-            self.sig_statbar_update.emit('Taking images: {} of {}'.format(i+1,totalcoor))
+
             if self._getter_liveview():
                 img = imgUnit.get_image_all_stitched(low_res=True)[0]
                 self.sig_ret_image_processed.emit(img)
-            
+
         self._motion_ctrl.exit_tiling_mode()        # restore continuous streaming
         self._motion_ctrl.resume_video()
         return imgUnit
@@ -276,6 +301,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
         self._chk_lres = wdg.chk_lres
         self._chk_liveview = wdg.chk_liveView
         self._chk_lres.toggled.connect(lambda _: self._plot_imgunit_combobox())
+        self._lbl_statusbar = wdg.lbl_statusbar
         
     # >>> Image control frame <<<
         self._list_imgunit_names = []
@@ -325,12 +351,13 @@ class Wdg_HiLvlTiling(qw.QWidget):
         
         self._worker.sig_req_img_capture.connect(self._motion_controller.trigger_fresh_img_capture)
         self._worker.sig_ret_image_processed.connect(self._canvas_img.set_image)
+        self._worker.sig_statbar_update.connect(self._lbl_statusbar.setText)
         self.sig_req_plot_imgunit.connect(self._worker.get_stitched_image)
-        
+
         # Other signal/connection setups
         self._dataHub_img.get_ImageMeasurement_Hub().add_observer(self.sig_update_combobox.emit)
         self.sig_update_combobox.connect(self._update_combobox)
-        
+
         # Image capture signals
         self.sig_capture_list_img.connect(self._worker.take_list_image)
         self._worker.sig_finished_msg.connect(self._handle_imageCapture_finished)
