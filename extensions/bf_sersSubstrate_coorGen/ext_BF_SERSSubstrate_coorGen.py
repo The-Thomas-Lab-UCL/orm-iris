@@ -378,9 +378,9 @@ class _PlotWorker(QObject):
                            'r-', lw=1.5, label='Detected boundary')
         ax['overlay'].plot(exp_px_x, exp_px_y,
                            'r--', lw=1, label=f'+{r._expansion_mm * 1e3:.0f} µm expansion')
-        ax['overlay'].scatter(scan_px_x, scan_px_y,
-                              s=3, c='cyan', alpha=0.1,
-                              label=f'N={len(r._coor.mapping_coordinates)} scan pts')
+        # ax['overlay'].scatter(scan_px_x, scan_px_y,
+        #                       s=3, c='cyan', alpha=0.01,
+        #                       label=f'N={len(r._coor.mapping_coordinates)} scan pts')
         ax['overlay'].scatter(f.xc, f.yc, s=60, c='yellow', zorder=5, label='Centre')
         ax['overlay'].set_title(
             f'Scan grid overlay  |  '
