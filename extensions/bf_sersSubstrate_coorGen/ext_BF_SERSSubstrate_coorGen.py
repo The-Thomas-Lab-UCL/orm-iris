@@ -42,6 +42,7 @@ from extensions.bf_sersSubstrate_coorGen.utils import generate_mask  # noqa: F40
 class ProcessResult:
     def __init__(self, img_unit: MeaImg_Unit, coor: MeaCoor_mm,
                  arr: np.ndarray, S: np.ndarray,
+                 S_blurred_centre: np.ndarray, S_sobel_viz: np.ndarray,
                  cx_est: float, cy_est: float,
                  ellipse_sobel, ellipse_fit, ellipse_smooth, ellipse_clean,
                  boundary_px_x: np.ndarray, boundary_px_y: np.ndarray,
@@ -53,6 +54,8 @@ class ProcessResult:
         self._coor = coor
         self._arr = arr
         self._S = S
+        self._S_blurred_centre = S_blurred_centre
+        self._S_sobel_viz = S_sobel_viz
         self._hsv_channels = hsv_channels
         self._cx_est = cx_est
         self._cy_est = cy_est
@@ -160,6 +163,7 @@ class _ProcessWorker(QObject):
         self.sig_done.emit()
 
     def _process_unit(self, unit: MeaImg_Unit, p: _PipelineParams) -> ProcessResult:
+        from skimage import filters as skfilters
 
         # Load stitched image
         img_stitched, coor_min_mm, _ = unit.get_image_all_stitched(low_res=False)
@@ -167,6 +171,9 @@ class _ProcessWorker(QObject):
 
         # Pipeline
         S = convert_img2gray_hsv_projection(arr, channels=p.hsv_channels)
+        S_blurred_centre = skfilters.gaussian(S, sigma=40)
+        S_blur_edge = skfilters.gaussian(S, sigma=p.params_edge.sigma)
+        S_sobel_viz = skfilters.sobel(S_blur_edge)
         cx_est, cy_est = estimate_centre_blurring(S, params=p.params_centre)
         ellipse_sobel = detect_edge_Sobel(S, cx_est, cy_est, params=p.params_edge)
         ellipse_fit = fit_ellipse_ransac(
@@ -231,6 +238,8 @@ class _ProcessWorker(QObject):
             coor=coor,
             arr=arr,
             S=S,
+            S_blurred_centre=S_blurred_centre,
+            S_sobel_viz=S_sobel_viz,
             cx_est=float(cx_est),
             cy_est=float(cy_est),
             ellipse_sobel=ellipse_sobel,
@@ -282,7 +291,6 @@ class _PlotWorker(QObject):
 
     @Slot()
     def run(self):
-        from skimage import filters as skfilters
         r = self._result
 
         fig = Figure(figsize=(12, 16))
@@ -321,16 +329,13 @@ class _PlotWorker(QObject):
         ax['s_ch'].set_title(ch_label, fontsize=fs)
         ax['s_ch'].axis('off')
 
-        S_blurred = skfilters.gaussian(r._S, sigma=40)
-        ax['centre'].imshow(S_blurred, cmap='gray')
+        ax['centre'].imshow(r._S_blurred_centre, cmap='gray')
         ax['centre'].scatter(r._cx_est, r._cy_est, s=60, c='red', marker='x', zorder=5)
         ax['centre'].set_title(f'Centre est. ({r._cx_est:.0f}, {r._cy_est:.0f}) px', fontsize=fs)
         ax['centre'].axis('off')
 
         # ── Row 1 ──────────────────────────────────────────────────────────
-        S_blur_sobel = skfilters.gaussian(r._S, sigma=5)
-        sobel_img = skfilters.sobel(S_blur_sobel)
-        ax['sobel'].imshow(sobel_img, cmap='gray')
+        ax['sobel'].imshow(r._S_sobel_viz, cmap='gray')
         ax['sobel'].scatter(r._ellipse_sobel.x, r._ellipse_sobel.y,
                             s=2, c='red', marker='x', label='Edge samples')
         ax['sobel'].set_title(f'Sobel edges  ({len(r._ellipse_sobel.x)} samples)', fontsize=fs)
@@ -373,9 +378,9 @@ class _PlotWorker(QObject):
                            'r-', lw=1.5, label='Detected boundary')
         ax['overlay'].plot(exp_px_x, exp_px_y,
                            'r--', lw=1, label=f'+{r._expansion_mm * 1e3:.0f} µm expansion')
-        ax['overlay'].scatter(scan_px_x, scan_px_y,
-                              s=3, c='cyan', alpha=0.1,
-                              label=f'N={len(r._coor.mapping_coordinates)} scan pts')
+        # ax['overlay'].scatter(scan_px_x, scan_px_y,
+        #                       s=3, c='cyan', alpha=0.01,
+        #                       label=f'N={len(r._coor.mapping_coordinates)} scan pts')
         ax['overlay'].scatter(f.xc, f.yc, s=60, c='yellow', zorder=5, label='Centre')
         ax['overlay'].set_title(
             f'Scan grid overlay  |  '
