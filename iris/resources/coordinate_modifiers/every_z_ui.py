@@ -16,8 +16,9 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
-    QGridLayout, QGroupBox, QHBoxLayout, QLabel,
-    QPushButton, QRadioButton, QSizePolicy, QVBoxLayout,
+    QGridLayout, QGroupBox, QHBoxLayout, QHeaderView,
+    QLabel, QPushButton, QRadioButton, QSizePolicy,
+    QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout,
     QWidget)
 
 class Ui_every_z(object):
@@ -51,20 +52,22 @@ class Ui_every_z(object):
 
         self.main_layout.addWidget(self.groupBox_2)
 
-        self.groupBox = QGroupBox(every_z)
-        self.groupBox.setObjectName(u"groupBox")
-        self.verticalLayout_4 = QVBoxLayout(self.groupBox)
-        self.verticalLayout_4.setObjectName(u"verticalLayout_4")
+        self.tabWidget = QTabWidget(every_z)
+        self.tabWidget.setObjectName(u"tabWidget")
+        self.tab = QWidget()
+        self.tab.setObjectName(u"tab")
+        self.verticalLayout = QVBoxLayout(self.tab)
+        self.verticalLayout.setObjectName(u"verticalLayout")
         self.lyt_modifications = QGridLayout()
         self.lyt_modifications.setObjectName(u"lyt_modifications")
         self.horizontalLayout_2 = QHBoxLayout()
         self.horizontalLayout_2.setObjectName(u"horizontalLayout_2")
-        self.btn_goToNext = QPushButton(self.groupBox)
+        self.btn_goToNext = QPushButton(self.tab)
         self.btn_goToNext.setObjectName(u"btn_goToNext")
 
         self.horizontalLayout_2.addWidget(self.btn_goToNext)
 
-        self.btn_goToPrev = QPushButton(self.groupBox)
+        self.btn_goToPrev = QPushButton(self.tab)
         self.btn_goToPrev.setObjectName(u"btn_goToPrev")
 
         self.horizontalLayout_2.addWidget(self.btn_goToPrev)
@@ -72,68 +75,20 @@ class Ui_every_z(object):
 
         self.lyt_modifications.addLayout(self.horizontalLayout_2, 5, 0, 1, 3)
 
-        self.lbl_prevZ = QLabel(self.groupBox)
-        self.lbl_prevZ.setObjectName(u"lbl_prevZ")
-
-        self.lyt_modifications.addWidget(self.lbl_prevZ, 1, 1, 1, 1)
-
-        self.label_2 = QLabel(self.groupBox)
-        self.label_2.setObjectName(u"label_2")
-        self.label_2.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
-
-        self.lyt_modifications.addWidget(self.label_2, 2, 0, 1, 1)
-
-        self.lbl_coorLeft = QLabel(self.groupBox)
-        self.lbl_coorLeft.setObjectName(u"lbl_coorLeft")
-
-        self.lyt_modifications.addWidget(self.lbl_coorLeft, 0, 1, 1, 1)
-
-        self.horizontalLayout = QHBoxLayout()
-        self.horizontalLayout.setObjectName(u"horizontalLayout")
-        self.btn_cancel = QPushButton(self.groupBox)
-        self.btn_cancel.setObjectName(u"btn_cancel")
-
-        self.horizontalLayout.addWidget(self.btn_cancel)
-
-        self.btn_finishAndSave = QPushButton(self.groupBox)
-        self.btn_finishAndSave.setObjectName(u"btn_finishAndSave")
-
-        self.horizontalLayout.addWidget(self.btn_finishAndSave)
-
-
-        self.lyt_modifications.addLayout(self.horizontalLayout, 6, 0, 1, 3)
-
-        self.label = QLabel(self.groupBox)
-        self.label.setObjectName(u"label")
-        self.label.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
-
-        self.lyt_modifications.addWidget(self.label, 0, 0, 1, 1)
-
-        self.chk_autoNextCoor = QCheckBox(self.groupBox)
-        self.chk_autoNextCoor.setObjectName(u"chk_autoNextCoor")
-        self.chk_autoNextCoor.setChecked(True)
-
-        self.lyt_modifications.addWidget(self.chk_autoNextCoor, 3, 0, 1, 3)
-
-        self.btn_storeZ = QPushButton(self.groupBox)
-        self.btn_storeZ.setObjectName(u"btn_storeZ")
-
-        self.lyt_modifications.addWidget(self.btn_storeZ, 2, 2, 1, 1)
-
-        self.spin_newZUm = QDoubleSpinBox(self.groupBox)
+        self.spin_newZUm = QDoubleSpinBox(self.tab)
         self.spin_newZUm.setObjectName(u"spin_newZUm")
         self.spin_newZUm.setMinimum(-1000000.000000000000000)
         self.spin_newZUm.setMaximum(1000000.000000000000000)
 
         self.lyt_modifications.addWidget(self.spin_newZUm, 2, 1, 1, 1)
 
-        self.label_3 = QLabel(self.groupBox)
-        self.label_3.setObjectName(u"label_3")
-        self.label_3.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+        self.label = QLabel(self.tab)
+        self.label.setObjectName(u"label")
+        self.label.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
 
-        self.lyt_modifications.addWidget(self.label_3, 1, 0, 1, 1)
+        self.lyt_modifications.addWidget(self.label, 0, 0, 1, 1)
 
-        self.groupBox_3 = QGroupBox(self.groupBox)
+        self.groupBox_3 = QGroupBox(self.tab)
         self.groupBox_3.setObjectName(u"groupBox_3")
         self.horizontalLayout_4 = QHBoxLayout(self.groupBox_3)
         self.horizontalLayout_4.setObjectName(u"horizontalLayout_4")
@@ -156,11 +111,116 @@ class Ui_every_z(object):
 
         self.lyt_modifications.addWidget(self.groupBox_3, 4, 0, 1, 3)
 
+        self.label_3 = QLabel(self.tab)
+        self.label_3.setObjectName(u"label_3")
+        self.label_3.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
 
-        self.verticalLayout_4.addLayout(self.lyt_modifications)
+        self.lyt_modifications.addWidget(self.label_3, 1, 0, 1, 1)
+
+        self.btn_storeZ = QPushButton(self.tab)
+        self.btn_storeZ.setObjectName(u"btn_storeZ")
+
+        self.lyt_modifications.addWidget(self.btn_storeZ, 2, 2, 1, 1)
+
+        self.lbl_coorLeft = QLabel(self.tab)
+        self.lbl_coorLeft.setObjectName(u"lbl_coorLeft")
+
+        self.lyt_modifications.addWidget(self.lbl_coorLeft, 0, 1, 1, 1)
+
+        self.chk_autoNextCoor = QCheckBox(self.tab)
+        self.chk_autoNextCoor.setObjectName(u"chk_autoNextCoor")
+        self.chk_autoNextCoor.setChecked(True)
+
+        self.lyt_modifications.addWidget(self.chk_autoNextCoor, 3, 0, 1, 3)
+
+        self.lbl_prevZ = QLabel(self.tab)
+        self.lbl_prevZ.setObjectName(u"lbl_prevZ")
+
+        self.lyt_modifications.addWidget(self.lbl_prevZ, 1, 1, 1, 1)
+
+        self.label_2 = QLabel(self.tab)
+        self.label_2.setObjectName(u"label_2")
+        self.label_2.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+
+        self.lyt_modifications.addWidget(self.label_2, 2, 0, 1, 1)
+
+        self.horizontalLayout = QHBoxLayout()
+        self.horizontalLayout.setObjectName(u"horizontalLayout")
+        self.btn_cancel = QPushButton(self.tab)
+        self.btn_cancel.setObjectName(u"btn_cancel")
+
+        self.horizontalLayout.addWidget(self.btn_cancel)
+
+        self.btn_finishAndSave = QPushButton(self.tab)
+        self.btn_finishAndSave.setObjectName(u"btn_finishAndSave")
+
+        self.horizontalLayout.addWidget(self.btn_finishAndSave)
 
 
-        self.main_layout.addWidget(self.groupBox)
+        self.lyt_modifications.addLayout(self.horizontalLayout, 6, 0, 1, 3)
+
+
+        self.verticalLayout.addLayout(self.lyt_modifications)
+
+        self.tabWidget.addTab(self.tab, "")
+        self.tab_2 = QWidget()
+        self.tab_2.setObjectName(u"tab_2")
+        self.verticalLayout_3 = QVBoxLayout(self.tab_2)
+        self.verticalLayout_3.setObjectName(u"verticalLayout_3")
+        self.gridLayout = QGridLayout()
+        self.gridLayout.setObjectName(u"gridLayout")
+        self.btn_autofocusAll = QPushButton(self.tab_2)
+        self.btn_autofocusAll.setObjectName(u"btn_autofocusAll")
+
+        self.gridLayout.addWidget(self.btn_autofocusAll, 0, 2, 1, 1)
+
+        self.btn_autofocusSel = QPushButton(self.tab_2)
+        self.btn_autofocusSel.setObjectName(u"btn_autofocusSel")
+
+        self.gridLayout.addWidget(self.btn_autofocusSel, 1, 2, 1, 1)
+
+        self.spin_autofocusRange = QDoubleSpinBox(self.tab_2)
+        self.spin_autofocusRange.setObjectName(u"spin_autofocusRange")
+        self.spin_autofocusRange.setMaximum(1000000.000000000000000)
+        self.spin_autofocusRange.setValue(100.000000000000000)
+
+        self.gridLayout.addWidget(self.spin_autofocusRange, 0, 1, 2, 1)
+
+        self.label_4 = QLabel(self.tab_2)
+        self.label_4.setObjectName(u"label_4")
+        self.label_4.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignTrailing|Qt.AlignmentFlag.AlignVCenter)
+
+        self.gridLayout.addWidget(self.label_4, 0, 0, 2, 1)
+
+        self.tree_report = QTreeWidget(self.tab_2)
+        __qtreewidgetitem = QTreeWidgetItem()
+        __qtreewidgetitem.setText(0, u"1");
+        self.tree_report.setHeaderItem(__qtreewidgetitem)
+        self.tree_report.setObjectName(u"tree_report")
+
+        self.gridLayout.addWidget(self.tree_report, 2, 0, 1, 3)
+
+        self.btn_AF_next = QPushButton(self.tab_2)
+        self.btn_AF_next.setObjectName(u"btn_AF_next")
+
+        self.gridLayout.addWidget(self.btn_AF_next, 3, 0, 1, 1)
+
+        self.btn_AF_insertCoor = QPushButton(self.tab_2)
+        self.btn_AF_insertCoor.setObjectName(u"btn_AF_insertCoor")
+
+        self.gridLayout.addWidget(self.btn_AF_insertCoor, 3, 1, 1, 1)
+
+        self.btn_AF_finish = QPushButton(self.tab_2)
+        self.btn_AF_finish.setObjectName(u"btn_AF_finish")
+
+        self.gridLayout.addWidget(self.btn_AF_finish, 3, 2, 1, 1)
+
+
+        self.verticalLayout_3.addLayout(self.gridLayout)
+
+        self.tabWidget.addTab(self.tab_2, "")
+
+        self.main_layout.addWidget(self.tabWidget)
 
         self.btn_showInstructions = QPushButton(every_z)
         self.btn_showInstructions.setObjectName(u"btn_showInstructions")
@@ -184,28 +244,38 @@ class Ui_every_z(object):
 
         self.retranslateUi(every_z)
 
+        self.tabWidget.setCurrentIndex(0)
+
+
         QMetaObject.connectSlotsByName(every_z)
     # setupUi
 
     def retranslateUi(self, every_z):
         every_z.setWindowTitle(QCoreApplication.translate("every_z", u"Form", None))
         self.groupBox_2.setTitle(QCoreApplication.translate("every_z", u"Coordinate selection (to be modified)", None))
-        self.btn_start.setText(QCoreApplication.translate("every_z", u"Start modification", None))
-        self.groupBox.setTitle(QCoreApplication.translate("every_z", u"Coordinate modifications", None))
+        self.btn_start.setText(QCoreApplication.translate("every_z", u"Confirm selection", None))
         self.btn_goToNext.setText(QCoreApplication.translate("every_z", u"Next coordinate", None))
         self.btn_goToPrev.setText(QCoreApplication.translate("every_z", u"Previous coordinate", None))
-        self.lbl_prevZ.setText(QCoreApplication.translate("every_z", u"None", None))
-        self.label_2.setText(QCoreApplication.translate("every_z", u"New Z-coordinate (\u00b5m):", None))
-        self.lbl_coorLeft.setText(QCoreApplication.translate("every_z", u"None", None))
-        self.btn_cancel.setText(QCoreApplication.translate("every_z", u"Cancel modification", None))
-        self.btn_finishAndSave.setText(QCoreApplication.translate("every_z", u"Finish and save modification", None))
         self.label.setText(QCoreApplication.translate("every_z", u"Number of coordinates left to modify:", None))
-        self.chk_autoNextCoor.setText(QCoreApplication.translate("every_z", u"Automove: Automatically go to the next coordinate after pressing \"Insert the current Z-coor\"", None))
-        self.btn_storeZ.setText(QCoreApplication.translate("every_z", u"Insert current Z-coor", None))
-        self.label_3.setText(QCoreApplication.translate("every_z", u"Original Z-coordinate (\u00b5m):", None))
         self.groupBox_3.setTitle(QCoreApplication.translate("every_z", u"New Z-coordinate autofill", None))
         self.rad_lastFilled.setText(QCoreApplication.translate("every_z", u"Use the last filled coordinate", None))
         self.rad_originalZ.setText(QCoreApplication.translate("every_z", u"Use the original Z-coordinate", None))
+        self.label_3.setText(QCoreApplication.translate("every_z", u"Original Z-coordinate (\u00b5m):", None))
+        self.btn_storeZ.setText(QCoreApplication.translate("every_z", u"Insert current Z-coor", None))
+        self.lbl_coorLeft.setText(QCoreApplication.translate("every_z", u"None", None))
+        self.chk_autoNextCoor.setText(QCoreApplication.translate("every_z", u"Automove: Automatically go to the next coordinate after pressing \"Insert the current Z-coor\"", None))
+        self.lbl_prevZ.setText(QCoreApplication.translate("every_z", u"None", None))
+        self.label_2.setText(QCoreApplication.translate("every_z", u"New Z-coordinate (\u00b5m):", None))
+        self.btn_cancel.setText(QCoreApplication.translate("every_z", u"Cancel modification", None))
+        self.btn_finishAndSave.setText(QCoreApplication.translate("every_z", u"Finish and save modification", None))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab), QCoreApplication.translate("every_z", u"Manual coordinate modifications", None))
+        self.btn_autofocusAll.setText(QCoreApplication.translate("every_z", u"Perform autofocus on all", None))
+        self.btn_autofocusSel.setText(QCoreApplication.translate("every_z", u"Perform autofocus on selected", None))
+        self.label_4.setText(QCoreApplication.translate("every_z", u"Autofocus range (\u00b5m):", None))
+        self.btn_AF_next.setText(QCoreApplication.translate("every_z", u"Go to next", None))
+        self.btn_AF_insertCoor.setText(QCoreApplication.translate("every_z", u"Insert current coordinate to the selected", None))
+        self.btn_AF_finish.setText(QCoreApplication.translate("every_z", u"Finish and save", None))
+        self.tabWidget.setTabText(self.tabWidget.indexOf(self.tab_2), QCoreApplication.translate("every_z", u"Autofocus coordinate modifications", None))
         self.btn_showInstructions.setText(QCoreApplication.translate("every_z", u"Show instructions", None))
     # retranslateUi
 
