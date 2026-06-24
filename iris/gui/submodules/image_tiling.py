@@ -58,7 +58,8 @@ class ImageTiling_Params:
     cropy_pixel:int
     cropx_mm:float
     cropy_mm:float
-    
+    exposure_ms:float = 0.0  # camera exposure time; used to compute per-tile capture timeout
+
     def check_validity(self) -> bool:
         """
         Check if the parameters are valid
@@ -191,6 +192,11 @@ class ImageProcessor_Worker(QObject):
         self._motion_ctrl.pause_video()
         self._motion_ctrl.wait_for_capture_drain()  # drain any in-flight capture before the loop
         self._motion_ctrl.enter_tiling_mode()       # switch camera to single-frame SW trigger mode
+
+        # Timeout must cover the camera's own poll window (exposure_ms * 2 + 50 ms) plus delivery
+        # overhead. Default floor is 15 s so short-exposure tiles always get a generous window.
+        capture_timeout_s = max(15.0, tiling_params.exposure_ms * 3 / 1000 + 3.0)
+
         for i,coor in enumerate(meaCoor_mm.mapping_coordinates):
             x, y, z = coor
             if self.flg_stop.is_set():
@@ -207,8 +213,11 @@ class ImageProcessor_Worker(QObject):
             self._motion_ctrl.get_img_ready_event().clear()
             self.sig_req_img_capture.emit()
 
-            if not self._motion_ctrl.get_img_ready_event().wait(timeout=5.0):
-                print(f'Timeout waiting for image capture at coordinate {coor}')
+            if not self._motion_ctrl.get_img_ready_event().wait(timeout=capture_timeout_s):
+                print(f'Timeout ({capture_timeout_s:.1f} s) waiting for image capture at coordinate {coor}')
+                # Wait for the in-flight capture to complete so the stale sig_img doesn't
+                # corrupt _flg_img_ready for the next tile.
+                self._motion_ctrl.get_img_ready_event().wait(timeout=capture_timeout_s)
                 continue
 
             img, _ = self._motion_ctrl.get_latest_image_with_timestamp()
@@ -645,6 +654,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
             cropy_pixel=cropy_pixel,
             cropx_mm=cropx_mm,
             cropy_mm=cropy_mm,
+            exposure_ms=exposure_ms,
         )
         
         # Disable the crosshair and the scalebar in the image display during capture to improve performance
