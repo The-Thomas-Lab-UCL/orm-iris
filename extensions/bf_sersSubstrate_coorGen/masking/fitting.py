@@ -92,19 +92,25 @@ def smoothen_boundary(
     ellipse_raw:Ellipse_Cartesian,
     ellipse_fit:EllipseFitResult,
     params: Param_Smoothen_Boundary = Param_Smoothen_Boundary(),
+    n_bins: int = 360,
     ax_spherical:Axes|None=None,
     ax_edges:Axes|None=None,
     ) -> tuple[Ellipse_Polar, Ellipse_Polar]:
     """
     Clean boundary profile:
+        0. Fill angle-bin directions with no raw edge sample directly with
+           the RANSAC ellipse radius (they trivially pass the outlier check below)
         1. Replace rays deviating > outlier_threshold_px from RANSAC
            ellipse with ellipse radius (not-so-aggressive outlier removal)
         2. Apply circular Savitzky-Golay smoothing
-        
+
     Args:
         ellipse_raw (Ellipse): raw edge points of the ellipse
         ellipse_fit (EllipseFitResult): fitted ellipse parameters and inliers
         params (Param_Smoothen_Boundary, optional): parameters for outlier removal and
+        n_bins (int, optional): number of angular bins the edge samples were taken over
+            (must match the n_bins used in detect_edge_Sobel) so that directions with
+            no raw sample can be identified and defaulted to the RANSAC fit. Defaults to 360.
         ax_spherical (Axes, optional): Matplotlib Axes to plot spherical projection of boundary. Defaults to None.
         ax_edges (Axes, optional): Matplotlib Axes to plot raw vs cleaned boundary. Defaults to None.
 
@@ -121,7 +127,21 @@ def smoothen_boundary(
     outlier_threshold_px = params.outlier_threshold_px
     savgol_window = params.savgol_window
     savgol_polyorder = params.savgol_polyorder
-    
+
+    # Step 0: directions with no raw edge sample default straight to the RANSAC fit
+    bin_edges = np.linspace(-np.pi, np.pi, n_bins + 1)
+    bin_idx = np.clip(np.digitize(angles, bin_edges) - 1, 0, n_bins - 1)
+    bin_has_sample = np.zeros(n_bins, dtype=bool)
+    bin_has_sample[bin_idx] = True
+    missing_bins = np.where(~bin_has_sample)[0]
+    if missing_bins.size:
+        missing_angles = (bin_edges[missing_bins] + bin_edges[missing_bins + 1]) / 2
+        missing_radii = np.array([calculate_ellipse_radius(ang, a, b, theta)
+                                  for ang in missing_angles])
+        order = np.argsort(np.concatenate([angles, missing_angles]))
+        boundary_rs = np.concatenate([boundary_rs, missing_radii])[order]
+        angles = np.concatenate([angles, missing_angles])[order]
+
     ransac_radii = np.array([calculate_ellipse_radius(ang, a, b, theta)
                              for ang in angles])
     
