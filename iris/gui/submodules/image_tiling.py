@@ -137,25 +137,31 @@ class ImageProcessor_Worker(QObject):
         total_units = len(list_meaCoor_mm)
         start_time = time.time()
 
-        for unit_idx, (meaCoor_mm, imgUnit) in enumerate(zip(list_meaCoor_mm, list_imgUnit)):
-            if self.flg_stop.is_set():
-                elapsed = time.time() - start_time
-                self.sig_statbar_update.emit(
-                    f'Stopped — {unit_idx}/{total_units} units | Elapsed: {self._fmt_elapsed(elapsed)}')
-                self.sig_finished_msg.emit(self.msg_stopped)
-                return
-            new_imgUnit = self._take_image(meaCoor_mm, imgUnit, tiling_params,
-                                           unit_idx + 1, total_units, start_time)
+        try:
+            for unit_idx, (meaCoor_mm, imgUnit) in enumerate(zip(list_meaCoor_mm, list_imgUnit)):
+                if self.flg_stop.is_set():
+                    elapsed = time.time() - start_time
+                    self.sig_statbar_update.emit(
+                        f'Stopped — {unit_idx}/{total_units} units | Elapsed: {self._fmt_elapsed(elapsed)}')
+                    self.sig_finished_msg.emit(self.msg_stopped)
+                    return
+                new_imgUnit = self._take_image(meaCoor_mm, imgUnit, tiling_params,
+                                               unit_idx + 1, total_units, start_time)
 
-            if not isinstance(new_imgUnit, MeaImg_Unit):
-                self.sig_finished_msg.emit(self.msg_error + 'Image capture failed')
-                return
-            self.sig_finished_unit.emit(new_imgUnit)
+                if not isinstance(new_imgUnit, MeaImg_Unit):
+                    self.sig_finished_msg.emit(self.msg_error + 'Image capture failed')
+                    return
+                self.sig_finished_unit.emit(new_imgUnit)
 
-        elapsed = time.time() - start_time
-        self.sig_statbar_update.emit(
-            f'Done — {total_units} unit(s) captured | Elapsed: {self._fmt_elapsed(elapsed)}')
-        self.sig_finished_msg.emit(self.msg_all_finished)
+            elapsed = time.time() - start_time
+            self.sig_statbar_update.emit(
+                f'Done — {total_units} unit(s) captured | Elapsed: {self._fmt_elapsed(elapsed)}')
+            self.sig_finished_msg.emit(self.msg_all_finished)
+        except Exception as e:
+            # Guarantee sig_finished_msg always fires so the GUI re-enables its buttons,
+            # even if a capture step raised something we didn't anticipate.
+            print(self.msg_error, e)
+            self.sig_finished_msg.emit(self.msg_error + str(e))
 
     def _take_image(self, meaCoor_mm:MeaCoor_mm, imgUnit:MeaImg_Unit,
         tiling_params:ImageTiling_Params,
@@ -197,50 +203,53 @@ class ImageProcessor_Worker(QObject):
         # overhead. Default floor is 15 s so short-exposure tiles always get a generous window.
         capture_timeout_s = max(15.0, tiling_params.exposure_ms * 3 / 1000 + 3.0)
 
-        for i,coor in enumerate(meaCoor_mm.mapping_coordinates):
-            x, y, z = coor
-            if self.flg_stop.is_set():
-                break
+        try:
+            for i,coor in enumerate(meaCoor_mm.mapping_coordinates):
+                x, y, z = coor
+                if self.flg_stop.is_set():
+                    break
 
-            elapsed = time.time() - start_time
-            self.sig_statbar_update.emit(
-                f'Unit {unit_idx}/{total_units} | Tile {i+1}/{totalcoor} | Elapsed: {self._fmt_elapsed(elapsed)}')
+                elapsed = time.time() - start_time
+                self.sig_statbar_update.emit(
+                    f'Unit {unit_idx}/{total_units} | Tile {i+1}/{totalcoor} | Elapsed: {self._fmt_elapsed(elapsed)}')
 
-            flg_mvmt_done = threading.Event()
-            self.sig_gotocoor.emit(coor, flg_mvmt_done)
-            flg_mvmt_done.wait()
+                flg_mvmt_done = threading.Event()
+                self.sig_gotocoor.emit(coor, flg_mvmt_done)
+                flg_mvmt_done.wait()
 
-            self._motion_ctrl.get_img_ready_event().clear()
-            self.sig_req_img_capture.emit()
+                self._motion_ctrl.get_img_ready_event().clear()
+                self.sig_req_img_capture.emit()
 
-            if not self._motion_ctrl.get_img_ready_event().wait(timeout=capture_timeout_s):
-                print(f'Timeout ({capture_timeout_s:.1f} s) waiting for image capture at coordinate {coor}')
-                # Wait for the in-flight capture to complete so the stale sig_img doesn't
-                # corrupt _flg_img_ready for the next tile.
-                self._motion_ctrl.get_img_ready_event().wait(timeout=capture_timeout_s)
-                continue
+                if not self._motion_ctrl.get_img_ready_event().wait(timeout=capture_timeout_s):
+                    print(f'Timeout ({capture_timeout_s:.1f} s) waiting for image capture at coordinate {coor}')
+                    # Wait for the in-flight capture to complete so the stale sig_img doesn't
+                    # corrupt _flg_img_ready for the next tile.
+                    self._motion_ctrl.get_img_ready_event().wait(timeout=capture_timeout_s)
+                    continue
 
-            img, _ = self._motion_ctrl.get_latest_image_with_timestamp()
-            if not isinstance(img,Image.Image):
-                print('Error in _take_image: No image received from the controller')
-                continue
+                img, _ = self._motion_ctrl.get_latest_image_with_timestamp()
+                if not isinstance(img,Image.Image):
+                    print('Error in _take_image: No image received from the controller')
+                    continue
 
-            img = img.crop((cropx_pixel,cropy_pixel,shape[0]-cropx_pixel,shape[1]-cropy_pixel))
+                img = img.crop((cropx_pixel,cropy_pixel,shape[0]-cropx_pixel,shape[1]-cropy_pixel))
 
-            imgUnit.add_measurement(
-                    timestamp=get_timestamp_us_str(),
-                    x_coor=x-cropx_mm,
-                    y_coor=y-cropy_mm,
-                    z_coor=z,
-                    image=img
-                )
+                imgUnit.add_measurement(
+                        timestamp=get_timestamp_us_str(),
+                        x_coor=x-cropx_mm,
+                        y_coor=y-cropy_mm,
+                        z_coor=z,
+                        image=img
+                    )
 
-            if self._getter_liveview():
-                img = imgUnit.get_image_all_stitched(low_res=True)[0]
-                self.sig_ret_image_processed.emit(img)
+                if self._getter_liveview():
+                    img = imgUnit.get_image_all_stitched(low_res=True)[0]
+                    self.sig_ret_image_processed.emit(img)
+        finally:
+            # Always restore camera/video state, even if a capture step above raised.
+            self._motion_ctrl.exit_tiling_mode()        # restore continuous streaming
+            self._motion_ctrl.resume_video()
 
-        self._motion_ctrl.exit_tiling_mode()        # restore continuous streaming
-        self._motion_ctrl.resume_video()
         return imgUnit
 
 class Wdg_HiLvlTiling(qw.QWidget):
@@ -641,6 +650,7 @@ class Wdg_HiLvlTiling(qw.QWidget):
                         qw.QMessageBox.Retry # pyright: ignore[reportAttributeAccessIssue] ; Retry button exists
                     )
                     if retry == qw.QMessageBox.Cancel:  # pyright: ignore[reportAttributeAccessIssue] ; Cancel button exists
+                        self.reset_imgCapture_button()
                         return
                     else: continue
                 break
