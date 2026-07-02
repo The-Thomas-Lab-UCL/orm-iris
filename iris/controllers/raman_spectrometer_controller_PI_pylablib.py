@@ -47,6 +47,10 @@ from iris.controllers import ControllerSpecificConfigEnum
 pll.par["devices/dlls/picam"] = r"C:\Program Files\Princeton Instruments\PICam\Runtime"
 
 def test():
+    import matplotlib
+    
+    matplotlib.use('QtAgg')
+    
     print(pic.list_cameras())
     with pic.PicamCamera() as cam:
         # All available attributes
@@ -165,6 +169,12 @@ def test():
         plt.show()
         
         spectrum:np.ndarray = np.mean(spectrum_raw_np, axis=0)
+        print('Spectrum length: {}'.format(len(spectrum)))
+        print('Spectrum shape: {}'.format(spectrum.shape))
+        plt.plot(spectrum)
+        plt.show()
+        
+        spectrum:np.ndarray = np.mean(spectrum_raw_np, axis=1)
         print('Spectrum length: {}'.format(len(spectrum)))
         print('Spectrum shape: {}'.format(spectrum.shape))
         plt.plot(spectrum)

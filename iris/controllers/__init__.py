@@ -330,7 +330,7 @@ if ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'qepro':
     from .raman_spectrometer_controller_QEPro import SpectrometerController_QEPro as Controller_Spectrometer
 elif ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'pi_legacy':
     from .raman_spectrometer_controller_PI_pylablib import SpectrometerController_PI as Controller_Spectrometer
-elif ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'pi_dll':
+elif ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'pi':
     from .raman_spectrometer_controller_PI_dll import SpectrometerController_PI as Controller_Spectrometer
 elif ControllerConfigEnum.SPECTROMETER_CONTROLLER.value == 'andor':
     from .raman_spectrometer_controller_Andor_dll import SpectrometerController_Andor as Controller_Spectrometer

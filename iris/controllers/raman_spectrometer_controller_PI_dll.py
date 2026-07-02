@@ -34,7 +34,7 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(libdir))
     
 
-from iris.utils.general import get_timestamp_us_int
+from iris.utils.general import get_timestamp_us_int, convert_timestamp_us_int_to_str
 from iris.controllers.class_spectrometer_controller import Class_SpectrometerController
 
 from iris import DataAnalysisConfigEnum
@@ -548,6 +548,9 @@ class SpectrometerController_PI(Class_SpectrometerController):
         
         import threading as th
         from typing import Callable
+        import matplotlib
+        
+        matplotlib.use('QtAgg')
         
         def offafter5sec(callback:Callable):
             time.sleep(5)
