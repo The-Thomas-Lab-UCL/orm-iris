@@ -181,7 +181,9 @@ class _ProcessWorker(QObject):
             residual_threshold=p.ransac_threshold,
             max_trials=p.ransac_trials,
         )
-        ellipse_smooth, ellipse_clean = smoothen_boundary(ellipse_sobel, ellipse_fit, params=p.params_smooth)
+        ellipse_smooth, ellipse_clean = smoothen_boundary(
+            ellipse_sobel, ellipse_fit, params=p.params_smooth, n_bins=p.params_edge.n_bins,
+        )
 
         boundary_cart = ellipse_smooth.get_cartesian()
         bx, by = boundary_cart.x, boundary_cart.y
@@ -661,8 +663,15 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
         if not items:
             return
         names = {item.text(0) for item in items}
+        next_index = min(self.tree_result.indexOfTopLevelItem(item) for item in items)
         for r in [r for r in self._process_results if r.get_name() in names]:
             self._process_results.remove(r)
+
+        count = self.tree_result.topLevelItemCount()
+        if count:
+            item = self.tree_result.topLevelItem(min(next_index, count - 1))
+            if item is not None:
+                self.tree_result.setCurrentItem(item)
 
     @Slot()
     def _on_saveall_clicked(self):
