@@ -125,7 +125,13 @@ class MeaRMap_Unit():
         }
         
         self._lock_measurement = threading.RLock()
-        
+
+        # Incremental cache for get_heatmap_table(), so that a redraw only has to extract
+        # the intensity value for newly-added points instead of rescanning the whole unit
+        # (which turns an O(n) per-redraw cost into an O(n^2) cost over a whole mapping scan).
+        self._structural_version = 0
+        self._heatmap_cache:dict|None = None
+
         assert all([key in self._dict_measurement_types.keys() for key in self._dict_measurement.keys()]),\
             'mapping_measurement_unit: The measurement keys are not the same as the measurement types.'
         
@@ -215,7 +221,8 @@ class MeaRMap_Unit():
         
         with self._lock_measurement: self._dict_measurement = dict_measurement
         self._flg_measurement_exist = True
-        
+        self._structural_version += 1
+
         if self.check_measurement_and_metadata_exist(): self._notify_observers()
         
     def get_dict_measurements(self, copy:bool=False) -> dict:
@@ -566,7 +573,8 @@ class MeaRMap_Unit():
                 
                 if len(self._dict_measurement[self._label_ts]) == 0:
                     self._flg_measurement_exist = False
-        
+
+        self._structural_version += 1
         self._notify_observers()
         
     def get_dict_RamanMeasurement_summary(self,measurement_id:int|str,exclude_id:bool=False) -> dict:
@@ -823,9 +831,30 @@ class MeaRMap_Unit():
         sample_df = ave_mea_snapshot[-1]
         wvl_idx = sample_df[self._dflabel_wavelength].tolist().index(closest_wavelength)
         int_col_idx = sample_df.columns.get_loc(self._dflabel_intensity)
-        
-        # This loop takes time, but it doesn't block the hardware anymore!
-        intensities = [df.iat[wvl_idx, int_col_idx] for df in ave_mea_snapshot]
+
+        # Reuse the previous extraction and only scan the newly-appended points: during a
+        # live mapping scan this method is re-run on the whole (ever-growing) unit at a fixed
+        # rate, so redoing the full Python-level scan every time makes the total cost O(n^2)
+        # over the scan instead of O(n), which is what causes the app to slow down over a
+        # long acquisition.
+        cache = self._heatmap_cache
+        n_total = len(ave_mea_snapshot)
+        if cache is not None and cache['structural_version'] == self._structural_version \
+            and cache['wvl_idx'] == wvl_idx and cache['n_cached'] <= n_total:
+            intensities = cache['intensities']
+            intensities.extend(
+                df.iat[wvl_idx, int_col_idx] for df in ave_mea_snapshot[cache['n_cached']:n_total]
+            )
+        else:
+            intensities = [df.iat[wvl_idx, int_col_idx] for df in ave_mea_snapshot]
+
+        self._heatmap_cache = {
+            'structural_version': self._structural_version,
+            'wvl_idx': wvl_idx,
+            'n_cached': n_total,
+            'intensities': intensities,
+        }
+        intensities = list(intensities)  # Return a copy so the cached list isn't mutated by the caller
 
         return pd.DataFrame({
             self._label_x: x_coor,
@@ -893,7 +922,9 @@ class MeaRMap_Unit():
             except: pass
         self._dict_measurement.clear()
         self._dict_measurement_types.clear()
-        
+
+        self._structural_version += 1
+        self._heatmap_cache = None
         self._notify_observers()
     
     def self_report(self):
@@ -2198,7 +2229,13 @@ class MeaRMap_Plotter:
         self._fig = Figure()
         self._ax = self._fig.add_subplot(111)
         self._cbar:Colorbar|None = None
-        
+
+        # State of the last scattering-mode plot, so that a redraw of the same mapping unit
+        # can update the existing artist's data in-place (cheap) instead of clearing the axes
+        # and recreating the scatter + colorbar from scratch (expensive), which is what made
+        # each redraw of a live, ever-growing mapping scan increasingly slow.
+        self._scatter_state:dict|None = None
+
     def get_figure_axes(self) -> tuple[Figure,Axes]:
         """
         Returns the figure and axes of the plotter
@@ -2271,7 +2308,8 @@ class MeaRMap_Plotter:
                 self._cbar.remove()
         except Exception as e: print(f'Error in plot_heatmap_empty while removing cbar: {e}')
         self._ax.clear()
-        
+        self._scatter_state = None
+
         self._ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
         self._ax.set_title(title)
         self._ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
@@ -2313,7 +2351,8 @@ class MeaRMap_Plotter:
         
         try: self._ax.clear()
         except Exception as e: print(f'Error in plot_heatmap_interp while clearing ax: {e}')
-        
+        self._scatter_state = None
+
         # Check if the the data can be plot using tripcolor
         if any([len(intensity) < 3, len(set(x_val)) < 2, len(set(y_val)) < 2]):
             return
@@ -2380,37 +2419,75 @@ class MeaRMap_Plotter:
         
         try: x_val, y_val, intensity = self._retrieve_heatmap_data(mapping_unit, wavelength)
         except ValueError as e: print(f'Error in plot_heatmap_scatter: {e}'); return
-        
-        try:
-            if isinstance(self._cbar,Colorbar):
-                self._cbar.remove()
-        except Exception as e: print(f'Error in plot_heatmap_scatter while clearing ax or cbar: {e}')
-        
-        try: self._ax.clear()
-        except Exception as e: print(f'Error in plot_heatmap_scatter while clearing ax: {e}')
-        
+
         # Check if the the data can be plot using tripcolor
-        if any([len(intensity) < 3, len(set(x_val)) < 2, len(set(y_val)) < 2]): return
-        
-        self._ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
-        
+        if any([len(intensity) < 3, len(set(x_val)) < 2, len(set(y_val)) < 2]):
+            try:
+                if isinstance(self._cbar,Colorbar):
+                    self._cbar.remove()
+            except Exception as e: print(f'Error in plot_heatmap_scatter while clearing ax or cbar: {e}')
+            try: self._ax.clear()
+            except Exception as e: print(f'Error in plot_heatmap_scatter while clearing ax: {e}')
+            self._scatter_state = None
+            return
+
+        unit_id = mapping_unit.get_unit_id()
+        n_points = len(intensity)
         figsize = self._fig.get_size_inches()
-        number_of_points = len(x_val)
-        
-        point_size = (figsize[0]*figsize[1])/number_of_points*750 if not isinstance(size,float) else size
-        self._ax.scatter(x_val, y_val, c=intensity, cmap=AppPlotEnum.PLT_COLOUR_MAP.value, s=point_size, linewidths=0, marker='s')
-        
-        # Add colourbar and labels
-        self._cbar = self._fig.colorbar(self._ax.collections[0], ax=self._ax)
+        point_size = (figsize[0]*figsize[1])/n_points*750 if not isinstance(size,float) else size
+
+        # A redraw of a live mapping scan re-plots the same (ever-growing) mapping unit at a
+        # fixed rate. Recreating the scatter artist and colorbar from scratch every time makes
+        # each redraw more expensive than the last (and steals GIL time from the GUI thread in
+        # the process). If we're still looking at the same unit/wavelength and it only grew,
+        # update the existing artist's data in-place instead of a full clear + replot.
+        state = self._scatter_state
+        can_update_incrementally = (
+            state is not None
+            and state['unit_id'] == unit_id
+            and state['wavelength'] == wavelength
+            and state['n'] <= n_points
+            and state['artist'] in self._ax.collections
+            and isinstance(self._cbar, Colorbar)
+        )
+
+        if can_update_incrementally:
+            artist = state['artist']
+            artist.set_offsets(np.column_stack([x_val, y_val]))
+            artist.set_array(np.asarray(intensity))
+            artist.set_sizes([point_size])
+            self._ax.update_datalim(np.column_stack([x_val, y_val]))
+            self._ax.autoscale_view()
+        else:
+            try:
+                if isinstance(self._cbar,Colorbar):
+                    self._cbar.remove()
+            except Exception as e: print(f'Error in plot_heatmap_scatter while clearing ax or cbar: {e}')
+
+            try: self._ax.clear()
+            except Exception as e: print(f'Error in plot_heatmap_scatter while clearing ax: {e}')
+
+            self._ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
+
+            artist = self._ax.scatter(x_val, y_val, c=intensity, cmap=AppPlotEnum.PLT_COLOUR_MAP.value, s=point_size, linewidths=0, marker='s')
+
+            # Add colourbar
+            self._cbar = self._fig.colorbar(artist, ax=self._ax)
+
+        self._scatter_state = {'unit_id': unit_id, 'wavelength': wavelength, 'n': n_points, 'artist': artist}
+
         self._ax.set_title(title)
         self._ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
         self._ax.set_ylabel(AppPlotEnum.PLT_LBL_Y_AXIS.value)
-        
+
         # Set the colourbar limits
-        if isinstance(clim,tuple) and len(clim) == 2:
-            if isinstance(clim[0],float) and isinstance(clim[1],float):
-                list(clim).sort()
+        if isinstance(clim,tuple) and len(clim) == 2 and isinstance(clim[0],float) and isinstance(clim[1],float):
+            list(clim).sort()
             self._cbar.mappable.set_clim(vmin=clim[0],vmax=clim[1])
+        else:
+            # No explicit colour limit: rescale the colour mapping to the current data range
+            # (a fresh scatter() call would have done this automatically on creation).
+            artist.autoscale()
     
 def test_datasaveload_system_txt(storage_main:MeaRMap_Hub|None=None):
     if storage_main is None: storage_main = generate_dummy_mappingHub()
