@@ -33,7 +33,21 @@
           <widget class="QWidget" name="wdg_coorGen_holder" native="true">
            <layout class="QGridLayout" name="gridLayout">
             <item row="0" column="0">
-             <layout class="QVBoxLayout" name="lyt_coorGen_holder"/>
+             <widget class="QDockWidget" name="dockWidget">
+              <property name="features">
+               <set>QDockWidget::DockWidgetFeature::DockWidgetFloatable|QDockWidget::DockWidgetFeature::DockWidgetMovable</set>
+              </property>
+              <property name="allowedAreas">
+               <set>Qt::DockWidgetArea::LeftDockWidgetArea</set>
+              </property>
+              <widget class="QWidget" name="dockWidgetContents">
+               <layout class="QVBoxLayout" name="verticalLayout_3">
+                <item>
+                 <layout class="QVBoxLayout" name="lyt_coorGen_holder"/>
+                </item>
+               </layout>
+              </widget>
+             </widget>
             </item>
            </layout>
           </widget>
