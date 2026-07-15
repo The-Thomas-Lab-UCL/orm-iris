@@ -1279,7 +1279,9 @@ class SpectrometerController_Andor(Class_SpectrometerController):
             # In FVB + RunTillAbort the SDK collapses all rows, so the result
             # is a 1-D array of length x_pixel stored as a (1 × x_pixel) image.
             image = getMostRecentImage(self._x_pixel, 1, self._x_pixel)
-            intensity = image.reshape(-1)
+            intensity = image.ravel()
+            intensity = np.flip(intensity)  # flip to match the orientation of the spectrometer output
+            
 
         wavelength = np.arange(1, self._x_pixel + 1, dtype=float).tolist()
         intensity_list = intensity.astype(float).tolist()
@@ -1445,7 +1447,7 @@ if __name__ == "__main__":
         matplotlib.use('TkAgg')
         controller.capture_full_image_for_track_setup(integration_time_ms=100.0)
     except Exception as e: print(f"Track setup image failed: {e}")
-    
+     
     int_time_us = int(100e3)   # 100 ms
     controller.set_integration_time_us(int_time_us)
     print(f"Integration time set to {controller.get_integration_time_us()/1e3:.1f} ms")
