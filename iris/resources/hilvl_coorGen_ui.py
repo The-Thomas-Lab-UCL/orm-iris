@@ -15,9 +15,9 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QCursor,
     QFont, QFontDatabase, QGradient, QIcon,
     QImage, QKeySequence, QLinearGradient, QPainter,
     QPalette, QPixmap, QRadialGradient, QTransform)
-from PySide6.QtWidgets import (QApplication, QComboBox, QGridLayout, QGroupBox,
-    QHBoxLayout, QPushButton, QSizePolicy, QTabWidget,
-    QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QComboBox, QDockWidget, QGridLayout,
+    QGroupBox, QHBoxLayout, QPushButton, QSizePolicy,
+    QTabWidget, QVBoxLayout, QWidget)
 
 class Ui_hilvl_coorGen(object):
     def setupUi(self, hilvl_coorGen):
@@ -43,10 +43,22 @@ class Ui_hilvl_coorGen(object):
         self.wdg_coorGen_holder.setObjectName(u"wdg_coorGen_holder")
         self.gridLayout = QGridLayout(self.wdg_coorGen_holder)
         self.gridLayout.setObjectName(u"gridLayout")
+        self.dockWidget = QDockWidget(self.wdg_coorGen_holder)
+        self.dockWidget.setObjectName(u"dockWidget")
+        self.dockWidget.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetFloatable|QDockWidget.DockWidgetFeature.DockWidgetMovable)
+        self.dockWidget.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
+        self.dockWidgetContents = QWidget()
+        self.dockWidgetContents.setObjectName(u"dockWidgetContents")
+        self.verticalLayout_3 = QVBoxLayout(self.dockWidgetContents)
+        self.verticalLayout_3.setObjectName(u"verticalLayout_3")
         self.lyt_coorGen_holder = QVBoxLayout()
         self.lyt_coorGen_holder.setObjectName(u"lyt_coorGen_holder")
 
-        self.gridLayout.addLayout(self.lyt_coorGen_holder, 0, 0, 1, 1)
+        self.verticalLayout_3.addLayout(self.lyt_coorGen_holder)
+
+        self.dockWidget.setWidget(self.dockWidgetContents)
+
+        self.gridLayout.addWidget(self.dockWidget, 0, 0, 1, 1)
 
 
         self.verticalLayout_2.addWidget(self.wdg_coorGen_holder)
