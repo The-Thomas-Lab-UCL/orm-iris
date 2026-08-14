@@ -2,7 +2,7 @@ import sys
 import os
 
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Slot
+from PySide6.QtCore import Qt as qt, Slot, QTimer
 
 if __name__ == '__main__':
     SCRIPT_DIR = os.path.abspath(r'.\iris')
@@ -162,9 +162,21 @@ class Wdg_Hilvl_CoorGenerator(qw.QWidget):
         )
         wdg.lyt_coorMod_holder.addWidget(self._wdg_coorMod)
         
+    # >>> Coordinate generator dock setup <<<
+        # The coordinate generator can hold fairly large widgets (e.g. image/video
+        # ROI generators), so it is placed in a dockable widget that can be popped
+        # out. When re-docked, it should return to its original spot in
+        # wdg_coorGen_holder's grid layout, mirroring Wdg_MotionController's video dock.
+        self._dock_coorGen = wdg.dockWidget
+        self._dock_coorGen_holder_layout = wdg.gridLayout
+        self._dock_coorGen_original_position = (0, 0, 1, 1)
+        self.main_win = self.window()
+
+        QTimer.singleShot(0, self._register_coorGen_dock)
+        self._dock_coorGen.topLevelChanged.connect(self._handle_coorGen_docking_changed)
+
     # >>> Mapping coordinate method widgets<<<
         # > Dictionaries and parameters to set up the mapping methods <
-        wdg.wdg_coorGen_holder.setLayout(qw.QVBoxLayout())
         self._dict_mappingmethods_kwargs = {
             'parent':wdg.wdg_coorGen_holder,
             'motion_controller':self._motion_controller,
@@ -223,7 +235,35 @@ class Wdg_Hilvl_CoorGenerator(qw.QWidget):
         Terminates the treeview and removes the observer from the hub.
         """
         pass
-        
+
+    def _register_coorGen_dock(self):
+        """
+        Registers the coordinate generator dock with the top-level QMainWindow so
+        Qt knows its home position, then returns it to its original spot in the
+        grid layout without actually floating it.
+        """
+        self.main_win = self.window()
+        if not isinstance(self.main_win, qw.QMainWindow):
+            return
+        self.main_win.addDockWidget(qt.DockWidgetArea.LeftDockWidgetArea, self._dock_coorGen)
+        self._dock_coorGen.setFloating(True)
+        self._dock_coorGen.setFloating(False)
+        self._dock_coorGen_holder_layout.addWidget(self._dock_coorGen, *self._dock_coorGen_original_position)
+
+    @Slot(bool)
+    def _handle_coorGen_docking_changed(self, floating:bool):
+        """
+        Keeps the coordinate generator docked to its original grid layout position
+        when re-docked, instead of letting it embed into the main window's dock area.
+        """
+        if floating:
+            if isinstance(self.main_win, qw.QMainWindow):
+                self.main_win.addDockWidget(qt.DockWidgetArea.LeftDockWidgetArea, self._dock_coorGen)
+            self._dock_coorGen.setFloating(True)
+        else:
+            self._dock_coorGen_holder_layout.addWidget(self._dock_coorGen, *self._dock_coorGen_original_position)
+            self._dock_coorGen.setFloating(False)
+
     @Slot(str)
     def show_chosen_coorGen(self, method_name:str):
         """
