@@ -29,6 +29,8 @@ class CameraController_Dummy(Class_CameraController):
         self.flg_initialised = True
         
         self._exposure_time_us = 10e-3# Initial exposure time in microseconds
+        self._gain_range = (0,480)  # Mimics the gain range of a Thorlabs camera
+        self._gain = 0              # Initial gain in camera device units
         print('\n>>>>> DUMMY camera controller is used <<<<<')
         
     def get_identifier(self) -> str:
@@ -53,7 +55,21 @@ class CameraController_Dummy(Class_CameraController):
     
     def get_exposure_time_us(self) -> int | float | None:
         return self._exposure_time_us
-    
+
+    def is_gain_supported(self) -> bool:
+        return True
+
+    def get_gain_range(self) -> tuple[int,int]|None:
+        return self._gain_range
+
+    def set_gain(self, gain: int | float) -> None:
+        self._gain = int(min(max(round(gain), self._gain_range[0]), self._gain_range[1]))
+        print(f'Gain set to {self._gain}')
+
+    def get_gain(self) -> int | None:
+        return self._gain
+
+
     def get_initialisation_status(self) -> bool:
         return self.flg_initialised
     
