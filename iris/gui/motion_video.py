@@ -1240,6 +1240,63 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         except Exception as e:
             qw.QMessageBox.critical(main_window, 'Error', 'Failed to set exposure time:\n' + str(e))
             
+    def set_camera_gain_db(self):
+        """
+        Sets the camera gain in decibels
+        """
+        main_window = self.window()
+        if not hasattr(self._camera_ctrl,'set_gain_db') or not hasattr(self._camera_ctrl,'get_gain_db'):
+            qw.QMessageBox.critical(main_window, 'Error', 'Camera does not support gain setting')
+            return
+        try:
+            if hasattr(self._camera_ctrl,'is_gain_supported') and not self._camera_ctrl.is_gain_supported():
+                qw.QMessageBox.critical(main_window, 'Error', 'The connected camera does not support gain')
+                return
+
+            init_gain_db = self._camera_ctrl.get_gain_db()
+            if init_gain_db is None: raise ValueError('Failed to get current gain from the camera')
+
+            message = 'Set the camera gain in decibels [dB]'
+            if hasattr(self._camera_ctrl,'get_gain_range_db'):
+                gain_range_db = self._camera_ctrl.get_gain_range_db()
+                if gain_range_db is not None:
+                    message += '\nAllowed range: {:.2f} to {:.2f} dB (out-of-range values are clamped)'.format(*gain_range_db)
+
+            new_gain_db = messagebox_request_input(
+                parent=main_window,
+                title='Set camera gain',
+                message=message,
+                default=str(round(init_gain_db,2)),
+                validator=validator_float_greaterThanZero,
+                invalid_msg='Gain must be a non-negative number',
+                loop_until_valid=True,
+            )
+            if new_gain_db is None:
+                qw.QMessageBox.information(main_window, 'Gain not set', 'Camera gain not changed')
+                return
+
+            self._camera_ctrl.set_gain_db(float(new_gain_db))
+
+            curr_gain_db = self._camera_ctrl.get_gain_db()
+            if curr_gain_db is None: raise ValueError('Failed to read back the gain from the camera')
+            qw.QMessageBox.information(main_window, 'Gain set', 'Camera gain set to {:.2f} dB'.format(curr_gain_db))
+        except Exception as e:
+            qw.QMessageBox.critical(main_window, 'Error', 'Failed to set camera gain:\n' + str(e))
+
+    def get_camera_gain_db(self) -> float|None:
+        """
+        Gets the camera gain in decibels
+
+        Returns:
+            float|None: The camera gain in dB, or None if unsupported or failed to get
+        """
+        if not hasattr(self._camera_ctrl,'get_gain_db'): return None
+        try:
+            return self._camera_ctrl.get_gain_db()
+        except Exception as e:
+            qw.QMessageBox.critical(self, 'Error', 'Failed to get camera gain:\n' + str(e))
+            return None
+
     def get_camera_exposure_ms(self) -> float|None:
         """
         Gets the camera exposure time in milliseconds
