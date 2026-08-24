@@ -154,6 +154,7 @@ class Ext_CameraExposureController(Ui_camera_exposure_controller, Extension_Main
         
     def _init_signals(self):
         self.slider_relative.sliderReleased.connect(self._set_current_spin_time)
+        self.slider_relative.valueChanged.connect(self._handle_slider_value_changed)
         self.spin_curr_ms.editingFinished.connect(self._set_current_slider_time)
 
         self.btn_preset1.clicked.connect(self._set_preset1_time)
@@ -165,7 +166,18 @@ class Ext_CameraExposureController(Ui_camera_exposure_controller, Extension_Main
     def _block_signals(self, block:bool):
         self.slider_relative.blockSignals(block)
         self.spin_curr_ms.blockSignals(block)
-        
+
+    @Slot(int)
+    def _handle_slider_value_changed(self, _value: int) -> None:
+        """
+        Commits the exposure right away for a direct click, page-step, or keyboard change.
+        While the handle is actively being dragged (isSliderDown), intermediate values are
+        skipped here — sliderReleased() commits once at the end of the drag — so a drag
+        doesn't flood the camera with a write per pixel of motion.
+        """
+        if not self.slider_relative.isSliderDown():
+            self._set_current_spin_time()
+
     @Slot()
     def _set_current_spin_time(self):
         """
