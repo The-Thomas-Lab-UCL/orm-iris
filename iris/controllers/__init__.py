@@ -273,7 +273,6 @@ class ControllerSpecificConfigEnum(Enum):
     # > Thorlabs camera parameters <
     THORLABS_CAMERA_DLL_PATH = dict_controllerSpecific_read['thorlabs_camera_dll_path']
     THORLABS_CAMERA_EXPOSURE_TIME = dict_controllerSpecific_read['thorlabs_camera_exposure_time']
-    THORLABS_CAMERA_GAIN_DB = dict_controllerSpecific_read['thorlabs_camera_gain_db']
     THORLABS_CAMERA_FRAMEPERTRIGGER = dict_controllerSpecific_read['thorlabs_camera_framepertrigger']
     THORLABS_CAMERA_IMAGEPOLL_TIMEOUT = dict_controllerSpecific_read['thorlabs_camera_imagepoll_timeout']
     # > Stage parameters <
@@ -303,6 +302,13 @@ class ControllerSpecificConfigEnum(Enum):
     # > Wasatch Enlighten spectrometer parameters <
     WASATCH_LASER_ENABLE = dict_controllerSpecific_read['wasatch_laser_enable']
     WASATCH_LASER_POWER_MW = dict_controllerSpecific_read['wasatch_laser_power_mw']
+    # !!! Enum members whose values compare equal become aliases of the FIRST one declared
+    # (0.0 == 0 == False), and the alias then reports the first member's value TYPE. Float
+    # entries must therefore be declared last, so that they can never turn an int/bool entry
+    # into a float and break the SDK calls that require a genuine int. Always cast config
+    # values at the point of use as well.
+    # > Thorlabs camera gain <
+    THORLABS_CAMERA_GAIN_DB = dict_controllerSpecific_read['thorlabs_camera_gain_db']
 
 ################################################################################
 # >>>>> Imports for the controllers <<<<<

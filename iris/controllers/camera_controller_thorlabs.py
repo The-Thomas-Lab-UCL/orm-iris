@@ -114,9 +114,10 @@ class CameraController_Thorlabs(Class_CameraController):
                 raise RuntimeError('No Thorlabs cameras detected')
 
             self.camera = self.controller.open_camera(available_cameras[self.camera_index])
-            self.camera.exposure_time_us = ControllerSpecificConfigEnum.THORLABS_CAMERA_EXPOSURE_TIME.value
-            self.camera.frames_per_trigger_zero_for_unlimited = ControllerSpecificConfigEnum.THORLABS_CAMERA_FRAMEPERTRIGGER.value
-            self.camera.image_poll_timeout_ms = ControllerSpecificConfigEnum.THORLABS_CAMERA_IMAGEPOLL_TIMEOUT.value
+            # The SDK requires genuine ints here, so the config values are cast explicitly
+            self.camera.exposure_time_us = int(ControllerSpecificConfigEnum.THORLABS_CAMERA_EXPOSURE_TIME.value)
+            self.camera.frames_per_trigger_zero_for_unlimited = int(ControllerSpecificConfigEnum.THORLABS_CAMERA_FRAMEPERTRIGGER.value)
+            self.camera.image_poll_timeout_ms = int(ControllerSpecificConfigEnum.THORLABS_CAMERA_IMAGEPOLL_TIMEOUT.value)
 
             # SENSOR_TYPE.MONOCHROME == 0; SENSOR_TYPE.BAYER == 1
             self._is_color = (self.camera.camera_sensor_type == SENSOR_TYPE.BAYER)
@@ -127,7 +128,7 @@ class CameraController_Thorlabs(Class_CameraController):
 
             # Gain is applied to both sensor types; cameras without gain support report a
             # gain_range maximum of 0 and are left untouched.
-            gain_db_default = ControllerSpecificConfigEnum.THORLABS_CAMERA_GAIN_DB.value
+            gain_db_default = float(ControllerSpecificConfigEnum.THORLABS_CAMERA_GAIN_DB.value)
             if not self._set_gain_db_unlocked(gain_db_default) and gain_db_default != 0:
                 print('CameraController_Thorlabs initialisation warning: the connected camera does not support gain, '
                       'the configured thorlabs_camera_gain_db of {} dB is ignored.'.format(gain_db_default))
@@ -510,7 +511,7 @@ class CameraController_Thorlabs(Class_CameraController):
             self.camera.image_poll_timeout_ms = old_timeout
 
         if frame is None: return None
-        
+
         image_1d = frame.image_buffer.copy()
         
         if self._is_color and isinstance(self._clrprc_monoToColour, MonoToColorProcessor):
