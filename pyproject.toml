@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "orm-iris"
-version = "1.1.3"
+version = "1.1.4"
 description = "Integrated Raman Imaging Software (IRIS) is a complementary controller software of the Open Raman Microscopy (ORM) system. It provides a GUI-based app to easily control a motorised Raman microscope (XY-stage, Z-stage, brightfield camera, and a spectrometer) for Raman imaging. It supports instruments from various manufacturers including Ocean Optics, Andor, Princeton Instruments, Thorlabs, Physik Instrumente, Zaber, and others."
 authors = [
     {name = "Kevin T. Uning", email = "kevin.uning.23@ucl.ac.uk"},
@@ -13,17 +17,16 @@ dependencies = [
     "configupdater>=3.2",
     "dill>=0.4.0",
     "fuzzywuzzy>=0.18.0",
-    "keyboard>=0.13.5",
     "matplotlib>=3.10.5",
     "numpy>=2.3.2",
     "opencv-python>=4.11.0.86",
     "pandas>=2.3.2",
     "pillow>=11.3.0",
     "psutil>=7.2.2",
-    "pyarrow>=21.0.0",
+    "pyarrow>=21.0.0",              # pandas backend for the "parquet"/"feather" save options
     "PySide6>=6.9.2",
-    "python-Levenshtein>=0.27.3",
-    "pyusb>=1.3.1",
+    "python-Levenshtein>=0.27.3",   # C speed-up backend for fuzzywuzzy
+    "pyusb>=1.3.1",                 # USB backend used by the Ocean Optics / Wasatch SDKs
     "RapidFuzz>=3.14.0",
     "scipy>=1.16.1",
     "scikit-image>=0.26.0",
@@ -35,12 +38,23 @@ zaber = [
     "zaber_motion~=6.5.0",
 ]
 physik_instrumente = [
+    # Physik Instrumente XY stages (xy_stage_controller_PI*.py)
     "PIPython~=2.10.2.1",
     "pyserial~=3.5",
 ]
+princeton_instruments = [
+    # Princeton Instruments spectrometer, "pi_legacy" backend
+    # (raman_spectrometer_controller_PI_pylablib.py)
+    "pylablib>=1.4",
+]
 thorlabs = [
+    # Kinesis / MCM301 .NET bindings (xy_stage_controller_m30xy.py, z_stage_controller_pfm450.py)
     "pythonnet~=3.0.3"
 ]
+# Not installable from PyPI - see README.md:
+#   * thorlabs_tsi_sdk  -> vendor zip 'thorlabs_tsi_camera_python_sdk_package.zip' (Thorlabs cameras)
+#   * oceandirect       -> Ocean Insight SDK, loaded from OCEANINSIGHT_API_DIRPATH in config.ini
+#   * MCM301_COMMAND_LIB-> Thorlabs MCM301 SDK, loaded from MCM301_SDK_DIRPATH in config.ini
 
 dev = [
     "pytest>=8.0",
@@ -60,5 +74,4 @@ testpaths = ["tests"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["iris*"]
-
-[docs]
+exclude = ["*.autosave", "*.autosave.*"]   # runtime output dir, not code
