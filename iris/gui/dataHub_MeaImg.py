@@ -17,6 +17,7 @@ if __name__ == '__main__':
 
 from iris.utils.general import get_timestamp_us_str
 from iris import LibraryConfigEnum
+from iris.data import MissingDataFileError
 from iris.data.measurement_image import MeaImg_Unit, MeaImg_Hub, MeaImg_Handler
 from iris.data.calibration_objective import ImgMea_Cal, ImgMea_Cal_Hub
 
@@ -229,6 +230,7 @@ class Image_SaverLoader_Worker(QObject):
     
     msg_save_db = 'ImageMeasurementHub saved successfully (.db): '
     msg_load_db = 'ImageMeasurementHub loaded successfully (.db): '
+    msg_load_db_partial = 'ImageMeasurementHub loaded, but some unit(s) were skipped (.db): '
     msg_save_png = 'ImageMeasurementUnit saved successfully as PNG: '
     
     msg_error_save = 'Error saving ImageMeasurementHub (.db): '
@@ -296,11 +298,17 @@ class Image_SaverLoader_Worker(QObject):
         Args:
             hub (ImageMeasurement_Hub): ImageMeasurement_Hub object to load data into
             file_path (str): Path to the database file
+        
+        Note:
+            - The units whose image files are missing are skipped, the remaining units are
+              still loaded into the hub and the user is warned about the skipped units.
         """
         try:
             handler = MeaImg_Handler()
-            handler.load_ImageMeasurementHub_database(file_path,hub)
+            handler.load_ImageMeasurementHub_database(file_path,hub,flg_raise_error=True)
             self.finished.emit(self.msg_load_db)
+        except MissingDataFileError as e:
+            self.finished.emit(self.msg_load_db_partial + str(e))
         except Exception as e:
             self.error.emit(self.msg_error_load + str(e))
             
@@ -434,6 +442,13 @@ class Wdg_DataHub_Image(qw.QWidget):
             self._flg_issaved = True
             self.reset_buttons('load')
             self.sig_updateTree.emit()
+        elif msg.startswith(self._worker.msg_load_db_partial):
+            # Partial load: the available units are loaded, the user is warned about the rest
+            self._flg_issaved = True
+            self.reset_buttons('load')
+            self.sig_updateTree.emit()
+            qw.QMessageBox.warning(self, 'Partially loaded', msg)
+            return
         elif msg.startswith(self._worker.msg_save_png):
             self.reset_buttons('save_png')
         else: raise ValueError('Unknown finished message from worker.')

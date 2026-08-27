@@ -27,7 +27,7 @@ from iris.utils.general import messagebox_request_input, get_timestamp_us_str, g
 from iris.data.measurement_Raman import MeaRaman
 from iris.data.measurement_RamanMap import MeaRMap_Hub, MeaRMap_Unit, MeaRMap_Handler
 
-from iris.data import SaveParamsEnum
+from iris.data import SaveParamsEnum, MissingDataFileError
 
 from iris.resources.dataHub_Raman_ui import Ui_DataHub_mapping
 from iris.resources.dataHubPlus_Raman_ui import Ui_DataHubPlus_mapping
@@ -98,6 +98,7 @@ class DataHub_Worker(QObject):
     sig_autoOffload_done = Signal(str)
     save_success = "Saved the data successfully."
     load_success = "Loaded the data successfully."
+    load_partial = "Loaded the data, but some unit(s) were skipped: "
     save_error = "Error in saving the data: "
     load_error = "Error in loading the data: "
     offload_success = "Autosaved and offloaded the data successfully."
@@ -252,11 +253,17 @@ class DataHub_Worker(QObject):
     def load_database(self, loadpath: str) -> None:
         """
         Load a MappingMeasurement_Hub from a database file
+        
+        Note:
+            - The units whose data files (.parquet) are missing are skipped, the remaining
+              units are still loaded into the hub and the user is warned about the skipped units.
         """
         try:
             self._handler.load_MappingMeasurementHub_database(
-                self._mappinghub, loadpath=loadpath, flg_readraw=True)
+                self._mappinghub, loadpath=loadpath, flg_readraw=True, flg_raise_error=True)
             self.sig_saveload_done.emit(self.load_success)
+        except MissingDataFileError as e:
+            self.sig_saveload_done.emit(self.load_partial + str(e))
         except Exception as e:
             self.sig_saveload_done.emit(self.load_error + str(e))
 
@@ -264,11 +271,18 @@ class DataHub_Worker(QObject):
     def load_database_partial(self, loadpath: str, unit_names: list[str]) -> None:
         """
         Load only the selected units from a database file.
+        
+        Note:
+            - The units whose data files (.parquet) are missing are skipped, the remaining
+              units are still loaded into the hub and the user is warned about the skipped units.
         """
         try:
             self._handler.load_MappingMeasurementHub_database(
-                self._mappinghub, loadpath=loadpath, flg_readraw=True, unit_names=unit_names)
+                self._mappinghub, loadpath=loadpath, flg_readraw=True, unit_names=unit_names,
+                flg_raise_error=True)
             self.sig_saveload_done.emit(self.load_success)
+        except MissingDataFileError as e:
+            self.sig_saveload_done.emit(self.load_partial + str(e))
         except Exception as e:
             self.sig_saveload_done.emit(self.load_error + str(e))
     
@@ -854,6 +868,10 @@ class Wdg_DataHub_Mapping(qw.QWidget):
             self._flg_issaved_db = True
         elif message == DataHub_Worker.load_success:
             qw.QMessageBox.information(None, "Save/Load operation", message)
+            self._flg_issaved_db = False
+        elif message.startswith(DataHub_Worker.load_partial):
+            # Partial load: the available units are loaded, the user is warned about the rest
+            qw.QMessageBox.warning(None, "Save/Load operation", message)
             self._flg_issaved_db = False
         elif message == DataHub_Worker.autosave_success:
             wdg = self._widget.lbl_autosave

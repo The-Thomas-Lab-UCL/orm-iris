@@ -42,7 +42,7 @@ from typing import Callable
 
 from iris.controllers import ControllerConfigEnum
 from iris.data.calibration_objective import ImgMea_Cal, ImgMea_Cal_Hub
-from iris.data import SaveParamsEnum, ImageProcessingParamsEnum
+from iris.data import SaveParamsEnum, ImageProcessingParamsEnum, MissingDataFileError
 
 class MeaImg_Unit():
     """
@@ -1531,7 +1531,8 @@ class MeaImg_Handler():
         conn.commit()
         return
         
-    def load_ImageMeasurementHub_database(self,loadpath:str,hub:MeaImg_Hub|None=None) -> None:
+    def load_ImageMeasurementHub_database(self,loadpath:str,hub:MeaImg_Hub|None=None,
+        flg_raise_error:bool=False) -> None:
         """
         Loads the measurements from a database
         
@@ -1539,6 +1540,11 @@ class MeaImg_Handler():
             loadpath (str): Path to the database
             hub (ImageMeasurement_Hub|None): Image measurement hub object, if None, a new hub is created.
                 Defaults to None.
+            flg_raise_error (bool): If True, a MissingDataFileError is raised at the end of the
+                loading process when one or more units were skipped because their image files
+                could not be found (so that the app can show a GUI error message). If False
+                (default), the same information is only printed to the terminal.
+                Either way, all the units whose image files are available are loaded.
         
         Returns:
             ImageMeasurement_Hub: Image measurement hub object
@@ -1567,6 +1573,7 @@ class MeaImg_Handler():
         metadata_types = unit.get_metadata_types()
         key_dict = [key for key in metadata_types.keys() if metadata_types[key] == dict]
         
+        list_skipped_units:list[str] = []   # Units skipped because of missing image files
         for row in rows:
             row:sql.Row
             dict_row = dict(row)
@@ -1574,9 +1581,23 @@ class MeaImg_Handler():
                 dict_row[key] = json.loads(dict_row[key])
             unit = MeaImg_Unit(None,None,reconstruct=True)
             unit.set_metadata_fromfile(dict_row)
-            unit = self.load_ImageMeasurementUnit_database(unit,unit.get_IdName()[0],
-                                                           conn=conn,conn_path=loadpath)
+            try:
+                unit = self.load_ImageMeasurementUnit_database(unit,unit.get_IdName()[0],
+                                                               conn=conn,conn_path=loadpath)
+            except MissingDataFileError as e:
+                # Skip the unit with missing image file(s) and carry on with the other units
+                unit_name = unit.get_IdName()[1]
+                # Only the file name is reported back to the user, the full path goes to the terminal
+                list_skipped_units.append("'{}': {}".format(unit_name,e.missing_filename if e.missing_filename else e))
+                print("load_ImageMeasurementHub_database: skipping image unit '{}' - {}"\
+                    .format(unit_name,e))
+                continue
             hub.append_ImageMeasurementUnit(unit)
+        
+        if len(list_skipped_units) > 0 and flg_raise_error:
+            raise MissingDataFileError(
+                'The following image measurement unit(s) could not be loaded because their '
+                'image files are missing:\n- {}'.format('\n- '.join(list_skipped_units)))
             
     def load_ImageMeasurementUnit_database(self,unit:MeaImg_Unit,
         unit_id:str,conn:sql.Connection,conn_path:str) -> MeaImg_Unit:
@@ -1591,6 +1612,10 @@ class MeaImg_Handler():
         
         Returns:
             ImageMeasurement_Unit: Image measurement unit object
+        
+        Raises:
+            MissingDataFileError: If one of the image files referred to by the database
+                cannot be found on disk.
         """
         assert isinstance(unit, MeaImg_Unit), 'Unit must be an image measurement unit object'
         assert isinstance(unit_id, str), 'Unit ID must be a string'
@@ -1625,6 +1650,9 @@ class MeaImg_Handler():
                 elif dict_types[key] == Image.Image:
                     imagepath = dict_row[key]
                     imagepath = os.path.join(os.path.dirname(conn_path),imagepath)
+                    if not os.path.isfile(imagepath):
+                        raise MissingDataFileError('image file not found: {}'.format(imagepath),
+                                                   filepath=imagepath)
                     image = Image.open(imagepath)
                     dict_mea[key].append(image)
                 else:
