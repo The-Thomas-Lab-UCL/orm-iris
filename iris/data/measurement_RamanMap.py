@@ -44,7 +44,7 @@ from iris.utils.general import convert_wavelength_to_ramanshift, convert_ramansh
 from iris.data.measurement_Raman import MeaRaman
 
 from iris import DataAnalysisConfigEnum as DAEnum
-from iris.data import SaveParamsEnum
+from iris.data import SaveParamsEnum, MissingDataFileError
 from iris.gui import AppPlotEnum
 
 class MeaRMap_Unit():
@@ -1849,6 +1849,10 @@ class MeaRMap_Handler():
         
         Returns:
             mapping_measurement_unit: mapping_measurement_unit object with measurement data loadeds
+        
+        Raises:
+            MissingDataFileError: If one of the data files (.parquet) referred to by the database
+                cannot be found on disk.
         """
         assert isinstance(unit_id, str), '_load_mappingMeasurementUnit_measurement_database: The input data type is not correct. Expected a string.'
         assert isinstance(conn, sql.Connection), '_load_mappingMeasurementUnit_measurement_database: The input data type is not correct. Expected sql.Connection object.'
@@ -1895,6 +1899,9 @@ class MeaRMap_Handler():
                         path = path.replace('/', '\\')
                     elif platform.system() == 'Darwin':  # macOS
                         path = path.replace('\\', '/')
+                    if not os.path.isfile(path):
+                        raise MissingDataFileError('data file not found: {}'.format(path),
+                                                   filepath=path)
                     if path != path_avg:
                         path_avg = path
                         avg_df_read = pd.read_parquet(path_avg)
@@ -1908,6 +1915,9 @@ class MeaRMap_Handler():
                         path = path.replace('/', '\\')
                     elif platform.system() == 'Darwin':  # macOS
                         path = path.replace('\\', '/')
+                    if not os.path.isfile(path):
+                        raise MissingDataFileError('raw data file not found: {}'.format(path),
+                                                   filepath=path)
                     if path != path_rawlist:
                         path_rawlist = path
                         rawlist_df_read = pd.read_parquet(path_rawlist)
@@ -1982,7 +1992,8 @@ class MeaRMap_Handler():
         return dict_unit_id_to_name
 
     def load_MappingMeasurementHub_database(self, hub:MeaRMap_Hub, loadpath:str,
-        flg_readraw:bool=True, unit_names:list[str]|None=None) -> MeaRMap_Hub:
+        flg_readraw:bool=True, unit_names:list[str]|None=None,
+        flg_raise_error:bool=False) -> MeaRMap_Hub:
         """
         Loads the mapping measurement data from a database.
 
@@ -1993,6 +2004,11 @@ class MeaRMap_Handler():
             unit_names (list[str] | None): optional list of unit names to load. When provided,
                 only units whose name appears in this list are loaded. Unrecognised names are
                 silently ignored. When None (default), all units are loaded.
+            flg_raise_error (bool): If True, a MissingDataFileError is raised at the end of the
+                loading process when one or more units were skipped because their data files
+                (.parquet) could not be found (so that the app can show a GUI error message).
+                If False (default), the same information is only printed to the terminal.
+                Either way, all the units whose data files are available are loaded.
 
         Returns:
             mapping_measurement_new: mapping_measurement object
@@ -2012,12 +2028,27 @@ class MeaRMap_Handler():
 
         # Load the metadata and measurement data
         mapping_measurement = hub
+        list_skipped_units:list[str] = []   # Units skipped because of missing data files
         for unit_id, unit_name in dict_unit_id_to_name.items():
             mappingUnit = MeaRMap_Unit(unit_name=unit_name, unit_id=unit_id)
             mappingUnit = self._load_MappingMeasurementUnit_metadata_database(unit_id, conn, mappingUnit)
-            mappingUnit = self._load_MappingMeasurementUnit_measurement_database(unit_id, conn, loadpath, mappingUnit, flg_readraw)
+            try:
+                mappingUnit = self._load_MappingMeasurementUnit_measurement_database(unit_id, conn, loadpath, mappingUnit, flg_readraw)
+            except MissingDataFileError as e:
+                # Skip the unit with missing data file(s) and carry on with the other units
+                # Only the file name is reported back to the user, the full path goes to the terminal
+                list_skipped_units.append("'{}': {}".format(unit_name, e.missing_filename if e.missing_filename else e))
+                print("load_MappingMeasurementHub_database: skipping mapping unit '{}' - {}"\
+                    .format(unit_name, e))
+                continue
             mapping_measurement.append_mapping_unit(mappingUnit)
         conn.close()
+
+        if len(list_skipped_units) > 0 and flg_raise_error:
+            raise MissingDataFileError(
+                'The following mapping measurement unit(s) could not be loaded because their '
+                'data files are missing:\n- {}'.format('\n- '.join(list_skipped_units)))
+
         return mapping_measurement
     
     def load_MappingMeasurement_pickle(self,hub:MeaRMap_Hub,loadpath:str) -> MeaRMap_Hub:
@@ -2043,7 +2074,7 @@ class MeaRMap_Handler():
         return hub
     
     def load_choose(self,mappingHub:MeaRMap_Hub,callback_fast:Callable|None=None,
-                    callback:Callable|None=None) -> threading.Thread:
+                    callback:Callable|None=None,flg_raise_error:bool=False) -> threading.Thread:
         """
         Choose to either load from database or pickle file.
         
@@ -2051,6 +2082,8 @@ class MeaRMap_Handler():
             mappingHub (MappingMeasurement_Hub): mapping_measurement_hub object to be loaded into
             callback_fast (Callable): callback function to run after the filedialog. Defaults to None.
             callback (Callable): callback function to run after the loading process. Defaults to None.
+            flg_raise_error (bool): flag to raise a MissingDataFileError when unit(s) are skipped
+                because of missing data files. Defaults to False (terminal message only).
         
         Returns:
             threading.Thread: thread of the loading process
@@ -2067,12 +2100,19 @@ class MeaRMap_Handler():
         
         if callback_fast is not None: callback_fast()
         
+        error_missingfile = None
         if loadpath.endswith('.db'):
-            self.load_MappingMeasurementHub_database(mappingHub,loadpath)
+            try:
+                self.load_MappingMeasurementHub_database(mappingHub,loadpath,flg_raise_error=flg_raise_error)
+            except MissingDataFileError as e:
+                # Hold the error back so that the callback still runs after the (partial) load
+                error_missingfile = e
         elif loadpath.endswith('.pkl'):
             self.load_MappingMeasurement_pickle(mappingHub,loadpath)
             
         if callback is not None: callback()
+        
+        if error_missingfile is not None: raise error_missingfile
 
     def test_database_save_load(self,hub:MeaRMap_Hub):
         """
