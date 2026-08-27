@@ -84,3 +84,27 @@ class ImageProcessingParamsEnum(Enum):
     if not 0<LOW_RESOLUTION_SCALE<1:
         LOW_RESOLUTION_SCALE = 0.1
         print(f"Warning: LOW_RESOLUTION_SCALE should be between 0 and 1. Setting to default value of {LOW_RESOLUTION_SCALE}.")
+
+class MissingDataFileError(FileNotFoundError):
+    """
+    Raised when a data file referenced by a save database (e.g. a .png image file or a
+    .parquet spectrum file) cannot be found on disk.
+
+    Args:
+        message (str): full error message, including the full path of the missing file.
+            This is the message shown in the terminal.
+        filepath (str|None): full path of the missing file. Defaults to None.
+
+    Note:
+        - The loaders use this exception to skip the affected measurement unit and carry on
+          with the rest of the loading process. It is only propagated to the caller when the
+          loader is called with ``flg_raise_error=True``, so that the GUI can display an
+          error message once the loading process has finished.
+        - Use the ``missing_filename`` attribute for the user-facing (GUI) messages, so that
+          only the name of the missing file is shown instead of its full path.
+          (the ``filename`` attribute is not used here as it is reserved by OSError)
+    """
+    def __init__(self, message:str, filepath:str|None=None):
+        super().__init__(message)
+        self.filepath = filepath
+        self.missing_filename = os.path.basename(filepath) if filepath is not None else ''
