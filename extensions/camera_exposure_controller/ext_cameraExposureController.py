@@ -38,9 +38,15 @@ class _HistogramWorker(QObject):
 
     @Slot()
     def start(self):
-        self._timer = QTimer()
-        self._timer.setInterval(500)
-        self._timer.timeout.connect(self._capture_and_emit)
+        # Reuse the existing timer instead of creating a new one each call — start() is
+        # re-triggered by showEvent() every time the window is re-shown (e.g. reopened from
+        # the Extensions menu) while the histogram checkbox is already checked. Creating a
+        # fresh QTimer each time leaked an ever-growing stack of 500ms pollers, each calling
+        # frame_capture() and contending for the camera's lock with tiling captures.
+        if self._timer is None:
+            self._timer = QTimer()
+            self._timer.setInterval(500)
+            self._timer.timeout.connect(self._capture_and_emit)
         self._timer.start()
 
     @Slot()
@@ -81,16 +87,10 @@ class Ext_CameraExposureController(Ui_camera_exposure_controller, Extension_Main
         
         self.chk_stayOnTop.stateChanged.connect(self._toggle_always_on_top)
         self._toggle_always_on_top() # Set the initial state of the always on top checkbox
-        
-        try:
-            current_exposure_time_us = self._camera.get_exposure_time_us()
-            if current_exposure_time_us is None: raise ValueError('Camera returned None for current exposure time')
-            self.spin_curr_ms.setValue(current_exposure_time_us/1e3)
-        except Exception as e:
-            qw.QMessageBox.warning(self,'Error getting current exposure time',f'Error getting the current exposure time from the camera: {e}')
-        
+
         self._init_signals()
         self._init_histogram()
+        self._sync_exposure_from_camera()
 
     def closeEvent(self, event):
         event.ignore()
@@ -98,8 +98,39 @@ class Ext_CameraExposureController(Ui_camera_exposure_controller, Extension_Main
 
     def showEvent(self, event):
         super().showEvent(event)
+        # The camera's exposure may have changed while this window was hidden (e.g. another
+        # extension, a tiling run, or the app's own defaults) — re-read it every time the
+        # window is (re-)shown so the fields never go stale.
+        self._sync_exposure_from_camera()
         if hasattr(self, '_hist_worker') and self.chk_histogram.isChecked():
             self._sig_hist_start.emit()
+
+    def _sync_exposure_from_camera(self) -> None:
+        """
+        Refreshes the exposure spin box and slider to reflect the camera's actual current
+        exposure time. Read-only — never writes anything back to the camera.
+        """
+        try:
+            current_exposure_time_us = self._camera.get_exposure_time_us()
+            if current_exposure_time_us is None: raise ValueError('Camera returned None for current exposure time')
+        except Exception as e:
+            qw.QMessageBox.warning(self,'Error getting current exposure time',f'Error getting the current exposure time from the camera: {e}')
+            return
+
+        exposure_time_ms = current_exposure_time_us / 1e3
+        max_ms = self.spin_max_ms.value()
+        min_ms = self.spin_min_ms.value() or 0.0001
+
+        if self.chk_logarithmic.isChecked():
+            curr_rel = int(math.log(exposure_time_ms / min_ms) / math.log(max_ms / min_ms) * 100)
+        else:
+            curr_rel = int((exposure_time_ms - min_ms) / (max_ms - min_ms) * 100)
+        curr_rel = max(0, min(100, curr_rel))
+
+        self._block_signals(True)
+        self.spin_curr_ms.setValue(exposure_time_ms)
+        self.slider_relative.setValue(curr_rel)
+        self._block_signals(False)
 
     def hideEvent(self, event):
         super().hideEvent(event)
@@ -123,6 +154,7 @@ class Ext_CameraExposureController(Ui_camera_exposure_controller, Extension_Main
         
     def _init_signals(self):
         self.slider_relative.sliderReleased.connect(self._set_current_spin_time)
+        self.slider_relative.valueChanged.connect(self._handle_slider_value_changed)
         self.spin_curr_ms.editingFinished.connect(self._set_current_slider_time)
 
         self.btn_preset1.clicked.connect(self._set_preset1_time)
@@ -134,7 +166,18 @@ class Ext_CameraExposureController(Ui_camera_exposure_controller, Extension_Main
     def _block_signals(self, block:bool):
         self.slider_relative.blockSignals(block)
         self.spin_curr_ms.blockSignals(block)
-        
+
+    @Slot(int)
+    def _handle_slider_value_changed(self, _value: int) -> None:
+        """
+        Commits the exposure right away for a direct click, page-step, or keyboard change.
+        While the handle is actively being dragged (isSliderDown), intermediate values are
+        skipped here — sliderReleased() commits once at the end of the drag — so a drag
+        doesn't flood the camera with a write per pixel of motion.
+        """
+        if not self.slider_relative.isSliderDown():
+            self._set_current_spin_time()
+
     @Slot()
     def _set_current_spin_time(self):
         """

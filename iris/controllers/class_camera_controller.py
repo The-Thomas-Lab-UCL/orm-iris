@@ -83,7 +83,45 @@ class Class_CameraController:
             int | float: Exposure time in microseconds
         """
         raise NotImplementedError("get_exposure_time() does not exist in this controller")
-    
+
+    def is_gain_supported(self) -> bool:
+        """
+        Whether this controller (and the connected camera) supports gain adjustment.
+        Override in subclasses that implement set_gain()/get_gain(). Use this to
+        decide whether to expose gain controls in the GUI.
+
+        Returns:
+            bool: True if gain can be set and read
+        """
+        return False
+
+    def get_gain_range(self) -> tuple[int,int]|None:
+        """
+        Get the range of gain values supported by the camera, in camera device units.
+
+        Returns:
+            tuple[int,int]|None: (min, max) gain, or None if unavailable
+        """
+        raise NotImplementedError("get_gain_range() does not exist in this controller")
+
+    def set_gain(self, gain:int|float) -> None:
+        """
+        Set the gain of the camera
+
+        Args:
+            gain (int | float): Gain in camera device units
+        """
+        raise NotImplementedError("set_gain() does not exist in this controller")
+
+    def get_gain(self) -> int|None:
+        """
+        Get the gain of the camera
+
+        Returns:
+            int|None: Gain in camera device units
+        """
+        raise NotImplementedError("get_gain() does not exist in this controller")
+
     def frame_capture(self) -> (np.ndarray|None):
         """
         Captures the frame from the camera and returns it as a numpy array.

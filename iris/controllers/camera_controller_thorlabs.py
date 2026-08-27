@@ -81,9 +81,13 @@ class CameraController_Thorlabs(Class_CameraController):
         return self._identifier
 
     def reinitialise_connection(self) -> None:
-        """Reinitialise the camera connection, preserving the current exposure time."""
+        """Reinitialise the camera connection, preserving the current exposure time and gain."""
         exposure_time_us = None
         try: exposure_time_us = self.get_exposure_time_us()
+        except Exception: pass
+
+        gain = None
+        try: gain = self.get_gain()
         except Exception: pass
 
         try: self.camera_termination()
@@ -96,6 +100,10 @@ class CameraController_Thorlabs(Class_CameraController):
             try: self.set_exposure_time_us(exposure_time_us)
             except Exception as e: print('CameraController_Thorlabs reinitialise_connection exposure restore error:\n{}'.format(e))
 
+        if gain is not None:
+            try: self.set_gain(gain)
+            except Exception as e: print('CameraController_Thorlabs reinitialise_connection gain restore error:\n{}'.format(e))
+
     def _initialisation(self) -> None:
         self._lock.acquire()
         try:
@@ -106,9 +114,10 @@ class CameraController_Thorlabs(Class_CameraController):
                 raise RuntimeError('No Thorlabs cameras detected')
 
             self.camera = self.controller.open_camera(available_cameras[self.camera_index])
-            self.camera.exposure_time_us = ControllerSpecificConfigEnum.THORLABS_CAMERA_EXPOSURE_TIME.value
-            self.camera.frames_per_trigger_zero_for_unlimited = ControllerSpecificConfigEnum.THORLABS_CAMERA_FRAMEPERTRIGGER.value
-            self.camera.image_poll_timeout_ms = ControllerSpecificConfigEnum.THORLABS_CAMERA_IMAGEPOLL_TIMEOUT.value
+            # The SDK requires genuine ints here, so the config values are cast explicitly
+            self.camera.exposure_time_us = int(ControllerSpecificConfigEnum.THORLABS_CAMERA_EXPOSURE_TIME.value)
+            self.camera.frames_per_trigger_zero_for_unlimited = int(ControllerSpecificConfigEnum.THORLABS_CAMERA_FRAMEPERTRIGGER.value)
+            self.camera.image_poll_timeout_ms = int(ControllerSpecificConfigEnum.THORLABS_CAMERA_IMAGEPOLL_TIMEOUT.value)
 
             # SENSOR_TYPE.MONOCHROME == 0; SENSOR_TYPE.BAYER == 1
             self._is_color = (self.camera.camera_sensor_type == SENSOR_TYPE.BAYER)
@@ -117,8 +126,14 @@ class CameraController_Thorlabs(Class_CameraController):
             self._colour_processor = None
             self._clrprc_monoToColour = None
 
+            # Gain is applied to both sensor types; cameras without gain support report a
+            # gain_range maximum of 0 and are left untouched.
+            gain_db_default = float(ControllerSpecificConfigEnum.THORLABS_CAMERA_GAIN_DB.value)
+            if not self._set_gain_db_unlocked(gain_db_default) and gain_db_default != 0:
+                print('CameraController_Thorlabs initialisation warning: the connected camera does not support gain, '
+                      'the configured thorlabs_camera_gain_db of {} dB is ignored.'.format(gain_db_default))
+
             if self._is_color:
-                self.camera.gain = int(0)
                 self._colour_processor = TL_MTC()
                 self._clrprc_monoToColour = self._colour_processor.create_mono_to_color_processor(
                     self.camera.camera_sensor_type,
@@ -228,6 +243,198 @@ class CameraController_Thorlabs(Class_CameraController):
         with self._lock:
             return self.camera.exposure_time_us
 
+    def _get_gain_range_unlocked(self) -> tuple[int, int] | None:
+        """
+        Query the gain range of the camera. The caller must already hold self._lock.
+
+        Returns:
+            tuple[int, int] | None: (min, max) gain in camera device units, or None if unavailable
+        """
+        if not isinstance(self.camera, TLCamera): return None
+
+        try:
+            gain_range = self.camera.gain_range
+            return (int(gain_range.min), int(gain_range.max))
+        except Exception as e:
+            print('CameraController_Thorlabs gain range error:\n{}'.format(e))
+            return None
+
+    def get_gain_range(self) -> tuple[int, int] | None:
+        """
+        Get the range of gain values supported by the camera, in camera device units.
+        A maximum of 0 means the connected camera does not support gain.
+
+        Returns:
+            tuple[int, int] | None: (min, max) gain, or None if the camera is not initialised
+        """
+        if not isinstance(self.camera, TLCamera):
+            print('CameraController_Thorlabs get_gain_range warning: camera is not properly initialised.')
+            return None
+
+        with self._lock:
+            return self._get_gain_range_unlocked()
+
+    def get_gain_range_db(self) -> tuple[float, float] | None:
+        """
+        Get the range of gain values supported by the camera, in decibels.
+
+        Returns:
+            tuple[float, float] | None: (min, max) gain in dB, or None if the camera
+                is not initialised or does not support gain
+        """
+        if not isinstance(self.camera, TLCamera):
+            print('CameraController_Thorlabs get_gain_range_db warning: camera is not properly initialised.')
+            return None
+
+        with self._lock:
+            gain_range = self._get_gain_range_unlocked()
+            if gain_range is None or gain_range[1] <= 0: return None
+
+            try:
+                return (float(self.camera.convert_gain_to_decibels(gain_range[0])),
+                        float(self.camera.convert_gain_to_decibels(gain_range[1])))
+            except Exception as e:
+                print('CameraController_Thorlabs get_gain_range_db error:\n{}'.format(e))
+                return None
+
+    def is_gain_supported(self) -> bool:
+        """
+        Check whether the connected camera supports gain adjustment.
+
+        Returns:
+            bool: True if the camera exposes a non-zero gain range
+        """
+        gain_range = self.get_gain_range()
+        return gain_range is not None and gain_range[1] > 0
+
+    def _set_gain_unlocked(self, gain: int | float) -> bool:
+        """
+        Apply the gain to the camera, clamped to the supported range.
+        The caller must already hold self._lock.
+
+        Args:
+            gain (int | float): Gain in camera device units
+
+        Returns:
+            bool: True if the gain was applied, False if unsupported or on error
+        """
+        if not isinstance(self.camera, TLCamera): return False
+
+        gain_range = self._get_gain_range_unlocked()
+        if gain_range is None or gain_range[1] <= 0: return False
+
+        gain_clamped = int(min(max(round(gain), gain_range[0]), gain_range[1]))
+        if gain_clamped != round(gain):
+            print('CameraController_Thorlabs gain warning: gain {} clamped to {} (allowed range {}-{}).'.format(
+                round(gain), gain_clamped, gain_range[0], gain_range[1]))
+
+        try:
+            self.camera.gain = gain_clamped
+            return True
+        except Exception as e:
+            print('CameraController_Thorlabs set_gain error:\n{}'.format(e))
+            return False
+
+    def set_gain(self, gain: int | float) -> None:
+        """
+        Set the gain of the camera, in camera device units.
+        The value is clamped to the range reported by get_gain_range().
+
+        Args:
+            gain (int | float): Gain in camera device units
+        """
+        if not isinstance(self.camera, TLCamera):
+            print('CameraController_Thorlabs set_gain warning: camera is not properly initialised.')
+            return
+
+        if not isinstance(gain, (int, float)):
+            raise ValueError("Gain must be an integer or float")
+
+        with self._lock:
+            gain_range = self._get_gain_range_unlocked()
+            if gain_range is None or gain_range[1] <= 0:
+                print('CameraController_Thorlabs set_gain warning: the connected camera does not support gain.')
+                return
+            self._set_gain_unlocked(gain)
+
+    def get_gain(self) -> int | None:
+        """
+        Get the gain of the camera, in camera device units.
+
+        Returns:
+            int | None: Gain in camera device units, or None if unavailable
+        """
+        if not isinstance(self.camera, TLCamera):
+            print('CameraController_Thorlabs get_gain warning: camera is not properly initialised.')
+            return None
+
+        with self._lock:
+            try: return int(self.camera.gain)
+            except Exception as e:
+                print('CameraController_Thorlabs get_gain error:\n{}'.format(e))
+                return None
+
+    def _set_gain_db_unlocked(self, gain_db: int | float) -> bool:
+        """
+        Convert a gain in decibels to camera device units and apply it.
+        The caller must already hold self._lock.
+
+        Args:
+            gain_db (int | float): Gain in decibels
+
+        Returns:
+            bool: True if the gain was applied, False if unsupported or on error
+        """
+        if not isinstance(self.camera, TLCamera): return False
+
+        try: gain = self.camera.convert_decibels_to_gain(float(gain_db))
+        except Exception as e:
+            print('CameraController_Thorlabs gain conversion error:\n{}'.format(e))
+            return False
+
+        return self._set_gain_unlocked(gain)
+
+    def set_gain_db(self, gain_db: int | float) -> None:
+        """
+        Set the gain of the camera in decibels. The value is converted to camera
+        device units by the SDK, then clamped to the supported range.
+
+        Args:
+            gain_db (int | float): Gain in decibels
+        """
+        if not isinstance(self.camera, TLCamera):
+            print('CameraController_Thorlabs set_gain_db warning: camera is not properly initialised.')
+            return
+
+        if not isinstance(gain_db, (int, float)):
+            raise ValueError("Gain must be an integer or float")
+
+        with self._lock:
+            gain_range = self._get_gain_range_unlocked()
+            if gain_range is None or gain_range[1] <= 0:
+                print('CameraController_Thorlabs set_gain_db warning: the connected camera does not support gain.')
+                return
+            self._set_gain_db_unlocked(gain_db)
+
+    def get_gain_db(self) -> float | None:
+        """
+        Get the gain of the camera in decibels.
+
+        Returns:
+            float | None: Gain in decibels, or None if unavailable
+        """
+        gain = self.get_gain()
+        if gain is None: return None
+
+        if not isinstance(self.camera, TLCamera):
+            print('CameraController_Thorlabs get_gain_db warning: camera is not properly initialised.')
+            return None
+
+        try: return float(self.camera.convert_gain_to_decibels(gain))
+        except Exception as e:
+            print('CameraController_Thorlabs get_gain_db error:\n{}'.format(e))
+            return None
+
     def frame_capture(self) -> np.ndarray | None:
         if not isinstance(self.camera, TLCamera):
             print('CameraController_Thorlabs frame_capture warning: camera is not properly initialised.')
@@ -304,7 +511,7 @@ class CameraController_Thorlabs(Class_CameraController):
             self.camera.image_poll_timeout_ms = old_timeout
 
         if frame is None: return None
-        
+
         image_1d = frame.image_buffer.copy()
         
         if self._is_color and isinstance(self._clrprc_monoToColour, MonoToColorProcessor):
@@ -349,6 +556,14 @@ class CameraController_Thorlabs(Class_CameraController):
                 try: self.camera.exposure_time_us -= 10000
                 except Exception as e: print(f"Error: {e}")
                 print(f"Exposure decreased to: {self.camera.exposure_time_us}")
+            elif key == ord('g'):  # Increase gain
+                current_gain = self.get_gain()
+                if current_gain is not None: self.set_gain(current_gain + 10)
+                print(f"Gain: {self.get_gain()} ({self.get_gain_db()} dB)")
+            elif key == ord('h'):  # Decrease gain
+                current_gain = self.get_gain()
+                if current_gain is not None: self.set_gain(current_gain - 10)
+                print(f"Gain: {self.get_gain()} ({self.get_gain_db()} dB)")
 
             img = self.img_capture()
             if img is None:

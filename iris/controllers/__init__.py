@@ -172,6 +172,7 @@ dict_controllerSpecific_default = {
     # > Thorlabs camera parameters <
     'thorlabs_camera_dll_path': '', # Path to the Thorlabs camera DLL
     'thorlabs_camera_exposure_time': 100, # Camera exposure time in [us], default: 10000
+    'thorlabs_camera_gain_db': 0.0, # Camera gain in [dB] applied at initialisation, default: 0.0 for no gain
     'thorlabs_camera_framepertrigger': 0,   # Number of frames per trigger, default: 0 for continuous acquisition mode
     'thorlabs_camera_imagepoll_timeout': 1000,  # Timeout for the image polling in [ms], default: 1000
     # > Stage parameters <
@@ -217,6 +218,7 @@ dict_controllerSpecific_comments = {
     # > Thorlabs camera parameters <
     'thorlabs_camera_dll_path': 'Path to the Thorlabs camera DLL',
     'thorlabs_camera_exposure_time': 'Camera exposure time in [us], default: 10000',
+    'thorlabs_camera_gain_db': 'Camera gain in [dB] applied at initialisation, default: 0.0 for no gain. The valid range is camera-dependent and out-of-range values are clamped. Ignored by cameras without gain support',
     'thorlabs_camera_framepertrigger': 'Number of frames per trigger, default: 0 for continuous acquisition mode',
     'thorlabs_camera_imagepoll_timeout': 'Timeout for the image polling in [ms], default: 1000',
     # > Stage parameters <
@@ -300,6 +302,13 @@ class ControllerSpecificConfigEnum(Enum):
     # > Wasatch Enlighten spectrometer parameters <
     WASATCH_LASER_ENABLE = dict_controllerSpecific_read['wasatch_laser_enable']
     WASATCH_LASER_POWER_MW = dict_controllerSpecific_read['wasatch_laser_power_mw']
+    # !!! Enum members whose values compare equal become aliases of the FIRST one declared
+    # (0.0 == 0 == False), and the alias then reports the first member's value TYPE. Float
+    # entries must therefore be declared last, so that they can never turn an int/bool entry
+    # into a float and break the SDK calls that require a genuine int. Always cast config
+    # values at the point of use as well.
+    # > Thorlabs camera gain <
+    THORLABS_CAMERA_GAIN_DB = dict_controllerSpecific_read['thorlabs_camera_gain_db']
 
 ################################################################################
 # >>>>> Imports for the controllers <<<<<
