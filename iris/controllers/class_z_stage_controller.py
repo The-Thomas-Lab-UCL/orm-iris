@@ -14,16 +14,18 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
-from iris.controllers import ControllerDirectionEnum
+from iris.controllers import ControllerConfigEnum, ControllerDirectionEnum
 
 class Class_ZController():
     def __init__(self,**kwargs) -> None:
-        
+
         self._dict_ctrl_remap = {
             'zfwd':ControllerDirectionEnum.ZFWD.value,
             'zrev':ControllerDirectionEnum.ZREV.value
         }   # Dictionary to remap the controls
-        
+
+        self._invertz = ControllerConfigEnum.STAGE_INVERTZ.value    # Flag to indicate if the z axis is flipped (inverted)
+
         # <<<<< Insert the device parameters here
         
         # Start by initializing the connection, device, motors, and their parameters
@@ -44,6 +46,20 @@ class Class_ZController():
             print(e)
             self.terminate()
         
+    def _remap_coordinate_flip(self,coor:float) -> float:
+        """
+        Remaps the coordinate based on the invert flag. Used both when getting the
+        coordinate and when setting it (moving the motor), since a sign flip is its
+        own inverse.
+
+        Args:
+            coor (float): The coordinate to be remapped
+
+        Returns:
+            float: the remapped coordinate
+        """
+        return -coor if self._invertz else coor
+
     def get_identifier(self) -> str:
         """
         Returns the identifier of the camera.
@@ -120,7 +136,9 @@ class Class_ZController():
         """
         if not isinstance(coor_abs, float) and not isinstance(coor_abs, int):
             raise ValueError("Coordinate must be a float")
-        
+
+        coor_abs = self._remap_coordinate_flip(coor_abs)
+
         # <<<<< Insert the direct movement commands here
         pass
         
@@ -242,8 +260,8 @@ class Class_ZController():
         # <<<<< Insert the coordinate retrieval commands here
         position_mm = float(0)
         pass
-    
-        return position_mm
+
+        return self._remap_coordinate_flip(position_mm)
 
 def test_getcoor_while_moving():
     def printcoor(zstage:z_stage_controller,flag:threading.Event):

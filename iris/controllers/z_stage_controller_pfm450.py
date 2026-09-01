@@ -10,7 +10,7 @@ if __name__ == '__main__':
     sys.path.append(os.path.dirname(SCRIPT_DIR))
 
 from iris.controllers.class_z_stage_controller import Class_ZController
-from iris.controllers import ControllerSpecificConfigEnum,ControllerDirectionEnum
+from iris.controllers import ControllerConfigEnum, ControllerSpecificConfigEnum,ControllerDirectionEnum
 
 import time
 import clr
@@ -40,7 +40,9 @@ class ZController_PFM450(Class_ZController):
         self._channel_polling_ms = 50   # Polling rate in [ms]
 
         self._isrunning_motor = False   # Running state of the motor. True: running, False: stopped
-        
+
+        self._invertz = ControllerConfigEnum.STAGE_INVERTZ.value    # Flag to indicate if the z axis is flipped (inverted)
+
         self._dict_ctrl_remap = {
             'zfwd':ControllerDirectionEnum.ZFWD.value,
             'zrev':ControllerDirectionEnum.ZREV.value
@@ -178,7 +180,7 @@ class ZController_PFM450(Class_ZController):
         """
         position_um = self._channel.GetPosition()
         coor = float(str(position_um))/10**3
-        return coor
+        return self._remap_coordinate_flip(coor)
 
     def move_direct(self,coor_abs,waittime_sec:float=0.5):
         """
@@ -189,9 +191,11 @@ class ZController_PFM450(Class_ZController):
             waittime_sec (float, optional): Waiting time for the motor to stop. Defaults to 0.5.
         """
         assert isinstance(coor_abs, (float,int)), "Coordinate must be a Decimal or float"
-        assert self._min_travel <= coor_abs <= self._max_travel, "Coordinate out of bounds"
         assert isinstance(waittime_sec, (float,int)), "Wait time must be a float"
         assert waittime_sec > 0, 'Wait time must be greater than 0'
+
+        coor_abs = self._remap_coordinate_flip(coor_abs)
+        assert self._min_travel <= coor_abs <= self._max_travel, "Coordinate out of bounds"
 
         # Convert the coordinates to decimals if floats are received
         if self._isrunning_motor == True:

@@ -424,7 +424,14 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         # Stop raman frame's continuous measurement and store the final measurements
         q_trig.put(EnumTrig.STORE)
         q_trig.put(EnumTrig.FINISH)
-        
+
+        # Restore the stage speed to normal (100%), whether the scan finished or was stopped early.
+        # Otherwise the stage is left at whatever reduced mapping_speed_rel_percent was last set
+        # inside _execute_scan_continuous_step, depending on the parity of the last coordinate index.
+        event_finish_setvel.clear()
+        self._sig_setvelrel.emit(100.0, -1.0, event_finish_setvel)
+        event_finish_setvel.wait()
+
         self._event_isacquiring.clear()
         self.emit_finish_signals(msg)
 

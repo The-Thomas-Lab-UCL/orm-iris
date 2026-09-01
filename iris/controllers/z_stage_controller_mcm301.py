@@ -9,7 +9,7 @@ import sys
 import numpy as np
 import threading
 
-from iris.controllers import ControllerSpecificConfigEnum
+from iris.controllers import ControllerConfigEnum, ControllerSpecificConfigEnum
 from iris.controllers.class_z_stage_controller import Class_ZController
 from iris.controllers import ControllerDirectionEnum
 
@@ -65,8 +65,9 @@ class ZController_MCM301(Class_ZController):
         self._vel_min = int(1)    # Minimum velocity of the motor [%]
         
         self._isrunning_motor = False   # Flag to check if the motor is running
-        
-        
+
+        self._invertz = ControllerConfigEnum.STAGE_INVERTZ.value    # Flag to indicate if the z axis is flipped (inverted)
+
         # Start by initializing the connection, device, motors, and their parameters
         self._identifier = None
         try:
@@ -232,7 +233,9 @@ class ZController_MCM301(Class_ZController):
         """
         if not isinstance(coor_abs, float) and not isinstance(coor_abs, int):
             raise ValueError("Coordinate must be a float")
-        
+
+        coor_abs = self._remap_coordinate_flip(coor_abs)
+
         coor_enc = [0]
         ret = self.controller.convert_nm_to_encoder(self.slot, float(coor_abs*1000000), coor_enc)
         if ret < 0:
@@ -383,7 +386,7 @@ class ZController_MCM301(Class_ZController):
         pos_container = [0]
         self.controller.convert_encoder_to_nm(self.slot, self.encoder[0], pos_container)
         position_mm = float(pos_container[0] * 1e-6)
-        return position_mm
+        return self._remap_coordinate_flip(position_mm)
 
 def test_getcoor_while_moving():
     def printcoor(zstage:ZController_MCM301,flag:threading.Event):

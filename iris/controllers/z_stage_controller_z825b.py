@@ -11,7 +11,7 @@ if __name__ == '__main__':
     sys.path.append(os.path.dirname(SCRIPT_DIR))
     
 from iris.controllers.class_z_stage_controller import Class_ZController
-from iris.controllers import ControllerDirectionEnum, ControllerSpecificConfigEnum
+from iris.controllers import ControllerConfigEnum, ControllerDirectionEnum, ControllerSpecificConfigEnum
 
 import time
 import clr
@@ -44,7 +44,9 @@ class ZController_Z825B(Class_ZController):
         
         self.unit_converter = None      # Unit converter for motor
         self.convert_type_length = None # Type of conversion for length
-        
+
+        self._invertz = ControllerConfigEnum.STAGE_INVERTZ.value    # Flag to indicate if the z axis is flipped (inverted)
+
         self.dict_ctrl_remap = {
             'zfwd':ControllerDirectionEnum.ZFWD.value,
             'zrev':ControllerDirectionEnum.ZREV.value
@@ -331,6 +333,8 @@ class ZController_Z825B(Class_ZController):
         Args:
             coor_abs (Decimal): coordinate of the destination
         """
+        coor_abs = self._remap_coordinate_flip(coor_abs)
+
         # Convert the coordinates to decimals if floats are received
         if type(coor_abs) is float:
             coor_abs= Decimal(coor_abs)
@@ -490,7 +494,7 @@ class ZController_Z825B(Class_ZController):
         """
         position = Decimal(self.dev.GetPositionCounter())
         coor = float(str(self.unit_converter.DeviceUnitToReal(position,self.convert_type_length)))
-        return coor
+        return self._remap_coordinate_flip(coor)
 
 def test_getcoor_while_moving():
     def printcoor(zstage:z_stage_controller,flag:threading.Event):

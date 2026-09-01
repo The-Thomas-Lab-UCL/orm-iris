@@ -23,6 +23,7 @@ dict_controller_options_default = {
     'stage_invertx': False,     # Flip the stage x-axis coordinate system direction
     'stage_inverty': False,     # Flip the stage y-axis coordinate system direction
     'stage_flipxy': False, # Flip the XY stage coordinate system
+    'stage_invertz': False,     # Flip the stage z-axis coordinate system direction
     'stage_tiling_waittime_sec': 0.2,  # Wait time after each stage movement during tiling measurements in [s]
     'stage_tiling_settle_sec': 0.3,    # Min time the stage must be stationary before image capture in [s]
     # > Camera <
@@ -45,6 +46,7 @@ dict_controller_options_comments = {
     'stage_invertx': 'Flip the stage x-axis coordinate system direction',
     'stage_inverty': 'Flip the stage y-axis coordinate system direction',
     'stage_flipxy': 'Flip the x and y axis of the XY stage coordinate system',
+    'stage_invertz': 'Flip the stage z-axis coordinate system direction',
     'stage_tiling_waittime_sec': 'Wait time after each stage movement during tiling measurements in seconds',
     'stage_tiling_settle_sec': 'Min time the stage must be stationary (coordinates stable) before image capture in seconds',
     # > Camera <
@@ -122,6 +124,7 @@ class ControllerConfigEnum(Enum):
     STAGE_INVERTX = dict_controller_options_read['stage_invertx']
     STAGE_INVERTY = dict_controller_options_read['stage_inverty']
     STAGE_FLIPXY = dict_controller_options_read['stage_flipxy']
+    STAGE_INVERTZ = dict_controller_options_read['stage_invertz']
     STAGE_TILING_WAITTIME_SEC = dict_controller_options_read['stage_tiling_waittime_sec']
     STAGE_TILING_SETTLE_SEC = dict_controller_options_read['stage_tiling_settle_sec']
 

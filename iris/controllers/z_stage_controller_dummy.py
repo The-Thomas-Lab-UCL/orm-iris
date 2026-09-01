@@ -15,12 +15,14 @@ if __name__ == '__main__':
     libdir = os.path.abspath(r'.\iris')
     sys.path.insert(0, os.path.dirname(libdir))
 
+from iris.controllers import ControllerConfigEnum
 from iris.controllers.class_z_stage_controller import Class_ZController
 
 class ZController_Dummy(Class_ZController):
     def __init__(self,**kwargs) -> None:
         self._coor_mm = float(0)    # Stores the current coordinate of the motor in [mm]
-        
+        self._invertz = ControllerConfigEnum.STAGE_INVERTZ.value    # Flag to indicate if the z axis is flipped (inverted)
+
         self._vel = 100  # Stores the velocity of the motor in percentage of max velocity
         self._motor_step_mm = float(0.001)  # Stores the motor step size in [mm]
         self._motor_step_wait_s = 1e-6  # Stores the time to wait for the motor to move in [s]
@@ -96,7 +98,8 @@ class ZController_Dummy(Class_ZController):
         """
         if not isinstance(coor_abs, float) and not isinstance(coor_abs, int):
             raise ValueError("Coordinate must be a float")
-        
+
+        coor_abs = self._remap_coordinate_flip(coor_abs)
         count = int((coor_abs-self._coor_mm) / self._motor_step_mm)
         
         target = self._coor_mm + count*self._motor_step_mm
@@ -236,7 +239,7 @@ class ZController_Dummy(Class_ZController):
         """
         Get the coordinates of the motor [mm]
         """
-        return self._coor_mm
+        return self._remap_coordinate_flip(self._coor_mm)
 
 def test_getcoor_while_moving():
     def printcoor(zstage:z_stage_controller,flag:threading.Event):
