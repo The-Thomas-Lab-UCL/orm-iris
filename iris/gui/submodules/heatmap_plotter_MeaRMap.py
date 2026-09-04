@@ -5,9 +5,9 @@ import PySide6.QtWidgets as qw
 from PySide6.QtCore import Signal, Slot, QTimer, QCoreApplication, Qt, QObject, QThread
 
 import matplotlib
+matplotlib.use('Agg')   # Must precede every backend import, or the call is a no-op
 import matplotlib.backend_bases
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-matplotlib.use('Agg')   # Force matplotlib to use the backend to prevent memory leak
 
 import threading
 import queue
@@ -45,8 +45,19 @@ class HeatmapPlotter_Design(Ui_HeatmapPlotter, qw.QWidget):
             self._dock_original_index = self.main_win.layout().indexOf(self.dock_plot)
             self._dock_original_index = max(0,self._dock_original_index-1)
             self.main_win.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_plot)
-            self.dock_plot.setFloating(True)
-            self.dock_plot.setFloating(False)
+            # NOTE: a setFloating(True)/setFloating(False) pair used to sit here.
+            # setFloating(True) gives the dock its own native top-level window;
+            # setFloating(False) immediately destroys it again, and the freed
+            # QWindow stays reachable through window().windowHandle() of every
+            # widget below this dock — including the matplotlib canvas, whose
+            # showEvent calls exactly that. Measured on PySide6 6.10.1: 9 of 15
+            # start-ups then failed with a wrong-typed wrapper over the recycled
+            # address ("'QWidgetItem' object has no attribute
+            # 'installEventFilter'"), and the runs that did not fail were simply
+            # the ones where the address had not been reused yet — a live
+            # use-after-free either way, with one instance per plotter widget.
+            # addDockWidget alone registers the dock; floating and re-docking by
+            # the user still work (verified), so the pair is pure liability.
             self.main_layout.insertWidget(self._dock_original_index, self.dock_plot)
     
     @Slot(bool)
@@ -60,6 +71,58 @@ class HeatmapPlotter_Design(Ui_HeatmapPlotter, qw.QWidget):
             self.main_layout.insertWidget(self._dock_original_index, self.dock_plot)
             self.dock_plot.setFloating(False)
 
+def _shutdown_plotter_thread(thread:QThread, timers:tuple) -> None:
+    """
+    Stops a plotter's worker thread and its polling timers.
+
+    Kept at module level and closed over by value: it is invoked from the
+    widget's ``destroyed`` signal, i.e. while the C++ widget is being torn down,
+    so it must not touch the widget itself.
+
+    Qt calls qFatal() — an immediate abort, with no Python traceback and nothing
+    to catch — if a QThread is destroyed while still running. Every plotter owns
+    one, and there are several per processing window, so leaving them to be
+    garbage collected aborts the process whenever such a window closes.
+    """
+    for timer in timers:
+        try: timer.stop()
+        except Exception: pass
+    try:
+        if thread.isRunning():
+            thread.quit()
+            if not thread.wait(3000):
+                thread.terminate()
+                thread.wait(1000)
+    except Exception: pass
+
+
+class _LockedCanvas(FigureCanvas):
+    """
+    A FigureCanvasQTAgg whose rendering is serialised against the plotting
+    worker thread.
+
+    ``HeatmapPlotter_Worker`` mutates this canvas' Figure (``ax.clear()``,
+    ``tripcolor``, colorbar add/remove) from a QThread, while the GUI thread
+    renders the very same Figure inside ``paintEvent``. Matplotlib is not
+    thread-safe: tearing down artists in one thread while Agg walks the artist
+    tree in another corrupts the renderer and segfaults the process with no
+    Python traceback. Both sides therefore take ``fig_lock`` before touching the
+    figure.
+    """
+
+    def __init__(self, figure, fig_lock: threading.RLock):
+        super().__init__(figure=figure)
+        self._fig_lock = fig_lock
+
+    def paintEvent(self, event):
+        with self._fig_lock:
+            return super().paintEvent(event)
+
+    def draw(self):
+        with self._fig_lock:
+            return super().draw()
+
+
 @dataclass
 class XYLimits:
     x_min:float|None = None
@@ -72,9 +135,10 @@ class HeatmapPlotter_Worker(QObject):
     sig_plotready = Signal()  # Signal emitted when the plot is ready to be drawn in the main thread
     sig_finished_plotting = Signal()  # Signal emitted when the plotting is finished
 
-    def __init__(self, plotter:MeaRMap_Plotter):
+    def __init__(self, plotter:MeaRMap_Plotter, fig_lock:threading.RLock):
         super().__init__()
         self._plotter = plotter
+        self._fig_lock = fig_lock
         
     @Slot(PlotterOptions, PlotterParams, PlotterExtraParamsBase, XYLimits)
     def plot_heatmap(self, option:PlotterOptions, params:PlotterParams, extra_params:PlotterExtraParamsBase,
@@ -97,16 +161,28 @@ class HeatmapPlotter_Worker(QObject):
         
         title = f'{mappingUnit.get_unit_name()}\n{ramanshift_str}cm⁻¹ [{wavelength}nm]'
         params.title = title
-        self._plotter.plot_heatmap(
-            plotter=option,
-            params=params,
-            params_extra=extra_params,
-        )
-        ax = self._plotter.get_figure_axes()[1]
-        
-        ax.set_xlim(limits_xy.x_min, limits_xy.x_max)
-        ax.set_ylim(limits_xy.y_min, limits_xy.y_max)
-        
+
+        # Held across the whole mutation: the GUI thread must not render a
+        # half-rebuilt figure (see _LockedCanvas).
+        try:
+            with self._fig_lock:
+                self._plotter.plot_heatmap(
+                    plotter=option,
+                    params=params,
+                    params_extra=extra_params,
+                )
+                ax = self._plotter.get_figure_axes()[1]
+
+                ax.set_xlim(limits_xy.x_min, limits_xy.x_max)
+                ax.set_ylim(limits_xy.y_min, limits_xy.y_max)
+        except Exception as e:
+            # An exception escaping a slot on a worker QThread leaves the plot
+            # request permanently "in flight", so the widget would never plot
+            # again. Report and release instead.
+            print(f'HeatmapPlotter_Worker.plot_heatmap failed: {e}')
+            self.sig_finished_plotting.emit()
+            return
+
         self.sig_plotready.emit()
         self.sig_finished_plotting.emit()
 
@@ -172,7 +248,8 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
     # >>> Plotter setup <<<
     # > Matplotlib plot setup <
         holder = wdg.lyt_heatmap_holder
-        self._canvas_widget = FigureCanvas(figure=self._fig) # The plot widget
+        self._fig_lock = threading.RLock()  # guards self._fig against the worker thread
+        self._canvas_widget = _LockedCanvas(figure=self._fig, fig_lock=self._fig_lock) # The plot widget
         holder.addWidget(self._canvas_widget)
         self._canvas_id_interaction = self._canvas_widget.mpl_connect('button_press_event', self._retrieve_click_idxcol) # The plot widget's canvas ID for interaction setups
         self._isplotting = False
@@ -232,7 +309,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         Initializes the worker thread for plotting
         """
         self._thread_plotter = QThread()
-        self._worker_plotter = HeatmapPlotter_Worker(plotter=self._plotter)
+        self._worker_plotter = HeatmapPlotter_Worker(plotter=self._plotter, fig_lock=self._fig_lock)
         self._worker_plotter.moveToThread(self._thread_plotter)
         
         # Connect the signals
@@ -242,6 +319,29 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         
         # Defer thread start until after initialization is complete
         QTimer.singleShot(0, lambda: self._thread_plotter.start(QThread.Priority.NormalPriority))
+
+        # Tie the thread's life to this widget's, so no caller has to remember to
+        # shut it down. Bound by value, never through self — see
+        # _shutdown_plotter_thread.
+        thread_ref = self._thread_plotter
+        timers_ref = (self._timer_plot, self._timer_combobox)
+        self.destroyed.connect(lambda *_: _shutdown_plotter_thread(thread_ref, timers_ref))
+        app = QCoreApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(lambda: _shutdown_plotter_thread(thread_ref, timers_ref))
+
+    def shutdown(self) -> None:
+        """
+        Stops the plotting worker thread and the polling timers.
+
+        Called automatically when the widget is destroyed and when the
+        application quits; call it explicitly from a window's closeEvent to shut
+        down deterministically rather than at garbage-collection time.
+        """
+        _shutdown_plotter_thread(
+            self._thread_plotter,
+            (self._timer_plot, self._timer_combobox),
+        )
         
     def _init_plot_control_widgets(self):
         """
@@ -647,7 +747,17 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
         if wavelength is None: return
         
         self._isplotting = True
-        
+
+        try:
+            self._dispatch_plot_request(mappingUnit, wavelength)
+        except Exception as e:
+            # Anything raised while assembling the request would otherwise leave
+            # _isplotting stuck True and the widget would never plot again.
+            print('plot_heatmap (dispatch)', e)
+            self._isplotting = False
+
+    def _dispatch_plot_request(self, mappingUnit, wavelength) -> None:
+        """Assembles the plot parameters and hands them to the worker thread."""
         #PlotterOptions, PlotterParams, PlotterExtraParamsBase, XYLimits
         options = self._get_plotter_option()
         params = PlotterParams(
@@ -673,13 +783,19 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
             params_extra,
             limits_xy,
         )
+        # NOT cleared here: the worker has only been *asked* to plot. Clearing it
+        # now defeated the `if self._isplotting: return` guard above and let the
+        # 1 s timer queue an unbounded backlog of plot jobs onto the worker.
+        # on_plotter_worker_finished() clears it when the work is really done.
         
-        self._isplotting = False
-        
-    @thread_assign
     def save_plot(self):
         """
-        Save the current plot as an image, asks the user for the file path
+        Save the current plot as an image, asks the user for the file path.
+
+        Runs on the GUI thread. It used to be wrapped in @thread_assign, which
+        put QFileDialog and QMessageBox on a bare Python thread — Qt widgets may
+        only be touched from the thread that owns them, and doing otherwise
+        aborts the process (reliably so on Windows).
         """
         try:
             filename = self._combo_plot_mappingUnitName.currentText()
@@ -689,17 +805,18 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
                 filename,
                 'PNG files (*.png)')[0]
             if filepath == '': return
-            
-            self._fig.tight_layout()
-            self._canvas_widget.draw_idle()
-            self._canvas_widget.update_idletasks() # Process pending idle tasks
-            self._canvas_widget.update() # Process pending events
-            self._canvas_widget.after_idle(self._canvas_widget.print_png,filepath)
+
+            # print_figure under the same lock the worker uses, so the file is
+            # rendered from a consistent figure.
+            with self._fig_lock:
+                self._fig.tight_layout()
+                self._canvas_widget.print_figure(filepath, format='png')
 
             qw.QMessageBox.information(self, 'Save plot', 'Plot saved successfully')
-        except Exception as e: print('save_plot',e); return
-        
-    @thread_assign
+        except Exception as e:
+            print('save_plot', e)
+            qw.QMessageBox.warning(self, 'Save plot', f'Could not save the plot:\n{e}')
+
     def save_plot_data(self):
         """
         Save the current plot data as a csv file, asks the user for the file path
@@ -754,11 +871,13 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
             not self._current_mappingUnit.check_measurement_and_metadata_exist():
             return None
         
-        # TODO: This often gets called before the comboboxes are fully populated, triggering the exceptions
+        # Note: this can be called before the comboboxes are fully populated, hence
+        # the guard. It must NOT call processEvents() — doing so re-enters the event
+        # loop from inside the plot path, letting timers, close events and widget
+        # deletion run mid-plot, which is a use-after-free waiting to happen.
         try:
-            qw.QApplication.processEvents()
             current_val = float(self._combo_plot_SpectralPosition.currentText())
-        except Exception as e: return None
+        except Exception: return None
         
         if self._chk_plot_in_RamanShift.isChecked():
             ret = self._current_mappingUnit.convert(Raman_shift=current_val)
