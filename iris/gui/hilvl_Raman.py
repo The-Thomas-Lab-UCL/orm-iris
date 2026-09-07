@@ -47,6 +47,20 @@ from iris.resources.hilvl_Raman_ui import Ui_Hilvl_Raman
 
 MINIMUM_RELATIVE_SPEED_PERCENT = 1e-5  # Minimum relative speed percentage for mapping
 
+# Base stall-timeout for stage movement during mapping: how long the stage may report no position
+# change before a "go to coordinate" is considered stalled/failed. This is NOT an absolute cap on
+# the move duration (a move at a very low relative speed can legitimately take minutes) - see
+# Motion_GoToCoor_Worker._notify_finish for the actual stall-detection logic. It is extended per
+# point by that point's total integration time, since acquisition-related pauses in stage telemetry
+# updates should not be mistaken for a stall.
+GOTO_STALL_TIMEOUT_BASE_SEC = 15.0
+
+# Timeout for the velocity-set synchronisation event used during continuous mapping. Unlike
+# reaching a coordinate, setting the velocity is not distance/speed-dependent, so a flat timeout
+# is appropriate here (it's a last-resort safety net against a genuinely hung hardware call -
+# Wdg_MotionController.set_vel_relative always releases this event promptly on its own otherwise).
+CONTINUOUS_SETVEL_WAIT_TIMEOUT_SEC = 5.0
+
 class Hilvl_Raman_Design(Ui_Hilvl_Raman,qw.QWidget):
     def __init__(self,parent):
         super().__init__(parent)
@@ -224,7 +238,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     err_msg_ismeasuring = "Cannot start a new mapping measurement while another is running."
     
     _sig_stop_autosaver = Signal()
-    _sig_gotocor = Signal(tuple, threading.Event)
+    _sig_gotocor = Signal(tuple, threading.Event, float, dict)
     _sig_setvelrel = Signal(float, float, threading.Event)
     _sig_acquire_discrete_mea = Signal(AcquisitionParams, queue.Queue)
     _sig_acquire_continuous_mea = Signal(AcquisitionParams, queue.Queue, queue.Queue, queue.Queue)
@@ -284,7 +298,23 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             return f"{minutes}m {seconds}s"
         else:
             return f"{seconds}s"
-    
+
+    def _calculate_goto_stall_timeout(self, params:AcquisitionParams) -> float:
+        """
+        Calculates the stall-timeout to use for a "go to coordinate" movement during a mapping
+        scan. This is added on top of the base config value so that per-point acquisition pauses
+        (which can briefly delay the next movement command) are never mistaken for a genuine stage
+        stall - see GOTO_STALL_TIMEOUT_BASE_SEC and Motion_GoToCoor_Worker._notify_finish.
+
+        Args:
+            params (AcquisitionParams): The acquisition parameters for the measurement
+
+        Returns:
+            float: The stall-timeout [s] to use for this scan's movement commands
+        """
+        total_integration_sec = params['accumulation'] * params['int_time_ms'] / 1000.0
+        return GOTO_STALL_TIMEOUT_BASE_SEC + total_integration_sec
+
     @Slot(AcquisitionParams, list, queue.Queue)
     def run_scan_discrete(
         self,
@@ -296,7 +326,8 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         q_mea = queue.Queue()
         int_time = params['int_time_ms']
         accumulation = params['accumulation']
-        
+        goto_timeout = self._calculate_goto_stall_timeout(params)
+
         time_start = time.time()
         total_points = len(mapping_coordinates)
         self._event_isacquiring.set()
@@ -307,20 +338,26 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 if not self._event_isacquiring.is_set():
                     msg = self.msg_mea_cancelled
                     break
-                
+
                 # Go to the requested coordinates
                 event_finish = threading.Event()
+                result_goto:dict = {}
                 # print('\nMoving to coordinates:',coor)
                 # print('Emitting _sig_gotocor signal...')
                 self._sig_gotocor.emit(
                     (float(coor[0]),float(coor[1]),float(coor[2])),
-                    event_finish
+                    event_finish,
+                    goto_timeout,
+                    result_goto,
                 )
                 # print('Waiting for movement to complete...')
-                event_finish.wait(10)
+                # No externally-imposed cap here: Motion_GoToCoor_Worker guarantees the event is always
+                # eventually set (bounded by its own stall-detection using goto_timeout), so this can't hang.
+                event_finish.wait()
                 # time2 = time.time()
-                
-                if not event_finish.is_set(): raise TimeoutError('Failed to reach the target coordinate. Movement to coordinates timed out.')
+
+                if result_goto.get('msg') != Motion_GoToCoor_Worker.msg_target_reached:
+                    raise TimeoutError(f"Failed to reach the target coordinate: {result_goto.get('msg', 'unknown error')}")
                 # print('Movement wait finished. Event set:', event_finish.is_set())
                 
                 # Trigger the acquisition and wait for the return queue to be filled
@@ -390,26 +427,35 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         time_start = time.time()
         total_points = len(mapping_coordinates_ends)
         self._event_isacquiring.set()
-        
+        goto_timeout = self._calculate_goto_stall_timeout(params)
+
         # Prepare the start of the measurement
         self._syncer.set_notready()
         q_trig.put(EnumTrig.START)
         self._syncer.wait_ready()
-        
-        self._auto_adjust_mapping_speed(
-            mapping_speed_param=mapping_speed_param,
-            q_test=q_test,
-            event_finish_setvel=event_finish_setvel,
-            event_finish_goto=event_finish_goto,
-            q_trig=q_trig,
-            coor_mea=mapping_coordinates_ends[0],
-        )
-        
+
+        try:
+            self._auto_adjust_mapping_speed(
+                mapping_speed_param=mapping_speed_param,
+                q_test=q_test,
+                event_finish_setvel=event_finish_setvel,
+                event_finish_goto=event_finish_goto,
+                q_trig=q_trig,
+                coor_mea=mapping_coordinates_ends[0],
+                goto_timeout=goto_timeout,
+            )
+        except Exception as e:
+            # Don't let a failure here (e.g. a stage comms timeout) silently kill the whole scan
+            # thread before it even starts the main loop - report it and continue with the
+            # un-adjusted speed instead.
+            self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
+            print('Error in _auto_adjust_mapping_speed:',e)
+
         msg = self.msg_mea_finished
         for i, coor in enumerate(mapping_coordinates_ends):
             try:
                 if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled; break
-                self._execute_scan_continuous_step(mapping_speed_param, q_mea_out, event_finish_setvel, event_finish_goto, q_trig, i, coor)
+                self._execute_scan_continuous_step(mapping_speed_param, q_mea_out, event_finish_setvel, event_finish_goto, q_trig, i, coor, goto_timeout)
             except Exception as e:
                 self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
                 print('Error in run_scan_continuous:',e)
@@ -444,6 +490,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         q_trig:queue.Queue,
         coor_idx:int,
         coor:tuple,
+        goto_timeout:float,
         ) -> None:
         """
         Executes a single step in the continuous mapping measurement.
@@ -456,19 +503,27 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             q_trig (queue.Queue): Queue to send the measurement trigger commands
             i (int): The index of the current coordinate
             coor (tuple): The target coordinate
-        """ 
+            goto_timeout (float): Stall-timeout [s] to use for the movement - see _calculate_goto_stall_timeout
+        """
         # Go to the requested coordinates
         # time1 = time.time()
         # print(f'\nMoving to coordinates: {coor} (Index {coor_idx}), distance from last: {math.dist(self._last_coor, coor) if hasattr(self, "_last_coor") else "N/A"}')
         self._last_coor = coor
         event_finish_goto.clear()
+        result_goto:dict = {}
         self._sig_gotocor.emit(
                     (float(coor[0]),float(coor[1]),float(coor[2])),
-                    event_finish_goto
+                    event_finish_goto,
+                    goto_timeout,
+                    result_goto,
                 )
+        # No externally-imposed cap: Motion_GoToCoor_Worker guarantees the event is always
+        # eventually set, bounded by its own stall-detection using goto_timeout.
         event_finish_goto.wait()
+        if result_goto.get('msg') != Motion_GoToCoor_Worker.msg_target_reached:
+            raise TimeoutError(f"Failed to reach the target coordinate: {result_goto.get('msg', 'unknown error')}")
         # time2 = time.time()
-            
+
         event_finish_setvel.clear()
         if coor_idx%2 == 0:
             # print('Moving to next line end position (odd line)...')
@@ -483,7 +538,8 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             self._sig_setvelrel.emit(100.0, -1.0, event_finish_setvel) # Set max speed to move between each scan line
             # print('Reached line end position.')
         self._syncer.wait_ready()
-        event_finish_setvel.wait()
+        if not event_finish_setvel.wait(CONTINUOUS_SETVEL_WAIT_TIMEOUT_SEC):
+            raise TimeoutError('Failed to set the stage velocity. Setting velocity timed out.')
         # time3 = time.time()
                 
                 # Check the autosave queue size and wait if necessary to prevent overflow
@@ -507,10 +563,11 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         event_finish_goto:threading.Event,
         q_trig:queue.Queue,
         coor_mea:tuple,
+        goto_timeout:float,
         ):
         """
         Auto adjusts the mapping speed based on the given parameters by performing a test measurement between the start and end coordinates and calculating the number of measurements collected.
-        
+
         Args:
             mapping_speed_param (MappingSpeedParam): The mapping speed parameters for the measurement
             q_test (queue.Queue): The queue to store the measurement data
@@ -518,41 +575,53 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             event_finish_goto (threading.Event): Event to signal the completion of going to coordinates
             q_trig (queue.Queue): Queue to send the measurement trigger commands
             coor_mea (tuple): The start coordinate of the measurement to return to after the adjustment
+            goto_timeout (float): Stall-timeout [s] to use for the movements - see _calculate_goto_stall_timeout
         """
-        
+
         # Go to the requested coordinates
         # time1 = time.time()
         # print(f'\nMoving to coordinates: {coor} (Index {coor_idx}), distance from last: {math.dist(self._last_coor, coor) if hasattr(self, "_last_coor") else "N/A"}')
         coor_start = mapping_speed_param.auto_adjust_coor_start
         coor_end = mapping_speed_param.auto_adjust_coor_end
-        
+
         # print(f'Auto adjusting mapping speed: Coor start: {coor_start}, Coor end: {coor_end}, Distance: {math.dist(coor_start, coor_end):.3f} mm')
-        
+
         event_finish_goto.clear()
+        result_goto:dict = {}
         self._sig_gotocor.emit(
                     (float(coor_start[0]),float(coor_start[1]),float(coor_start[2])),
-                    event_finish_goto
+                    event_finish_goto,
+                    goto_timeout,
+                    result_goto,
                 )
         event_finish_goto.wait()
-        
+        if result_goto.get('msg') != Motion_GoToCoor_Worker.msg_target_reached:
+            raise TimeoutError(f"Failed to reach the auto-adjust start coordinate: {result_goto.get('msg', 'unknown error')}")
+
         # Adjust the mapping speed to the initial speed
         event_finish_setvel.clear()
         self._sig_setvelrel.emit(mapping_speed_param.mapping_speed_rel_percent, -1.0, event_finish_setvel)
-        event_finish_setvel.wait()
-        
+        if not event_finish_setvel.wait(CONTINUOUS_SETVEL_WAIT_TIMEOUT_SEC):
+            raise TimeoutError('Failed to set the stage velocity for auto-adjust. Setting velocity timed out.')
+
         # Start the measurement trigger
         self._syncer.set_notready()
         q_trig.put(EnumTrig.IGNORE) # Ignore all the measurements so far
         self._syncer.wait_ready()
-        
+
         # print('Auto adjust mapping speed: Moving to end coordinate for test measurement...')
         # Move to the end coordinate
         event_finish_goto.clear()
+        result_goto = {}
         self._sig_gotocor.emit(
                     (float(coor_end[0]),float(coor_end[1]),float(coor_end[2])),
-                    event_finish_goto
+                    event_finish_goto,
+                    goto_timeout,
+                    result_goto,
                 )
         event_finish_goto.wait()
+        if result_goto.get('msg') != Motion_GoToCoor_Worker.msg_target_reached:
+            raise TimeoutError(f"Failed to reach the auto-adjust end coordinate: {result_goto.get('msg', 'unknown error')}")
         
         # print('Auto adjust mapping speed: Collecting measurements for speed adjustment...')
         # Collect the measurements in the queue
@@ -584,8 +653,11 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         
         # Return to the measurement start coordinate
         event_finish_goto.clear()
-        self._sig_gotocor.emit((float(coor_mea[0]),float(coor_mea[1]),float(coor_mea[2])),event_finish_goto)
+        result_goto = {}
+        self._sig_gotocor.emit((float(coor_mea[0]),float(coor_mea[1]),float(coor_mea[2])),event_finish_goto,goto_timeout,result_goto)
         event_finish_goto.wait()
+        if result_goto.get('msg') != Motion_GoToCoor_Worker.msg_target_reached:
+            raise TimeoutError(f"Failed to return to the measurement start coordinate after auto-adjust: {result_goto.get('msg', 'unknown error')}")
         
         
     @Slot(str)

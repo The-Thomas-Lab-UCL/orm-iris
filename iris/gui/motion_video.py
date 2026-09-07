@@ -294,18 +294,29 @@ class Motion_GoToCoor_Worker(QObject):
         else: return np.array(result)
         
     def _notify_finish(self, thread_xy:threading.Thread, thread_z:threading.Thread,
-                       event_finished:threading.Event):
+                       event_finished:threading.Event, timeout:float=WAIT_MOVEMENT_TIMEOUT,
+                       result_holder:dict|None=None):
         """
         Waits for the target to be reached and for the stage to be stationary for a minimum
-        settle time before signalling completion. Raises a TimeoutError if the total timeout
-        (reset while stage is still moving) is exceeded.
+        settle time before signalling completion.
+
+        `timeout` is a STALL timeout, not an absolute cap on the total move duration: it is reset
+        every time the stage's reported position actually changes, so a move that keeps making
+        progress (e.g. at a very low relative speed, which can legitimately take minutes) will
+        never be aborted purely for taking a long time. It only fires when the stage has reported
+        no meaningful position change for `timeout` seconds in a row, which indicates a genuine
+        stall (e.g. a stage comms error, a stalled motor, or a hardware fault).
 
         Args:
             thread_xy (threading.Thread): The thread moving the XY stage
             thread_z (threading.Thread): The thread moving the Z stage
             event_finished (threading.Event): Event to signal when movement and settling are done
+            timeout (float): Maximum time [s] the stage is allowed to report no position change
+                before the movement is considered stalled. Defaults to WAIT_MOVEMENT_TIMEOUT.
+            result_holder (dict|None): Optional dict that gets populated with {'msg': <result>} using
+                the same messages as sig_mvmt_finished, so a synchronous caller can distinguish a
+                genuine timeout/failure from success without a separate signal round-trip.
         """
-        timeout = WAIT_MOVEMENT_TIMEOUT
         settle_sec = ControllerConfigEnum.STAGE_TILING_SETTLE_SEC.value
 
         timeout_start = time.time()
@@ -323,6 +334,7 @@ class Motion_GoToCoor_Worker(QObject):
                     last_change_time = time.time()  # Reset settle timer once threads finish
 
             if time.time() - timeout_start > timeout:
+                if result_holder is not None: result_holder['msg'] = self.msg_target_timeout
                 if event_finished is not None: event_finished.set()
                 self.sig_mvmt_finished.emit(self.msg_target_timeout)
                 break
@@ -335,52 +347,67 @@ class Motion_GoToCoor_Worker(QObject):
                 coor = coor_new
             if not np.allclose(coor, coor_new, atol=0.001):
                 last_change_time = time.time()
-                timeout_start = time.time()  # Reset overall timeout while stage is still moving
+                timeout_start = time.time()  # Reset the stall timeout while the stage is still moving
             coor = coor_new
 
             if threads_done and (time.time() - last_change_time) >= settle_sec:
+                if result_holder is not None: result_holder['msg'] = self.msg_target_reached
                 if event_finished is not None: event_finished.set()
                 self.sig_mvmt_finished.emit(self.msg_target_reached)
                 break
 
             time.sleep(0.01)
-        
+
     @Slot(tuple, threading.Event)
+    @Slot(tuple, threading.Event, float)
+    @Slot(tuple, threading.Event, float, dict)
     def work(
         self,
         coors_mm:tuple[float,float,float],
-        event_finished:threading.Event):
+        event_finished:threading.Event,
+        timeout:float=WAIT_MOVEMENT_TIMEOUT,
+        result_holder:dict|None=None):
         """
         Moves the stage to specific coordinates, except if None is provided
 
         Args:
             coors_mm (tuple[float,float,float]): Target coordinates in mm (x,y,z). Use None to skip moving that axis.
             event_finished (threading.Event): An event to signal when the movement is finished.
+            timeout (float): Stall timeout [s] passed through to `_notify_finish` - see its docstring.
+                Defaults to WAIT_MOVEMENT_TIMEOUT.
+            result_holder (dict|None): Optional dict populated with {'msg': <result>}; see `_notify_finish`.
         """
         # print('Motion_GoToCoor_Worker.work() called with coordinates (mm):',coors_mm)
         # print('Thread ID:', threading.current_thread().ident)
-        # If None is provided, assign the current coordinates (i.e., do not move)
-        coor_x_mm, coor_y_mm, coor_z_mm = coors_mm
-        if any([coor_x_mm is None,coor_y_mm is None,coor_z_mm is None]):
-            res = self._get_coor()
-            if res is None:
-                self.sig_mvmt_finished.emit(self.msg_target_failed)
-                return
-            coor_x_current,coor_y_current,coor_z_current = res
-            if coor_x_mm is None: coor_x_mm = coor_x_current
-            if coor_y_mm is None: coor_y_mm = coor_y_current
-            if coor_z_mm is None: coor_z_mm = coor_z_current
-        
-        self.sig_mvmt_started.emit('Moving to X: {:.3f} Y: {:.3f} Z: {:.3f} mm'.format(coor_x_mm,coor_y_mm,coor_z_mm))
-        
-        # Operate both stages at once
-        thread_xy_move = threading.Thread(target=self.ctrl_xy.move_direct,args=((coor_x_mm,coor_y_mm),))
-        thread_z_move = threading.Thread(target=self.ctrl_z.move_direct,args=(coor_z_mm,))
-        
-        thread_xy_move.start()
-        thread_z_move.start()
+        try:
+            # If None is provided, assign the current coordinates (i.e., do not move)
+            coor_x_mm, coor_y_mm, coor_z_mm = coors_mm
+            if any([coor_x_mm is None,coor_y_mm is None,coor_z_mm is None]):
+                res = self._get_coor()
+                if res is None:
+                    raise RuntimeError('Failed to retrieve the current stage coordinates.')
+                coor_x_current,coor_y_current,coor_z_current = res
+                if coor_x_mm is None: coor_x_mm = coor_x_current
+                if coor_y_mm is None: coor_y_mm = coor_y_current
+                if coor_z_mm is None: coor_z_mm = coor_z_current
 
-        self._notify_finish(thread_xy_move,thread_z_move,event_finished)
+            self.sig_mvmt_started.emit('Moving to X: {:.3f} Y: {:.3f} Z: {:.3f} mm'.format(coor_x_mm,coor_y_mm,coor_z_mm))
+
+            # Operate both stages at once
+            thread_xy_move = threading.Thread(target=self.ctrl_xy.move_direct,args=((coor_x_mm,coor_y_mm),))
+            thread_z_move = threading.Thread(target=self.ctrl_z.move_direct,args=(coor_z_mm,))
+
+            thread_xy_move.start()
+            thread_z_move.start()
+
+            self._notify_finish(thread_xy_move,thread_z_move,event_finished,timeout=timeout,result_holder=result_holder)
+        except Exception as e:
+            # Ensure the waiting caller is never left blocked forever if setting up/monitoring
+            # the movement fails unexpectedly (e.g. a stage communication error).
+            print(f'Error in Motion_GoToCoor_Worker.work(): {e}')
+            if result_holder is not None: result_holder['msg'] = self.msg_target_failed
+            if event_finished is not None: event_finished.set()
+            self.sig_mvmt_finished.emit(self.msg_target_failed)
 
 # class _worker_set_vel_relative(QObject):
 #     """
@@ -1550,20 +1577,23 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
             vel_xy (float, optional): Velocity (percentage) for the xy-stage. Must be between 0[%] and 100[%]. If -1, uses the current velocity. Defaults to None.
             vel_z (float, optional): Velocity (percentage) for the z-stage. Must be between 0[%] and 100[%]. If -1, uses the current velocity. Defaults to None.
         """
-        if vel_xy <= 0.0 or vel_xy > 100.0: vel_xy = self.ctrl_xy.get_vel_acc_relative()[1]
-        if vel_z <= 0.0 or vel_z > 100.0: vel_z = self.ctrl_z.get_vel_acc_relative()[1]
-        
-        assert isinstance(vel_xy,(float,int)) and isinstance(vel_z,(float,int)), 'Invalid input type for the velocity parameters'
-        
-        self.ctrl_xy.set_vel_acc_relative(vel_homing=vel_xy,vel_move=vel_xy)
-        self.ctrl_z.set_vel_acc_relative(vel_homing=vel_z,vel_move=vel_z)
-        
-        speed_xy = self.ctrl_xy.get_vel_acc_relative()[1]
-        speed_z = self.ctrl_z.get_vel_acc_relative()[1]
-        
-        if isinstance(event_finish,threading.Event): event_finish.set()
-        
-        self._update_set_vel_labels()
+        try:
+            if vel_xy <= 0.0 or vel_xy > 100.0: vel_xy = self.ctrl_xy.get_vel_acc_relative()[1]
+            if vel_z <= 0.0 or vel_z > 100.0: vel_z = self.ctrl_z.get_vel_acc_relative()[1]
+
+            assert isinstance(vel_xy,(float,int)) and isinstance(vel_z,(float,int)), 'Invalid input type for the velocity parameters'
+
+            self.ctrl_xy.set_vel_acc_relative(vel_homing=vel_xy,vel_move=vel_xy)
+            self.ctrl_z.set_vel_acc_relative(vel_homing=vel_z,vel_move=vel_z)
+
+            speed_xy = self.ctrl_xy.get_vel_acc_relative()[1]
+            speed_z = self.ctrl_z.get_vel_acc_relative()[1]
+
+            self._update_set_vel_labels()
+        finally:
+            # Always release the waiting caller, even if a hardware/comms error occurred above,
+            # so a scan waiting on this event can never block forever.
+            if isinstance(event_finish,threading.Event): event_finish.set()
         
     def _set_vel_acc_params(self):
         """

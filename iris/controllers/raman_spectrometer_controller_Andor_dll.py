@@ -1445,7 +1445,7 @@ if __name__ == "__main__":
     
     try:
         matplotlib.use('TkAgg')
-        controller.capture_full_image_for_track_setup(integration_time_ms=100.0)
+        controller.capture_full_image_for_track_setup(integration_time_ms=1000.0)
     except Exception as e: print(f"Track setup image failed: {e}")
      
     int_time_us = int(100e3)   # 100 ms
