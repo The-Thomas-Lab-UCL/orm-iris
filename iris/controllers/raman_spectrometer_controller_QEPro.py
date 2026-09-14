@@ -61,7 +61,7 @@ class SpectrometerController_QEPro(Class_SpectrometerController):
         
         # >>> Current implementation is for the 'continuous' mode only. The 'discreet' mode seems to be causing some weird communication slowdowns.
         print(f"\n>>>>> QEPro: Current mode: {self._mode}")
-        print(f"Warning: The 'discreet' mode is NOT FULLY IMPLEMENTED yet and might cause some random SLOWDOWNS. If you experience any issues, please switch to the 'continuous' mode.\n")
+        if self._mode == 'discreet': print(f"QEPro Warning: The 'discreet' mode is NOT FULLY IMPLEMENTED yet and might cause some random SLOWDOWNS. If you experience any issues, please switch to the 'continuous' mode in the config.ini file.\n")
         print("<<<<<\n")
         
         

@@ -238,7 +238,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     err_msg_ismeasuring = "Cannot start a new mapping measurement while another is running."
     
     _sig_stop_autosaver = Signal()
-    _sig_gotocor = Signal(tuple, threading.Event, float, dict)
+    _sig_gotocor = Signal(tuple, threading.Event, float, queue.Queue)
     _sig_setvelrel = Signal(float, float, threading.Event)
     _sig_acquire_discrete_mea = Signal(AcquisitionParams, queue.Queue)
     _sig_acquire_continuous_mea = Signal(AcquisitionParams, queue.Queue, queue.Queue, queue.Queue)
@@ -315,6 +315,21 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         total_integration_sec = params['accumulation'] * params['int_time_ms'] / 1000.0
         return GOTO_STALL_TIMEOUT_BASE_SEC + total_integration_sec
 
+    @staticmethod
+    def _get_goto_result(result_goto:queue.Queue) -> str|None:
+        """
+        Retrieves the result message put there by Motion_GoToCoor_Worker (see its `work()`/
+        `_notify_finish()` docstrings), after the corresponding event has already been waited on.
+
+        Args:
+            result_goto (queue.Queue): The queue passed alongside the _sig_gotocor emission
+
+        Returns:
+            str|None: The result message, or None if nothing was put (should not normally happen)
+        """
+        try: return result_goto.get_nowait()
+        except queue.Empty: return None
+
     @Slot(AcquisitionParams, list, queue.Queue)
     def run_scan_discrete(
         self,
@@ -341,7 +356,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
 
                 # Go to the requested coordinates
                 event_finish = threading.Event()
-                result_goto:dict = {}
+                result_goto:queue.Queue = queue.Queue()
                 # print('\nMoving to coordinates:',coor)
                 # print('Emitting _sig_gotocor signal...')
                 self._sig_gotocor.emit(
@@ -356,8 +371,9 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 event_finish.wait()
                 # time2 = time.time()
 
-                if result_goto.get('msg') != Motion_GoToCoor_Worker.msg_target_reached:
-                    raise TimeoutError(f"Failed to reach the target coordinate: {result_goto.get('msg', 'unknown error')}")
+                goto_result_msg = self._get_goto_result(result_goto)
+                if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
+                    raise TimeoutError(f"Failed to reach the target coordinate: {goto_result_msg or 'unknown error'}")
                 # print('Movement wait finished. Event set:', event_finish.is_set())
                 
                 # Trigger the acquisition and wait for the return queue to be filled
@@ -510,7 +526,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         # print(f'\nMoving to coordinates: {coor} (Index {coor_idx}), distance from last: {math.dist(self._last_coor, coor) if hasattr(self, "_last_coor") else "N/A"}')
         self._last_coor = coor
         event_finish_goto.clear()
-        result_goto:dict = {}
+        result_goto:queue.Queue = queue.Queue()
         self._sig_gotocor.emit(
                     (float(coor[0]),float(coor[1]),float(coor[2])),
                     event_finish_goto,
@@ -520,8 +536,9 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         # No externally-imposed cap: Motion_GoToCoor_Worker guarantees the event is always
         # eventually set, bounded by its own stall-detection using goto_timeout.
         event_finish_goto.wait()
-        if result_goto.get('msg') != Motion_GoToCoor_Worker.msg_target_reached:
-            raise TimeoutError(f"Failed to reach the target coordinate: {result_goto.get('msg', 'unknown error')}")
+        goto_result_msg = self._get_goto_result(result_goto)
+        if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
+            raise TimeoutError(f"Failed to reach the target coordinate: {goto_result_msg or 'unknown error'}")
         # time2 = time.time()
 
         event_finish_setvel.clear()
@@ -587,7 +604,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         # print(f'Auto adjusting mapping speed: Coor start: {coor_start}, Coor end: {coor_end}, Distance: {math.dist(coor_start, coor_end):.3f} mm')
 
         event_finish_goto.clear()
-        result_goto:dict = {}
+        result_goto:queue.Queue = queue.Queue()
         self._sig_gotocor.emit(
                     (float(coor_start[0]),float(coor_start[1]),float(coor_start[2])),
                     event_finish_goto,
@@ -595,8 +612,9 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                     result_goto,
                 )
         event_finish_goto.wait()
-        if result_goto.get('msg') != Motion_GoToCoor_Worker.msg_target_reached:
-            raise TimeoutError(f"Failed to reach the auto-adjust start coordinate: {result_goto.get('msg', 'unknown error')}")
+        goto_result_msg = self._get_goto_result(result_goto)
+        if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
+            raise TimeoutError(f"Failed to reach the auto-adjust start coordinate: {goto_result_msg or 'unknown error'}")
 
         # Adjust the mapping speed to the initial speed
         event_finish_setvel.clear()
@@ -612,7 +630,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         # print('Auto adjust mapping speed: Moving to end coordinate for test measurement...')
         # Move to the end coordinate
         event_finish_goto.clear()
-        result_goto = {}
+        result_goto = queue.Queue()
         self._sig_gotocor.emit(
                     (float(coor_end[0]),float(coor_end[1]),float(coor_end[2])),
                     event_finish_goto,
@@ -620,8 +638,9 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                     result_goto,
                 )
         event_finish_goto.wait()
-        if result_goto.get('msg') != Motion_GoToCoor_Worker.msg_target_reached:
-            raise TimeoutError(f"Failed to reach the auto-adjust end coordinate: {result_goto.get('msg', 'unknown error')}")
+        goto_result_msg = self._get_goto_result(result_goto)
+        if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
+            raise TimeoutError(f"Failed to reach the auto-adjust end coordinate: {goto_result_msg or 'unknown error'}")
         
         # print('Auto adjust mapping speed: Collecting measurements for speed adjustment...')
         # Collect the measurements in the queue
@@ -653,11 +672,12 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         
         # Return to the measurement start coordinate
         event_finish_goto.clear()
-        result_goto = {}
+        result_goto = queue.Queue()
         self._sig_gotocor.emit((float(coor_mea[0]),float(coor_mea[1]),float(coor_mea[2])),event_finish_goto,goto_timeout,result_goto)
         event_finish_goto.wait()
-        if result_goto.get('msg') != Motion_GoToCoor_Worker.msg_target_reached:
-            raise TimeoutError(f"Failed to return to the measurement start coordinate after auto-adjust: {result_goto.get('msg', 'unknown error')}")
+        goto_result_msg = self._get_goto_result(result_goto)
+        if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
+            raise TimeoutError(f"Failed to return to the measurement start coordinate after auto-adjust: {goto_result_msg or 'unknown error'}")
         
         
     @Slot(str)

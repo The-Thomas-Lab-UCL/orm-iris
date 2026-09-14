@@ -295,7 +295,7 @@ class Motion_GoToCoor_Worker(QObject):
         
     def _notify_finish(self, thread_xy:threading.Thread, thread_z:threading.Thread,
                        event_finished:threading.Event, timeout:float=WAIT_MOVEMENT_TIMEOUT,
-                       result_holder:dict|None=None):
+                       result_holder:'queue.Queue|None'=None):
         """
         Waits for the target to be reached and for the stage to be stationary for a minimum
         settle time before signalling completion.
@@ -313,9 +313,14 @@ class Motion_GoToCoor_Worker(QObject):
             event_finished (threading.Event): Event to signal when movement and settling are done
             timeout (float): Maximum time [s] the stage is allowed to report no position change
                 before the movement is considered stalled. Defaults to WAIT_MOVEMENT_TIMEOUT.
-            result_holder (dict|None): Optional dict that gets populated with {'msg': <result>} using
-                the same messages as sig_mvmt_finished, so a synchronous caller can distinguish a
-                genuine timeout/failure from success without a separate signal round-trip.
+            result_holder (queue.Queue|None): Optional queue that receives the result message (one of
+                msg_target_reached/msg_target_timeout/msg_target_failed) so a synchronous caller can
+                distinguish success from a genuine timeout/failure without a separate signal round-trip.
+                NOTE: must be a queue.Queue (not e.g. a plain dict/list) - across a QueuedConnection,
+                PySide marshals a plain dict/list through QVariantMap/QVariantList, which hands the slot
+                a converted COPY rather than the original object, silently discarding any mutation made
+                on the receiving thread. queue.Queue (like threading.Event) is passed through as an
+                opaque PyObject reference, so writes are visible to the emitting thread.
         """
         settle_sec = ControllerConfigEnum.STAGE_TILING_SETTLE_SEC.value
 
@@ -334,7 +339,7 @@ class Motion_GoToCoor_Worker(QObject):
                     last_change_time = time.time()  # Reset settle timer once threads finish
 
             if time.time() - timeout_start > timeout:
-                if result_holder is not None: result_holder['msg'] = self.msg_target_timeout
+                if result_holder is not None: result_holder.put(self.msg_target_timeout)
                 if event_finished is not None: event_finished.set()
                 self.sig_mvmt_finished.emit(self.msg_target_timeout)
                 break
@@ -351,7 +356,7 @@ class Motion_GoToCoor_Worker(QObject):
             coor = coor_new
 
             if threads_done and (time.time() - last_change_time) >= settle_sec:
-                if result_holder is not None: result_holder['msg'] = self.msg_target_reached
+                if result_holder is not None: result_holder.put(self.msg_target_reached)
                 if event_finished is not None: event_finished.set()
                 self.sig_mvmt_finished.emit(self.msg_target_reached)
                 break
@@ -360,13 +365,13 @@ class Motion_GoToCoor_Worker(QObject):
 
     @Slot(tuple, threading.Event)
     @Slot(tuple, threading.Event, float)
-    @Slot(tuple, threading.Event, float, dict)
+    @Slot(tuple, threading.Event, float, queue.Queue)
     def work(
         self,
         coors_mm:tuple[float,float,float],
         event_finished:threading.Event,
         timeout:float=WAIT_MOVEMENT_TIMEOUT,
-        result_holder:dict|None=None):
+        result_holder:'queue.Queue|None'=None):
         """
         Moves the stage to specific coordinates, except if None is provided
 
@@ -375,7 +380,7 @@ class Motion_GoToCoor_Worker(QObject):
             event_finished (threading.Event): An event to signal when the movement is finished.
             timeout (float): Stall timeout [s] passed through to `_notify_finish` - see its docstring.
                 Defaults to WAIT_MOVEMENT_TIMEOUT.
-            result_holder (dict|None): Optional dict populated with {'msg': <result>}; see `_notify_finish`.
+            result_holder (queue.Queue|None): Optional queue that receives the result message; see `_notify_finish`.
         """
         # print('Motion_GoToCoor_Worker.work() called with coordinates (mm):',coors_mm)
         # print('Thread ID:', threading.current_thread().ident)
@@ -405,7 +410,7 @@ class Motion_GoToCoor_Worker(QObject):
             # Ensure the waiting caller is never left blocked forever if setting up/monitoring
             # the movement fails unexpectedly (e.g. a stage communication error).
             print(f'Error in Motion_GoToCoor_Worker.work(): {e}')
-            if result_holder is not None: result_holder['msg'] = self.msg_target_failed
+            if result_holder is not None: result_holder.put(self.msg_target_failed)
             if event_finished is not None: event_finished.set()
             self.sig_mvmt_finished.emit(self.msg_target_failed)
 
