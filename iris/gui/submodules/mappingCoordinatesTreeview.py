@@ -233,16 +233,21 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
             filter='CSV files (*.csv);;Pickle files (*.pkl)'
         )
         
-        if len(list_loadpath) == 0: return None
-        
+        if len(list_loadpath) == 0:
+            self._btn_load.setEnabled(True)
+            return None
+
         if not isinstance(list_loadpath, (list,tuple)):
             qw.QMessageBox.warning(self, 'Error',f"Expected list, got {type(list_loadpath)}")
+            self._btn_load.setEnabled(True)
             return
         if not all(isinstance(path, str) for path in list_loadpath):
             qw.QMessageBox.warning(self, 'Error',f"Expected list of str, got {type(list_loadpath)}")
+            self._btn_load.setEnabled(True)
             return
         if not all(os.path.exists(path) for path in list_loadpath):
             qw.QMessageBox.warning(self, 'Error',f"Some files do not exist")
+            self._btn_load.setEnabled(True)
             return
         
         self.sig_load_mappingCoor.emit(list_loadpath)
