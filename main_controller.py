@@ -178,6 +178,8 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
         self._main_analyser = main_analyser(
             processor=self._processor,
             dataHub=self._dataHub_map,
+            dataHub_img=self._dataHub_img,
+            dataHub_imgcal=self._dataHub_imgcal,
         )
         
         # Set up the menu bar

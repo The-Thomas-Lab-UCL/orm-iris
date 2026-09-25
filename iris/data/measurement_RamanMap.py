@@ -2310,6 +2310,7 @@ class MeaRMap_Plotter:
             if isinstance(self._cbar,Colorbar):
                 self._cbar.remove()
         except Exception as e: print(f'Error in plot_heatmap_empty while removing cbar: {e}')
+        self._cbar = None
         self._ax.clear()
         
         self._ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)

@@ -342,6 +342,7 @@ class Wdg_DataHub_Image(qw.QWidget):
     sig_load = Signal(MeaImg_Hub, str)
     sig_save_png = Signal(MeaImg_Unit, str, float, bool)
     sig_updateTree = Signal()
+    sig_tree_selection_str = Signal(str)    # Emitted when the treeview selection is changed, with the selected unit name as argument
     
     # Treeview column indices
     _COL_INDEX = 0      # Order in which the unit was added to the hub (1-based)
@@ -389,6 +390,7 @@ class Wdg_DataHub_Image(qw.QWidget):
         # Click a header to sort by that column; click '#' to return to the acquisition order
         self._tree.setSortingEnabled(True)
         self._tree.sortByColumn(self._COL_INDEX, Qt.SortOrder.AscendingOrder)
+        self._tree.itemSelectionChanged.connect(self._emit_signal_selection)
         
     # >>> Other control widgets <<<
         # Widgets to manipulate the entries
@@ -708,11 +710,38 @@ class Wdg_DataHub_Image(qw.QWidget):
         self.sig_updateTree.emit()
         
     @Slot()
+    def _emit_signal_selection(self):
+        """
+        Emit the selection changed signal with the selected unit name
+        """
+        selections = self._tree.selectedItems()
+        if len(selections) == 0: return
+        self.sig_tree_selection_str.emit(selections[0].text(self._COL_NAME))
+        
+    @Slot(str)
+    def set_selection_unitName(self, unit_name:str):
+        """
+        Sets the selection in the treeview to the given unit name, without emitting the selection signal.
+
+        Args:
+            unit_name (str): The unit name to select.
+        """
+        self._tree.blockSignals(True)
+        self._tree.clearSelection()
+        root = self._tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            item = root.child(i)
+            if item.text(self._COL_NAME) == unit_name: item.setSelected(True)
+        self._tree.blockSignals(False)
+        
+    @Slot()
     def update_tree(self):
         """
         Update the treeview widget with the data from the ImageMeasurement_Hub.
         """
         tree = self._tree
+        list_selected_names = [item.text(self._COL_NAME) for item in tree.selectedItems()]
+        tree.blockSignals(True)
         tree.clear()
         
         list_id, list_name, list_num_measurements, list_metadata = self.ImageHub.get_summary_units()
@@ -730,7 +759,9 @@ class Wdg_DataHub_Image(qw.QWidget):
             item.setData(self._COL_INDEX, Qt.ItemDataRole.UserRole, i + 1)
             item.setData(self._COL_NUMMEA, Qt.ItemDataRole.UserRole, num)
             tree.addTopLevelItem(item)
+            if name in list_selected_names: item.setSelected(True)
         tree.setSortingEnabled(True)
+        tree.blockSignals(False)
             
     def check_safeToTerminate(self) -> bool:
         """
