@@ -166,7 +166,8 @@ class MainWindow_Controller(Ui_main_controller,qw.QMainWindow):
             frm_datahub_mapping=self._dataHub_map,
             frm_datahub_image=self._dataHub_img,
             frm_datahub_imgcal=self._dataHub_imgcal,
-            coorhub=self._coorHub
+            coorhub=self._coorHub,
+            processor=self._processor,
             )
         
     # >> Set up the calibration generator <<

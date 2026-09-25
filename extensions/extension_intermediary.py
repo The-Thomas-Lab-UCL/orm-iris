@@ -9,7 +9,9 @@ if __name__ == '__main__':
     EXT_DIR = os.path.abspath(r'.\extensions')
     sys.path.append(os.path.dirname(SCRIPT_DIR))
     sys.path.append(os.path.dirname(EXT_DIR))
-    
+
+import multiprocessing.pool as mpp
+
 # Basic controllers
 from iris.controllers.class_camera_controller import Class_CameraController
 from iris.controllers.class_xy_stage_controller import Class_XYController
@@ -49,6 +51,8 @@ class Ext_DataIntermediary():
         frm_datahub_image: Wdg_DataHub_Image,
         frm_datahub_imgcal: Wdg_DataHub_ImgCal,
         coorhub: List_MeaCoor_Hub,
+        # Shared resources
+        processor: mpp.Pool|None = None,
         ) -> None:
         """
         Initialise the intermediary class with the required controllers and GUI components.
@@ -70,7 +74,10 @@ class Ext_DataIntermediary():
         self.frm_datahub_image = frm_datahub_image
         self.frm_datahub_imgcal = frm_datahub_imgcal
         self.coorhub = coorhub
-        
+
+        # Shared resources
+        self.processor = processor
+
     def get_spectrometer_controller(self) -> Class_SpectrometerController:
         """
         Get the Raman controller. Note that it is not recommended to control the
@@ -150,3 +157,19 @@ class Ext_DataIntermediary():
         Get the coordinate hub.
         """
         return self.coorhub
+
+    def get_processor(self) -> mpp.Pool|None:
+        """
+        Get the app-wide multiprocessing pool.
+
+        Extensions should offload heavy CPU-bound work (image processing,
+        fitting, ...) here rather than running it in a QThread. A QThread still
+        shares the GIL and a core with the GUI, so a long numpy/skimage run
+        leaves the event loop stuttering; a pool worker has its own.
+
+        Returns:
+            mpp.Pool|None: The shared pool, or None if the app was started
+                without one (the caller should then fall back to running the
+                work in-process).
+        """
+        return self.processor

@@ -7,8 +7,10 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(SCRIPT_DIR))
     sys.path.insert(0, os.path.dirname(EXT_DIR))
 
+import threading
+import multiprocessing.pool as mpp
+
 import numpy as np
-from matplotlib.path import Path as MplPath
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 
@@ -20,64 +22,43 @@ from typing import Callable, Iterable
 from extensions.extension_template import Extension_MainWindow
 from extensions.extension_intermediary import Ext_DataIntermediary as Intermediary
 
-from iris.data.measurement_image import MeaImg_Unit
 from iris.data.measurement_coordinates import MeaCoor_mm
 from iris.data.measurement_coordinates import List_MeaCoor_Hub
 
 from extensions.bf_sersSubstrate_coorGen.bf_sersSubstrate_coorGen_ui import Ui_bf_sresSubstrate_coorGen
 
-from extensions.bf_sersSubstrate_coorGen.masking.fitting import (
-    Param_Smoothen_Boundary, fit_ellipse_ransac, smoothen_boundary,
-)
+from extensions.bf_sersSubstrate_coorGen.masking.fitting import Param_Smoothen_Boundary
 from extensions.bf_sersSubstrate_coorGen.masking.basic_image_processing import (
     Params_Centre_Estimation, Params_Edge_Detection,
-    estimate_centre_blurring, detect_edge_Sobel,
 )
-from extensions.bf_sersSubstrate_coorGen.masking.image_preprocessing import convert_img2gray_hsv_projection
-from extensions.bf_sersSubstrate_coorGen.utils import generate_mask  # noqa: F401  (available for future overlay use)
+from extensions.bf_sersSubstrate_coorGen.masking.pipeline import PipelineOutput, PipelineParams, run_pipeline
 
 
 # ── Data classes ──────────────────────────────────────────────────────────────
 
 class ProcessResult:
-    def __init__(self, img_unit: MeaImg_Unit, coor: MeaCoor_mm,
-                 arr: np.ndarray, S: np.ndarray,
-                 S_blurred_centre: np.ndarray, S_sobel_viz: np.ndarray,
-                 cx_est: float, cy_est: float,
-                 ellipse_sobel, ellipse_fit, ellipse_smooth, ellipse_clean,
-                 boundary_px_x: np.ndarray, boundary_px_y: np.ndarray,
-                 boundary_stage_mm: np.ndarray, boundary_stage_mm_expanded: np.ndarray,
-                 scan_pts_stage: np.ndarray, scan_pts_mea: np.ndarray,
-                 expansion_mm: float, step_size_x_mm: float, step_size_y_mm: float,
-                 hsv_channels: str = 'S'):
-        self._img_unit = img_unit
-        self._coor = coor
-        self._arr = arr
-        self._S = S
-        self._S_blurred_centre = S_blurred_centre
-        self._S_sobel_viz = S_sobel_viz
-        self._hsv_channels = hsv_channels
-        self._cx_est = cx_est
-        self._cy_est = cy_est
-        self._ellipse_sobel = ellipse_sobel
-        self._ellipse_fit = ellipse_fit
-        self._ellipse_smooth = ellipse_smooth
-        self._ellipse_clean = ellipse_clean
-        self._bx = boundary_px_x
-        self._by = boundary_px_y
-        self._boundary_stage = boundary_stage_mm
-        self._boundary_expanded = boundary_stage_mm_expanded
-        self._scan_pts_stage = scan_pts_stage
-        self._scan_pts_mea = scan_pts_mea
-        self._expansion_mm = expansion_mm
-        self._step_size_x_mm = step_size_x_mm
-        self._step_size_y_mm = step_size_y_mm
+    """
+    A finished pipeline run, ready to plot and to save to the coordinate hub.
+
+    Holds only the plain data returned by the pool worker — notably *not* the
+    MeaImg_Unit, so keeping several results around no longer pins a full set of
+    raw tile images in memory per result.
+    """
+    def __init__(self, out: PipelineOutput):
+        self._out = out
+        self._coor = MeaCoor_mm(
+            mappingUnit_name=out.unit_name,
+            mapping_coordinates=out.scan_coordinates,
+        )
 
     def get_name(self) -> str:
-        return self._img_unit.get_IdName()[1]
+        return self._out.unit_name
 
     def get_coor(self) -> MeaCoor_mm:
         return self._coor
+
+    def get_output(self) -> PipelineOutput:
+        return self._out
 
 
 class List_ProcessResult(list):
@@ -123,168 +104,66 @@ class List_ProcessResult(list):
 
 # ── Worker: run the full pipeline for a list of MeaImg_Units ─────────────────
 
-class _PipelineParams:
-    """Plain-data carrier so the worker doesn't touch Qt widgets."""
-    def __init__(self,
-                 params_centre: Params_Centre_Estimation,
-                 params_edge: Params_Edge_Detection,
-                 params_smooth: Param_Smoothen_Boundary,
-                 ransac_threshold: float,
-                 ransac_trials: int,
-                 step_size_x_mm: float,
-                 step_size_y_mm: float,
-                 expansion_mm: float,
-                 hsv_channels: str = 'S'):
-        self.params_centre = params_centre
-        self.params_edge = params_edge
-        self.params_smooth = params_smooth
-        self.ransac_threshold = ransac_threshold
-        self.ransac_trials = ransac_trials
-        self.step_size_x_mm = step_size_x_mm
-        self.step_size_y_mm = step_size_y_mm
-        self.expansion_mm = expansion_mm
-        self.hsv_channels = hsv_channels
-
-
 class _ProcessWorker(QObject):
-    sig_result = Signal(object)   # emits ProcessResult
-    sig_error  = Signal(str, str) # (unit_name, error_message)
-    sig_done   = Signal()
+    """
+    Feeds units to the app-wide process pool, one at a time.
+
+    This object lives on a QThread, but the QThread is only a waiting room: the
+    actual work runs in a pool worker process and `AsyncResult.get()` blocks on
+    a pipe read, which releases the GIL. Running the pipeline in the QThread
+    itself would instead share the GIL and a core with the GUI, which on a
+    full-size stitched image leaves the event loop visibly stuttering.
+    """
+    sig_result   = Signal(object)        # emits ProcessResult
+    sig_error    = Signal(str, str)      # (unit_name, error_message)
+    sig_progress = Signal(str, int, int) # (unit_name, index, total)
+    sig_done     = Signal(bool)          # was_cancelled
+
+    def __init__(self, pool: mpp.Pool | None):
+        super().__init__()
+        self._pool = pool
+        self._cancel = threading.Event()
+
+    def request_cancel(self):
+        """
+        Ask to stop after the unit currently in flight.
+
+        A pool task cannot be interrupted once it has started, so this is a
+        'stop after the current unit' cancel rather than an immediate abort.
+        """
+        self._cancel.set()
 
     @Slot(list, object)
-    def submit(self, units: list, params: _PipelineParams):
-        for unit in units:
+    def submit(self, units: list, params: PipelineParams):
+        self._cancel.clear()
+        total = len(units)
+        for i, unit in enumerate(units):
+            if self._cancel.is_set():
+                break
             name = unit.get_IdName()[1]
+            self.sig_progress.emit(name, i, total)
             try:
-                result = self._process_unit(unit, params)
-                self.sig_result.emit(result)
+                if self._pool is not None:
+                    out = self._pool.apply_async(run_pipeline, (unit, params)).get()
+                else:
+                    # No shared pool (e.g. the extension run standalone). Still
+                    # correct, but the GUI will stutter while this runs.
+                    out = run_pipeline(unit, params)
+                self.sig_result.emit(ProcessResult(out))
             except Exception as e:
                 self.sig_error.emit(name, str(e))
-        self.sig_done.emit()
-
-    def _process_unit(self, unit: MeaImg_Unit, p: _PipelineParams) -> ProcessResult:
-        from skimage import filters as skfilters
-
-        # Load stitched image
-        img_stitched, coor_min_mm, _ = unit.get_image_all_stitched(low_res=False)
-        arr = np.array(img_stitched.convert('RGB'))
-
-        # Pipeline
-        S = convert_img2gray_hsv_projection(arr, channels=p.hsv_channels)
-        S_blurred_centre = skfilters.gaussian(S, sigma=40)
-        S_blur_edge = skfilters.gaussian(S, sigma=p.params_edge.sigma)
-        S_sobel_viz = skfilters.sobel(S_blur_edge)
-        cx_est, cy_est = estimate_centre_blurring(S, params=p.params_centre)
-        ellipse_sobel = detect_edge_Sobel(S, cx_est, cy_est, params=p.params_edge)
-        ellipse_fit = fit_ellipse_ransac(
-            ellipse_sobel,
-            residual_threshold=p.ransac_threshold,
-            max_trials=p.ransac_trials,
-        )
-        ellipse_smooth, ellipse_clean = smoothen_boundary(
-            ellipse_sobel, ellipse_fit, params=p.params_smooth, n_bins=p.params_edge.n_bins,
-        )
-
-        boundary_cart = ellipse_smooth.get_cartesian()
-        bx, by = boundary_cart.x, boundary_cart.y
-
-        # Pixel → stage coordinates
-        boundary_stage_mm = np.array([
-            unit.convert_imgpt2stg(
-                frame_coor_mm=coor_min_mm,
-                coor_pixel=(float(px), float(py)),
-                correct_rot=True,
-                low_res=False,
-            )
-            for px, py in zip(bx, by)
-        ])
-
-        # Minkowski-sum expansion
-        boundary_stage_mm_expanded = self._expand_boundary(boundary_stage_mm, p.expansion_mm)
-
-        # Grid generation
-        polygon = MplPath(boundary_stage_mm_expanded)
-        x_min = boundary_stage_mm_expanded[:, 0].min()
-        x_max = boundary_stage_mm_expanded[:, 0].max()
-        y_min = boundary_stage_mm_expanded[:, 1].min()
-        y_max = boundary_stage_mm_expanded[:, 1].max()
-
-        xs = np.arange(x_min, x_max + p.step_size_x_mm, p.step_size_x_mm)
-        ys = np.arange(y_min, y_max + p.step_size_y_mm, p.step_size_y_mm)
-        xx, yy = np.meshgrid(xs, ys)
-        grid_candidates = np.column_stack([xx.ravel(), yy.ravel()])
-        inside = polygon.contains_points(grid_candidates)
-        scan_pts_stage = grid_candidates[inside]
-        
-        scan_pts_mea = np.array([
-            unit.convert_mea2stg((float(x), float(y)))
-            for x, y in scan_pts_stage
-        ])
-        
-        # Z from the mean of all stored z-coordinates in the image unit
-        z_mm = float(np.mean(unit.get_dict_measurement()['coor_z']))
-        
-        scan_coordinates = [
-            (float(x), float(y), z_mm)
-            for x, y in scan_pts_mea
-        ]
-
-        unit_name = unit.get_IdName()[1]
-        coor = MeaCoor_mm(
-            mappingUnit_name=unit_name,
-            mapping_coordinates=scan_coordinates,
-        )
-
-        return ProcessResult(
-            img_unit=unit,
-            coor=coor,
-            arr=arr,
-            S=S,
-            S_blurred_centre=S_blurred_centre,
-            S_sobel_viz=S_sobel_viz,
-            cx_est=float(cx_est),
-            cy_est=float(cy_est),
-            ellipse_sobel=ellipse_sobel,
-            ellipse_fit=ellipse_fit,
-            ellipse_smooth=ellipse_smooth,
-            ellipse_clean=ellipse_clean,
-            boundary_px_x=bx,
-            boundary_px_y=by,
-            boundary_stage_mm=boundary_stage_mm,
-            boundary_stage_mm_expanded=boundary_stage_mm_expanded,
-            scan_pts_stage=scan_pts_stage,
-            scan_pts_mea=scan_pts_mea,
-            expansion_mm=p.expansion_mm,
-            step_size_x_mm=p.step_size_x_mm,
-            step_size_y_mm=p.step_size_y_mm,
-            hsv_channels=p.hsv_channels,
-        )
-
-    @staticmethod
-    def _expand_boundary(boundary: np.ndarray, expansion_mm: float) -> np.ndarray:
-        centroid = boundary.mean(axis=0)
-        n_circle = 36
-        circle_angles = np.linspace(0, 2 * np.pi, n_circle, endpoint=False)
-        offsets = expansion_mm * np.column_stack([np.cos(circle_angles), np.sin(circle_angles)])
-        all_candidates = (boundary[:, None, :] + offsets[None, :, :]).reshape(-1, 2)
-        cand_vec = all_candidates - centroid
-        cand_angles = np.arctan2(cand_vec[:, 1], cand_vec[:, 0])
-        cand_radii = np.linalg.norm(cand_vec, axis=1)
-        n_bins = len(boundary)
-        bin_edges = np.linspace(-np.pi, np.pi, n_bins + 1)
-        expanded_pts = []
-        for i in range(n_bins):
-            in_bin = (cand_angles >= bin_edges[i]) & (cand_angles < bin_edges[i + 1])
-            if not in_bin.any():
-                continue
-            best = np.argmax(cand_radii[in_bin])
-            expanded_pts.append(all_candidates[in_bin][best])
-        return np.array(expanded_pts)
+        self.sig_done.emit(self._cancel.is_set())
 
 
 # ── Worker: render full pipeline collage for a single ProcessResult ───────────
 
 class _PlotWorker(QObject):
+    """
+    Builds the diagnostic collage off the GUI thread.
+
+    Only artist objects are created here (a bare Figure, never pyplot); the
+    actual rasterisation happens on the main thread when the canvas draws.
+    """
     sig_done = Signal(object, object)  # (Figure, result_name)
 
     def __init__(self, result: ProcessResult):
@@ -293,7 +172,7 @@ class _PlotWorker(QObject):
 
     @Slot()
     def run(self):
-        r = self._result
+        r = self._result.get_output()
 
         fig = Figure(figsize=(12, 16))
         fig.set_tight_layout(True) # pyright: ignore[reportAttributeAccessIssue] ; set_tight_layout is valid for Figure
@@ -306,50 +185,55 @@ class _PlotWorker(QObject):
 
         fs = 7  # common font size for titles / labels
 
+        # The diagnostic images come back downsampled for display, while every
+        # coordinate below is in full-resolution pixels. Drawing each image
+        # with the full-resolution extent puts the two back on the same axes.
+        img_h, img_w = r.img_shape_full
+        extent = (-0.5, img_w - 0.5, img_h - 0.5, -0.5)
+
         # ── Affine transform: stage mm → image pixel ───────────────────────
         # Derived from the boundary (known in both coordinate systems).
         # Handles rotation + scale without needing to store coor_min_mm.
-        N = len(r._bx)
-        src = np.column_stack([r._boundary_stage, np.ones(N)])
-        Ax, _, _, _ = np.linalg.lstsq(src, r._bx, rcond=None)
-        Ay, _, _, _ = np.linalg.lstsq(src, r._by, rcond=None)
+        N = len(r.boundary_px_x)
+        src = np.column_stack([r.boundary_stage_mm, np.ones(N)])
+        Ax, _, _, _ = np.linalg.lstsq(src, r.boundary_px_x, rcond=None)
+        Ay, _, _, _ = np.linalg.lstsq(src, r.boundary_px_y, rcond=None)
 
         def stg2px(pts_mm: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
             h = np.column_stack([pts_mm, np.ones(len(pts_mm))])
             return h @ Ax, h @ Ay
 
-        exp_px_x, exp_px_y = stg2px(r._boundary_expanded)
-        scan_px_x, scan_px_y = stg2px(r._scan_pts_stage)
+        exp_px_x, exp_px_y = stg2px(r.boundary_stage_mm_expanded)
 
         # ── Row 0 ──────────────────────────────────────────────────────────
-        ax['rgb'].imshow(r._arr)
+        ax['rgb'].imshow(r.arr, extent=extent)
         ax['rgb'].set_title('RGB input', fontsize=fs)
         ax['rgb'].axis('off')
 
-        ch_label = r._hsv_channels if len(r._hsv_channels) == 1 else f'{r._hsv_channels} → PCA'
-        ax['s_ch'].imshow(r._S, cmap='gray')
+        ch_label = r.hsv_channels if len(r.hsv_channels) == 1 else f'{r.hsv_channels} → PCA'
+        ax['s_ch'].imshow(r.S, cmap='gray', extent=extent)
         ax['s_ch'].set_title(ch_label, fontsize=fs)
         ax['s_ch'].axis('off')
 
-        ax['centre'].imshow(r._S_blurred_centre, cmap='gray')
-        ax['centre'].scatter(r._cx_est, r._cy_est, s=60, c='red', marker='x', zorder=5)
-        ax['centre'].set_title(f'Centre est. ({r._cx_est:.0f}, {r._cy_est:.0f}) px', fontsize=fs)
+        ax['centre'].imshow(r.S_blurred_centre, cmap='gray', extent=extent)
+        ax['centre'].scatter(r.cx_est, r.cy_est, s=60, c='red', marker='x', zorder=5)
+        ax['centre'].set_title(f'Centre est. ({r.cx_est:.0f}, {r.cy_est:.0f}) px', fontsize=fs)
         ax['centre'].axis('off')
 
         # ── Row 1 ──────────────────────────────────────────────────────────
-        ax['sobel'].imshow(r._S_sobel_viz, cmap='gray')
-        ax['sobel'].scatter(r._ellipse_sobel.x, r._ellipse_sobel.y,
+        ax['sobel'].imshow(r.S_sobel_viz, cmap='gray', extent=extent)
+        ax['sobel'].scatter(r.ellipse_sobel.x, r.ellipse_sobel.y,
                             s=2, c='red', marker='x', label='Edge samples')
-        ax['sobel'].set_title(f'Sobel edges  ({len(r._ellipse_sobel.x)} samples)', fontsize=fs)
+        ax['sobel'].set_title(f'Sobel edges  ({len(r.ellipse_sobel.x)} samples)', fontsize=fs)
         ax['sobel'].axis('off')
         ax['sobel'].legend(fontsize=fs - 1, markerscale=2)
 
-        f = r._ellipse_fit
+        f = r.ellipse_fit
         t = np.linspace(0, 2 * np.pi, 200)
         ex = f.xc + f.a * np.cos(t) * np.cos(f.theta) - f.b * np.sin(t) * np.sin(f.theta)
         ey = f.yc + f.a * np.cos(t) * np.sin(f.theta) + f.b * np.sin(t) * np.cos(f.theta)
-        ax['ransac'].imshow(r._S, cmap='gray')
-        ax['ransac'].scatter(r._ellipse_sobel.x, r._ellipse_sobel.y,
+        ax['ransac'].imshow(r.S, cmap='gray', extent=extent)
+        ax['ransac'].scatter(r.ellipse_sobel.x, r.ellipse_sobel.y,
                              s=1, c='blue', alpha=0.4, label='Edge samples')
         ax['ransac'].plot(ex, ey, 'g-', lw=1.5, label='RANSAC fit')
         ax['ransac'].scatter(f.xc, f.yc, s=40, c='yellow', zorder=5)
@@ -359,15 +243,15 @@ class _PlotWorker(QObject):
         ax['ransac'].axis('off')
         ax['ransac'].legend(fontsize=fs - 1)
 
-        raw_r, raw_theta = r._ellipse_sobel.get_polar(
-            centre_x=r._ellipse_fit.xc, centre_y=r._ellipse_fit.yc)
+        raw_r, raw_theta = r.ellipse_sobel.get_polar(
+            centre_x=r.ellipse_fit.xc, centre_y=r.ellipse_fit.yc)
         sort_raw = np.argsort(np.degrees(raw_theta))
         ax['smooth'].plot(np.degrees(raw_theta)[sort_raw] + 180,
                           raw_r[sort_raw], 'b-', lw=0.8, label='Raw')
-        ax['smooth'].plot(np.degrees(r._ellipse_clean.theta) + 180,
-                          r._ellipse_clean.r, 'r-', lw=0.8, label='Cleaned')
-        ax['smooth'].plot(np.degrees(r._ellipse_smooth.theta) + 180,
-                          r._ellipse_smooth.r, 'g-', lw=1.2, label='Smoothed')
+        ax['smooth'].plot(np.degrees(r.ellipse_clean.theta) + 180,
+                          r.ellipse_clean.r, 'r-', lw=0.8, label='Cleaned')
+        ax['smooth'].plot(np.degrees(r.ellipse_smooth.theta) + 180,
+                          r.ellipse_smooth.r, 'g-', lw=1.2, label='Smoothed')
         ax['smooth'].set_title('Boundary radius vs angle', fontsize=fs)
         ax['smooth'].set_xlabel('Angle (°)', fontsize=fs)
         ax['smooth'].set_ylabel('Radius (px)', fontsize=fs)
@@ -375,24 +259,26 @@ class _PlotWorker(QObject):
         ax['smooth'].legend(fontsize=fs - 1)
 
         # ── Row 2 — image overlay (spans 2 cols) + measurement frame ───────
-        ax['overlay'].imshow(r._arr)
-        ax['overlay'].plot(r._bx, r._by,
+        ax['overlay'].imshow(r.arr, extent=extent)
+        ax['overlay'].plot(r.boundary_px_x, r.boundary_px_y,
                            'r-', lw=1.5, label='Detected boundary')
         ax['overlay'].plot(exp_px_x, exp_px_y,
-                           'r--', lw=1, label=f'+{r._expansion_mm * 1e3:.0f} µm expansion')
-        # ax['overlay'].scatter(scan_px_x, scan_px_y,
-        #                       s=3, c='cyan', alpha=0.01,
-        #                       label=f'N={len(r._coor.mapping_coordinates)} scan pts')
+                           'r--', lw=1, label=f'+{r.expansion_mm * 1e3:.0f} µm expansion')
         ax['overlay'].scatter(f.xc, f.yc, s=60, c='yellow', zorder=5, label='Centre')
+        # The expansion may run past the edge of the image; grid points out
+        # there are dropped, so pin the view to the image itself to make the
+        # clipping visible rather than zooming out to fit the dashed outline.
+        ax['overlay'].set_xlim(extent[0], extent[1])
+        ax['overlay'].set_ylim(extent[2], extent[3])
+        clipped = f'  |  {r.n_clipped_by_image} clipped' if r.n_clipped_by_image else ''
         ax['overlay'].set_title(
             f'Scan grid overlay  |  '
-            f'step={r._step_size_x_mm * 1e3:.0f}×{r._step_size_y_mm * 1e3:.0f} µm  |  '
-            f'N={len(r._coor.mapping_coordinates)}',
+            f'step={r.step_size_x_mm * 1e3:.0f}×{r.step_size_y_mm * 1e3:.0f} µm  |  '
+            f'N={len(r.scan_coordinates)}{clipped}',
             fontsize=fs)
         ax['overlay'].axis('off')
-        # ax['overlay'].legend(fontsize=fs - 1)
 
-        sc_arr = np.array(r._coor.mapping_coordinates)
+        sc_arr = np.array(r.scan_coordinates)
         ax['mea'].scatter(sc_arr[:, 0], sc_arr[:, 1],
                           s=2, c='darkorange', alpha=0.6, label='Scan pts (mea)')
         ax['mea'].set_aspect('equal')
@@ -400,9 +286,8 @@ class _PlotWorker(QObject):
         ax['mea'].set_ylabel('Y mea [mm]', fontsize=fs)
         ax['mea'].tick_params(labelsize=fs - 1)
         ax['mea'].set_title('Measurement frame (laser position)', fontsize=fs)
-        # ax['mea'].legend(fontsize=fs - 1)
 
-        self.sig_done.emit(fig, r.get_name())
+        self.sig_done.emit(fig, self._result.get_name())
 
 
 # ── Main extension window ─────────────────────────────────────────────────────
@@ -423,21 +308,26 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
         self._process_results = List_ProcessResult()
         self._process_results.add_observer(self._sync_result_tree)
 
-        # Permanent background processor — created once, never torn down
-        self._process_worker = _ProcessWorker()
+        # Permanent background processor — created once, never torn down.
+        # The QThread only marshals work to the app-wide process pool, so the
+        # pipeline never runs on the GUI's interpreter.
+        self._process_worker = _ProcessWorker(intermediary.get_processor())
         self._process_thread = QThread(self)
         self._process_worker.moveToThread(self._process_thread)
         self._process_worker.sig_result.connect(self._on_process_result)
         self._process_worker.sig_error.connect(self._on_process_error)
+        self._process_worker.sig_progress.connect(self._on_process_progress)
         self._process_worker.sig_done.connect(self._on_process_done)
         self._sig_submit_work.connect(self._process_worker.submit)
         self._process_thread.start()
+        self._processing = False
 
         self._plot_thread: QThread | None = None
         self._plot_worker: _PlotWorker | None = None
         self._pending_plot_result: ProcessResult | None = None
 
         self._init_params_widgets()
+        self._init_progress_widgets()
         self._init_result_plot()
         self._init_result_buttons()
         self._init_signals()
@@ -521,8 +411,22 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
         self._spin_step_y_um    = _add_spin('Step Y [µm]',        50.0,     1.0,    10000.0,    1, ' µm')
         self._spin_expansion_um = _add_spin('ROI expansion [µm]',  200.0,   0.0,    10000.0,    3, ' µm')
 
-    def _read_params(self) -> _PipelineParams:
-        return _PipelineParams(
+    def _init_progress_widgets(self):
+        """
+        A status line under the Process button, so a long run reads as 'busy'
+        rather than 'hung'.
+        """
+        self._btn_process_label = self.btn_process.text()
+        self._lbl_status = qw.QLabel('')
+        self._lbl_status.setWordWrap(True)
+        self._progress = qw.QProgressBar()
+        self._progress.setTextVisible(False)
+        self._progress.setVisible(False)
+        self.lyt.addWidget(self._lbl_status)
+        self.lyt.addWidget(self._progress)
+
+    def _read_params(self) -> PipelineParams:
+        return PipelineParams(
             params_centre=Params_Centre_Estimation(
                 sigma=self._spin_ce_sigma.value(),
                 percentile=self._spin_ce_percentile.value(),
@@ -571,6 +475,13 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
 
     @Slot()
     def _on_process_clicked(self):
+        # While a run is in flight the button doubles as Cancel
+        if self._processing:
+            self._process_worker.request_cancel()
+            self.btn_process.setEnabled(False)
+            self._lbl_status.setText('Cancelling after the current unit…')
+            return
+
         selected_names = [item.text(0) for item in self.tree_img.selectedItems()]
         if not selected_names:
             qw.QMessageBox.information(self, 'No selection', 'Please select at least one image unit.')
@@ -579,8 +490,17 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
         units = [self._imghub.get_ImageMeasurementUnit(unit_name=n) for n in selected_names]
         params = self._read_params()
 
-        self.btn_process.setEnabled(False)
+        self._processing = True
+        self.btn_process.setText('Cancel processing')
+        self._progress.setRange(0, len(units))
+        self._progress.setValue(0)
+        self._progress.setVisible(True)
         self._sig_submit_work.emit(units, params)
+
+    @Slot(str, int, int)
+    def _on_process_progress(self, unit_name: str, index: int, total: int):
+        self._progress.setValue(index)
+        self._lbl_status.setText(f'Processing {unit_name} ({index + 1}/{total})…')
 
     @Slot(object)
     def _on_process_result(self, result: ProcessResult):
@@ -590,9 +510,15 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
     def _on_process_error(self, unit_name: str, msg: str):
         qw.QMessageBox.warning(self, f'Error processing {unit_name}', msg)
 
-    @Slot()
-    def _on_process_done(self):
+    @Slot(bool)
+    def _on_process_done(self, cancelled: bool):
+        self._processing = False
+        self.btn_process.setText(self._btn_process_label)
         self.btn_process.setEnabled(True)
+        self._progress.setVisible(False)
+        self._lbl_status.setText('Cancelled.' if cancelled else '')
+        if cancelled:
+            return
         self.tabWidget.setCurrentWidget(self.tab_result)
         qw.QMessageBox.information(
             self, 'Processing complete',
@@ -645,8 +571,10 @@ class Ext_BF_SERSSubstrate_coorGen(Ui_bf_sresSubstrate_coorGen, Extension_MainWi
         if w > 0 and h > 0:
             fig.set_size_inches(w / fig.dpi, h / fig.dpi, forward=False)
         self._result_canvas.draw_idle()
-        import matplotlib.pyplot as plt
-        plt.close(old_fig)
+        # The old figure was built with the bare OO API, so pyplot never knew
+        # about it and plt.close() would not have released anything. Dropping
+        # its artists is what actually frees the memory.
+        old_fig.clear()
 
         self._plot_thread = None
         self._plot_worker = None
