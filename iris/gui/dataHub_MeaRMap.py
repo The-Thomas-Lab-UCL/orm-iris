@@ -449,7 +449,10 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._update_tree_timer.setSingleShot(True)
         self._update_tree_timer.setInterval(50)  # 50 ms debounce
         self._update_tree_timer.timeout.connect(self.update_tree)
-        self._sig_req_update_tree.connect(self._update_tree_timer.start)
+        # The hub observers emit this signal from whichever thread modified the hub (e.g. another
+        # panel's DataHub_Worker). Force a queued connection to a slot on this widget so the timer
+        # is always (re)started from the GUI thread, never from the worker thread.
+        self._sig_req_update_tree.connect(self._request_update_tree, Qt.ConnectionType.QueuedConnection)
         
     # > Autosave info <
         # Autosave parameters
@@ -574,6 +577,13 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         ]
         
         return list_matches_id
+    
+    @Slot()
+    def _request_update_tree(self):
+        """
+        Restarts the debounce timer for the treeview update. Must run in the GUI thread.
+        """
+        self._update_tree_timer.start()
     
     @Slot()
     def update_tree(self, keep_selection:bool=True):
