@@ -47,6 +47,7 @@ from iris.resources.tiling_method_ui import Ui_tiling_method
 
 LIVEVIEW_MIN_INTERVAL_S = 1.0   # Minimum interval between live-view stitch updates during tiling [s]
 LIVEVIEW_COST_RATIO = 4.0       # Wait at least this many times the last stitch duration before re-stitching
+CAPTURE_MAX_ATTEMPTS = 3        # Maximum capture attempts per tile before the tile is skipped
 TIMING_REPORT_EVERY = 20        # Print the per-phase tiling timing summary every N tiles
 # Tiling phases timed per tile: stage move+settle, request -> video thread starts the capture,
 # camera trigger+readout, correction + main-thread delivery, crop+store, live-view stitch
@@ -166,6 +167,36 @@ class ImageProcessor_Worker(QObject):
             print(self.msg_error, e)
             self.sig_finished_msg.emit(self.msg_error + str(e))
 
+    def _capture_fresh_image(self, timeout_s:float) -> Image.Image|None:
+        """
+        Triggers a fresh capture and returns the newly captured image, retrying failed captures.
+
+        Args:
+            timeout_s (float): Timeout for each capture attempt [s]
+
+        Returns:
+            Image.Image|None: The new image, or None if every attempt failed
+        """
+        flg_ready = self._motion_ctrl.get_img_ready_event()
+        for attempt in range(1, CAPTURE_MAX_ATTEMPTS + 1):
+            img_prev, _ = self._motion_ctrl.get_latest_image_with_timestamp()
+            flg_ready.clear()
+            self.sig_req_img_capture.emit()
+
+            if not flg_ready.wait(timeout=timeout_s):
+                print(f'Timeout ({timeout_s:.1f} s) waiting for image capture (attempt {attempt}/{CAPTURE_MAX_ATTEMPTS})')
+                # Let the in-flight capture finish so its late result isn't taken for the next request
+                flg_ready.wait(timeout=timeout_s)
+                continue
+
+            # A failed capture sets the ready flag without delivering a new image, leaving the
+            # previous tile's image as the latest one: it must not be stored at this coordinate
+            img, _ = self._motion_ctrl.get_latest_image_with_timestamp()
+            if isinstance(img, Image.Image) and img is not img_prev:
+                return img
+            print(f'Image capture failed (attempt {attempt}/{CAPTURE_MAX_ATTEMPTS})')
+        return None
+
     def _take_image(self, meaCoor_mm:MeaCoor_mm, imgUnit:MeaImg_Unit,
         tiling_params:ImageTiling_Params,
         unit_idx:int = 1, total_units:int = 1,
@@ -223,20 +254,10 @@ class ImageProcessor_Worker(QObject):
                 flg_mvmt_done.wait()
                 t_moved = time.time()
 
-                self._motion_ctrl.get_img_ready_event().clear()
-                self.sig_req_img_capture.emit()
-
-                if not self._motion_ctrl.get_img_ready_event().wait(timeout=capture_timeout_s):
-                    print(f'Timeout ({capture_timeout_s:.1f} s) waiting for image capture at coordinate {coor}')
-                    # Wait for the in-flight capture to complete so the stale sig_img doesn't
-                    # corrupt _flg_img_ready for the next tile.
-                    self._motion_ctrl.get_img_ready_event().wait(timeout=capture_timeout_s)
-                    continue
+                img = self._capture_fresh_image(capture_timeout_s)
                 t_ready = time.time()
-
-                img, _ = self._motion_ctrl.get_latest_image_with_timestamp()
-                if not isinstance(img,Image.Image):
-                    print('Error in _take_image: No image received from the controller')
+                if img is None:
+                    print(f'Error in _take_image: no image captured at coordinate {coor}, tile skipped')
                     continue
 
                 img = img.crop((cropx_pixel,cropy_pixel,shape[0]-cropx_pixel,shape[1]-cropy_pixel))
