@@ -106,10 +106,11 @@ class List_ProcessResult(list):
 
 class _ProcessWorker(QObject):
     """
-    Feeds units to the app-wide process pool, one at a time.
+    Feeds units to the app-wide process pool, keeping one task in flight per
+    worker so every core stays busy.
 
     This object lives on a QThread, but the QThread is only a waiting room: the
-    actual work runs in a pool worker process and `AsyncResult.get()` blocks on
+    actual work runs in pool worker processes and `AsyncResult.get()` blocks on
     a pipe read, which releases the GIL. Running the pipeline in the QThread
     itself would instead share the GIL and a core with the GUI, which on a
     full-size stitched image leaves the event loop visibly stuttering.
@@ -126,10 +127,11 @@ class _ProcessWorker(QObject):
 
     def request_cancel(self):
         """
-        Ask to stop after the unit currently in flight.
+        Ask to stop dispatching further units.
 
-        A pool task cannot be interrupted once it has started, so this is a
-        'stop after the current unit' cancel rather than an immediate abort.
+        A pool task cannot be interrupted once it has started, so units
+        already in flight still run to completion and their results are
+        still emitted; only units not yet dispatched are skipped.
         """
         self._cancel.set()
 
@@ -137,21 +139,56 @@ class _ProcessWorker(QObject):
     def submit(self, units: list, params: PipelineParams):
         self._cancel.clear()
         total = len(units)
-        for i, unit in enumerate(units):
-            if self._cancel.is_set():
-                break
-            name = unit.get_IdName()[1]
-            self.sig_progress.emit(name, i, total)
-            try:
-                if self._pool is not None:
-                    out = self._pool.apply_async(run_pipeline, (unit, params)).get()
-                else:
-                    # No shared pool (e.g. the extension run standalone). Still
-                    # correct, but the GUI will stutter while this runs.
+
+        if self._pool is None:
+            # No shared pool (e.g. the extension run standalone). Still
+            # correct, but the GUI will stutter while this runs, and there's
+            # no pool to parallelise across.
+            for i, unit in enumerate(units):
+                if self._cancel.is_set():
+                    break
+                name = unit.get_IdName()[1]
+                self.sig_progress.emit(name, i, total)
+                try:
                     out = run_pipeline(unit, params)
+                    self.sig_result.emit(ProcessResult(out))
+                except Exception as e:
+                    self.sig_error.emit(name, str(e))
+            self.sig_done.emit(self._cancel.is_set())
+            return
+
+        # Dispatch up to `window` units at once (roughly one per CPU core) so
+        # the pool's workers run in parallel, then top the window back up as
+        # each one finishes. Submitting every unit up front instead would
+        # pickle every unit's raw image to the pool immediately, spiking
+        # memory on a large batch.
+        pool = self._pool
+        window = max(1, os.cpu_count() or 1)
+        next_index = 0
+        inflight: list[tuple[str, mpp.AsyncResult]] = []
+
+        def _dispatch_next():
+            nonlocal next_index
+            unit = units[next_index]
+            name = unit.get_IdName()[1]
+            future = pool.apply_async(run_pipeline, (unit, params))
+            inflight.append((name, future))
+            self.sig_progress.emit(name, next_index, total)
+            next_index += 1
+
+        while next_index < len(units) and len(inflight) < window:
+            _dispatch_next()
+
+        while inflight:
+            name, future = inflight.pop(0)
+            try:
+                out = future.get()
                 self.sig_result.emit(ProcessResult(out))
             except Exception as e:
                 self.sig_error.emit(name, str(e))
+            if not self._cancel.is_set() and next_index < len(units):
+                _dispatch_next()
+
         self.sig_done.emit(self._cancel.is_set())
 
 
