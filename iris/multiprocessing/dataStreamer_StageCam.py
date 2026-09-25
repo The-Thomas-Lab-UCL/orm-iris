@@ -102,7 +102,9 @@ class DataStreamer_StageCam(mp.Process):
         self._stage_offset_ms = MPMeaHubEnum.STAGEHUB_TIME_OFFSET_MS.value
         
         # > Locks <
-        self._lock_pipe = mp.Lock()  # Lock for the pipe
+        # Separate locks so coordinate queries never wait behind a camera frame transfer/correction (and vice versa)
+        self._lock_coor_pipe = mp.Lock()  # Lock for the coordinate pipe
+        self._lock_cam_pipe = mp.Lock()   # Lock for the camera pipe
         
     class Enum_CoorType(Enum):
         """
@@ -523,7 +525,7 @@ class DataStreamer_StageCam(mp.Process):
             filename (str): Filename to save the reference image
         """
         assert isinstance(filename,str), 'Filename is not a string'
-        with self._lock_pipe:
+        with self._lock_cam_pipe:
             self._cam_pipe_main.send((self.Enum_CommandType.SAVE_FLATFIELD_REF,filename))
             self._cam_pipe_main.recv()
         
@@ -535,7 +537,7 @@ class DataStreamer_StageCam(mp.Process):
             filename (str): Filename to load the reference image
         """
         assert isinstance(filename,str), 'Filename is not a string'
-        with self._lock_pipe:
+        with self._lock_cam_pipe:
             self._cam_pipe_main.send((self.Enum_CommandType.LOAD_FLATFIELD_REF,filename))
             self._cam_pipe_main.recv()
     
@@ -547,7 +549,7 @@ class DataStreamer_StageCam(mp.Process):
             ref_img (np.ndarray): Reference image
         """
         assert isinstance(ref_img,np.ndarray), 'Reference image is not a numpy array'
-        with self._lock_pipe:
+        with self._lock_cam_pipe:
             self._cam_pipe_main.send((self.Enum_CommandType.FLATFIELD_REF,ref_img))
             self._cam_pipe_main.recv()
             
@@ -558,7 +560,7 @@ class DataStreamer_StageCam(mp.Process):
         Returns:
             float: Flatfield gain
         """
-        with self._lock_pipe:
+        with self._lock_cam_pipe:
             self._cam_pipe_main.send((self.Enum_CommandType.GET_FLATFIELD_GAIN,0))
             gain = self._cam_pipe_main.recv()
         return gain
@@ -571,7 +573,7 @@ class DataStreamer_StageCam(mp.Process):
             gain (float): Flatfield gain
         """
         assert isinstance(gain,float), 'Gain is not a float'
-        with self._lock_pipe:
+        with self._lock_cam_pipe:
             self._cam_pipe_main.send((self.Enum_CommandType.SET_FLATFIELD_GAIN,gain))
             self._cam_pipe_main.recv()
     
@@ -589,7 +591,7 @@ class DataStreamer_StageCam(mp.Process):
             Image.Image: Corrected image, or the original if correction fails
         """
         arr = np.array(img)
-        with self._lock_pipe:
+        with self._lock_cam_pipe:
             self._cam_pipe_main.send((correction, arr))
             result = self._cam_pipe_main.recv()
         return result if isinstance(result, Image.Image) else img
@@ -605,7 +607,7 @@ class DataStreamer_StageCam(mp.Process):
             np.ndarray: Image
         """
         assert isinstance(request,Enum_CamCorrectionType), 'Invalid request type'
-        with self._lock_pipe:
+        with self._lock_cam_pipe:
             self._cam_pipe_main.send(request)
             img = self._cam_pipe_main.recv()
         return img
@@ -672,7 +674,7 @@ class DataStreamer_StageCam(mp.Process):
         Returns:
             tuple|None: Coordinates in [x,y,z] or None if no coordinates are found
         """
-        with self._lock_pipe:
+        with self._lock_coor_pipe:
             self._coor_pipe_main.send((self.Enum_CoorType.INTERPOLATE,timestamp))
             coor = self._coor_pipe_main.recv()
         return coor
@@ -687,7 +689,7 @@ class DataStreamer_StageCam(mp.Process):
         Returns:
             tuple: Coordinates in [x,y,z] or None if no coordinates are found
         """
-        with self._lock_pipe:
+        with self._lock_coor_pipe:
             self._coor_pipe_main.send((self.Enum_CoorType.CLOSEST,timestamp))
             coor = self._coor_pipe_main.recv()
         return coor

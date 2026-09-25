@@ -45,6 +45,13 @@ from iris.gui import AppPlotEnum
 
 from iris.resources.tiling_method_ui import Ui_tiling_method
 
+LIVEVIEW_MIN_INTERVAL_S = 1.0   # Minimum interval between live-view stitch updates during tiling [s]
+LIVEVIEW_COST_RATIO = 4.0       # Wait at least this many times the last stitch duration before re-stitching
+TIMING_REPORT_EVERY = 20        # Print the per-phase tiling timing summary every N tiles
+# Tiling phases timed per tile: stage move+settle, request -> video thread starts the capture,
+# camera trigger+readout, correction + main-thread delivery, crop+store, live-view stitch
+TIMING_PHASES = ('move', 'dispatch', 'camera', 'deliver', 'store', 'liveview')
+
 class TilingMethod_Design(Ui_tiling_method, qw.QWidget):
     def __init__(self,parent):
         super().__init__(parent)
@@ -196,6 +203,9 @@ class ImageProcessor_Worker(QObject):
         # Timeout must cover the camera's own poll window (exposure_ms * 2 + 50 ms) plus delivery
         # overhead. Default floor is 15 s so short-exposure tiles always get a generous window.
         capture_timeout_s = max(15.0, tiling_params.exposure_ms * 3 / 1000 + 3.0)
+        t_next_liveview = 0.0
+        vid_worker = self._motion_ctrl.get_video_worker()
+        dict_timings:dict[str,list[float]] = {key:[] for key in TIMING_PHASES}
 
         try:
             for i,coor in enumerate(meaCoor_mm.mapping_coordinates):
@@ -207,9 +217,11 @@ class ImageProcessor_Worker(QObject):
                 self.sig_statbar_update.emit(
                     f'Unit {unit_idx}/{total_units} | Tile {i+1}/{totalcoor} | Elapsed: {self._fmt_elapsed(elapsed)}')
 
+                t_start = time.time()
                 flg_mvmt_done = threading.Event()
                 self.sig_gotocoor.emit(coor, flg_mvmt_done)
                 flg_mvmt_done.wait()
+                t_moved = time.time()
 
                 self._motion_ctrl.get_img_ready_event().clear()
                 self.sig_req_img_capture.emit()
@@ -220,6 +232,7 @@ class ImageProcessor_Worker(QObject):
                     # corrupt _flg_img_ready for the next tile.
                     self._motion_ctrl.get_img_ready_event().wait(timeout=capture_timeout_s)
                     continue
+                t_ready = time.time()
 
                 img, _ = self._motion_ctrl.get_latest_image_with_timestamp()
                 if not isinstance(img,Image.Image):
@@ -236,10 +249,31 @@ class ImageProcessor_Worker(QObject):
                         z_coor=z,
                         image=img
                     )
+                t_stored = time.time()
 
-                if self._getter_liveview():
+                # Re-stitching costs O(tiles so far), so throttle it to keep the per-tile overhead
+                # bounded; otherwise the loop slows down progressively over a long tiling run
+                is_last_tile = i == totalcoor - 1
+                if self._getter_liveview() and (time.time() >= t_next_liveview or is_last_tile):
+                    t_stitch = time.time()
                     img = imgUnit.get_image_all_stitched(low_res=True)[0]
                     self.sig_ret_image_processed.emit(img)
+                    dt_stitch = time.time() - t_stitch
+                    t_next_liveview = time.time() + max(LIVEVIEW_MIN_INTERVAL_S, dt_stitch * LIVEVIEW_COST_RATIO)
+
+                # Diagnostics: per-phase timing to locate which step slows down over a long run
+                t_cam_start, t_cam_done = vid_worker.time_fresh_start, vid_worker.time_fresh_done
+                cam_valid = t_moved <= t_cam_start <= t_cam_done <= t_ready
+                dict_timings['move'].append(t_moved - t_start)
+                dict_timings['dispatch'].append(t_cam_start - t_moved if cam_valid else np.nan)
+                dict_timings['camera'].append(t_cam_done - t_cam_start if cam_valid else np.nan)
+                dict_timings['deliver'].append(t_ready - t_cam_done if cam_valid else np.nan)
+                dict_timings['store'].append(t_stored - t_ready)
+                dict_timings['liveview'].append(time.time() - t_stored)
+                if (i + 1) % TIMING_REPORT_EVERY == 0 or is_last_tile:
+                    summary = ', '.join(f'{key} {np.nanmean(vals[-TIMING_REPORT_EVERY:])*1e3:.0f}'
+                                        for key, vals in dict_timings.items())
+                    print(f'Tiling timings [ms, mean of last {TIMING_REPORT_EVERY}] tile {i+1}/{totalcoor}: {summary}')
         finally:
             # Always restore camera/video state, even if a capture step above raised.
             self._motion_ctrl.exit_tiling_mode()        # restore continuous streaming

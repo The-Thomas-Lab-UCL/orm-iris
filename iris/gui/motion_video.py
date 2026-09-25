@@ -670,7 +670,9 @@ class ImageCapture_Worker(QObject):
         self._camera_controller = camera_controller
         self._stageHub = stageHub
         self._getter_imgcal = getter_imgcal
-        
+        self.time_fresh_start = 0.0 # Time when the last fresh capture started [s]
+        self.time_fresh_done = 0.0  # Time when the last fresh capture returned from the camera [s]
+
     def _overlay_scalebar(self,img:Image.Image) -> Image.Image:
         """
         Overlays a scalebar on the image based on the image calibration file
@@ -743,7 +745,10 @@ class ImageCapture_Worker(QObject):
             return
         try:
             # Always capture a fresh triggered frame from the camera directly
+            self.time_fresh_start = time.time()     # Diagnostics: read by the tiling worker
             img = self._camera_controller.img_capture_fresh()
+            self.time_fresh_done = time.time()
+            timestamp_us = get_timestamp_us_int()   # Stamp on arrival, before the correction round-trip
 
             if not isinstance(img, Image.Image):
                 self.sig_no_frame.emit()
@@ -753,7 +758,7 @@ class ImageCapture_Worker(QObject):
             if img_corr != Enum_CamCorrectionType.RAW:
                 img = self._stageHub.apply_correction(img, img_corr)
 
-            self.sig_raw_img.emit(get_timestamp_us_int(), img)
+            self.sig_raw_img.emit(timestamp_us, img)
 
             img = self._overlay_scalebar(img) if scalebar else img
             if crosshair: img = self._draw_crosshair(img)
@@ -783,15 +788,20 @@ class ImageCapture_Worker(QObject):
             return
         
         try:
-            if img_corr == Enum_CamCorrectionType.RAW: img = self._camera_controller.img_capture()
-            else: img:Image.Image = self._stageHub.get_image(request=img_corr)
-            
+            # Capture raw here and correct afterwards so the timestamp reflects frame arrival,
+            # not arrival + correction time (which skews the autofocus z-correlation)
+            img = self._camera_controller.img_capture()
+            timestamp_us = get_timestamp_us_int()
+
             if not isinstance(img,Image.Image):
                 self.sig_no_frame.emit()
                 return
-            
+
+            if img_corr != Enum_CamCorrectionType.RAW:
+                img = self._stageHub.apply_correction(img, img_corr)
+
             # Add a scalebar to it
-            self.sig_raw_img.emit(get_timestamp_us_int(), img)
+            self.sig_raw_img.emit(timestamp_us, img)
 
             img = self._overlay_scalebar(img) if scalebar else img
             if crosshair: img = self._draw_crosshair(img)
