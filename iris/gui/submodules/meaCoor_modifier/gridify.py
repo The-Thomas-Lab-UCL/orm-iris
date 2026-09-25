@@ -783,11 +783,8 @@ class Gridify_Finetune(Ui_gridify_setup_finetuning, qw.QMainWindow):
             self._stop_autofocus()
             return
 
-        idx, mapping_coor = result
-        if idx == len(self._list_mapping_coor) - 1:
-            self._stop_autofocus()
-            return
-
+        # The last ROI is autofocused too; the finished/peak-not-found handlers stop the run after it
+        _, mapping_coor = result
         target_coor_mm = self._calculate_target_coordinate(mapping_coor)
         target_coor_mm = target_coor_mm.astype(float)
         target_coor_mm = (target_coor_mm[0], target_coor_mm[1], target_coor_mm[2])
