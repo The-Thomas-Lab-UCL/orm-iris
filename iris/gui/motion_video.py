@@ -43,6 +43,7 @@ from iris.resources.motion_video.brightfieldcontrol_ui import Ui_wdg_brightfield
 from iris.resources.motion_video.stagecontrol_ui import Ui_stagecontrol
 
 WAIT_MOVEMENT_TIMEOUT = 10.0  # Timeout for waiting for the movement to finish [s] (reset if the stage is still moving)
+ARRIVAL_TOLERANCE_MM = 0.05   # How far the stage may settle from the requested target before the move counts as failed [mm]
 AUTOFOCUS_BLUR_KERNEL_SIZE = AppVideoEnum.AUTOFOCUS_BLUR_KERNEL_SIZE.value
 AUTOFOCUS_NO_IMPROVE_STEPS = AppVideoEnum.AUTOFOCUS_NO_IMPROVE_STEPS.value
 
@@ -295,7 +296,8 @@ class Motion_GoToCoor_Worker(QObject):
         
     def _notify_finish(self, thread_xy:threading.Thread, thread_z:threading.Thread,
                        event_finished:threading.Event, timeout:float=WAIT_MOVEMENT_TIMEOUT,
-                       result_holder:'queue.Queue|None'=None):
+                       result_holder:'queue.Queue|None'=None,
+                       target_mm:'tuple[float,float,float]|None'=None):
         """
         Waits for the target to be reached and for the stage to be stationary for a minimum
         settle time before signalling completion.
@@ -321,6 +323,10 @@ class Motion_GoToCoor_Worker(QObject):
                 a converted COPY rather than the original object, silently discarding any mutation made
                 on the receiving thread. queue.Queue (like threading.Event) is passed through as an
                 opaque PyObject reference, so writes are visible to the emitting thread.
+            target_mm (tuple[float,float,float]|None): The requested target (x,y,z) in mm. When given, the
+                settled position is checked against it and msg_target_failed is reported if the stage never
+                got there - a move that was silently rejected by the controller (e.g. a stuck busy flag)
+                otherwise settles instantly at the wrong place and is indistinguishable from a real arrival.
         """
         settle_sec = ControllerConfigEnum.STAGE_TILING_SETTLE_SEC.value
 
@@ -356,9 +362,15 @@ class Motion_GoToCoor_Worker(QObject):
             coor = coor_new
 
             if threads_done and (time.time() - last_change_time) >= settle_sec:
-                if result_holder is not None: result_holder.put(self.msg_target_reached)
+                msg = self.msg_target_reached
+                if target_mm is not None and coor is not None and \
+                    not np.allclose(coor, np.array(target_mm), atol=ARRIVAL_TOLERANCE_MM):
+                    print('Movement finished but the stage is not at the target. '
+                          f'Requested: {tuple(float(c) for c in target_mm)} mm, reached: {tuple(float(c) for c in coor)} mm')
+                    msg = self.msg_target_failed
+                if result_holder is not None: result_holder.put(msg)
                 if event_finished is not None: event_finished.set()
-                self.sig_mvmt_finished.emit(self.msg_target_reached)
+                self.sig_mvmt_finished.emit(msg)
                 break
 
             time.sleep(0.01)
@@ -405,7 +417,8 @@ class Motion_GoToCoor_Worker(QObject):
             thread_xy_move.start()
             thread_z_move.start()
 
-            self._notify_finish(thread_xy_move,thread_z_move,event_finished,timeout=timeout,result_holder=result_holder)
+            self._notify_finish(thread_xy_move,thread_z_move,event_finished,timeout=timeout,result_holder=result_holder,
+                                target_mm=(coor_x_mm,coor_y_mm,coor_z_mm))
         except Exception as e:
             # Ensure the waiting caller is never left blocked forever if setting up/monitoring
             # the movement fails unexpectedly (e.g. a stage communication error).

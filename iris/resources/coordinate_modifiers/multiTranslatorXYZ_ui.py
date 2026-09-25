@@ -57,6 +57,7 @@ class Ui_MultiTranslatorXYZ(object):
         self.spin_y_um.setObjectName(u"spin_y_um")
         self.spin_y_um.setDecimals(1)
         self.spin_y_um.setMinimum(-1000000.000000000000000)
+        self.spin_y_um.setMaximum(1000000.000000000000000)
         self.spin_y_um.setValue(0.000000000000000)
 
         self.horizontalLayout_2.addWidget(self.spin_y_um)
