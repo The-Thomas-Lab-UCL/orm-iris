@@ -64,8 +64,27 @@ class Class_CameraController:
             bool: The initialisation status of the camera
         """
         return self.flg_initialised
-    
-    
+
+    def is_camera_available(self) -> bool:
+        """
+        Whether the camera can currently be talked to.
+
+        Unlike get_initialisation_status(), this also reports False once the connection
+        has been lost at runtime (e.g. the USB cable was pulled). The GUI uses this to
+        enter a 'no camera available' state instead of retrying (and logging) forever.
+
+        Returns:
+            bool: True if captures and parameter reads may be attempted
+        """
+        return self.get_initialisation_status()
+
+    def reinitialise_connection(self) -> None:
+        """
+        Reinitialise the connection to the camera. Override in subclasses.
+        """
+        raise NotImplementedError("reinitialise_connection() does not exist in this controller")
+
+
     def set_exposure_time_us(self, exposure_time_us:int|float) -> None:
         """
         Set the exposure time of the camera

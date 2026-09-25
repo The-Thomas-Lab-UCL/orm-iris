@@ -46,6 +46,7 @@ WAIT_MOVEMENT_TIMEOUT = 10.0  # Timeout for waiting for the movement to finish [
 ARRIVAL_TOLERANCE_MM = 0.05   # How far the stage may settle from the requested target before the move counts as failed [mm]
 AUTOFOCUS_BLUR_KERNEL_SIZE = AppVideoEnum.AUTOFOCUS_BLUR_KERNEL_SIZE.value
 AUTOFOCUS_NO_IMPROVE_STEPS = AppVideoEnum.AUTOFOCUS_NO_IMPROVE_STEPS.value
+NO_CAMERA_RETRY_INTERVAL_S = 2.0   # How often the video feed re-checks for a camera while in the 'no camera' state [s]
 
 class BrightfieldController(qw.QWidget,Ui_wdg_brightfield_controller):
     def __init__(self,parent=None):
@@ -145,6 +146,18 @@ class ResizableQLabel(qw.QLabel):
     def setPixmap(self, pixmap):
         self._pixmap = pixmap
         self.resizeEvent(None)
+
+    def show_message(self, message: str):
+        """
+        Replaces the displayed pixmap with a centred text message (e.g. 'No camera available').
+
+        Args:
+            message (str): The message to display
+        """
+        self._pixmap = QPixmap()
+        self.clear()
+        self.setAlignment(qc.Qt.AlignmentFlag.AlignCenter)
+        self.setText(message)
         
     def resizeEvent(self, event):
         if not self._pixmap.isNull():
@@ -677,6 +690,7 @@ class ImageCapture_Worker(QObject):
     sig_raw_img = Signal(object, Image.Image)  # Signal to emit (timestamp_us, raw frame) before any overlays (for focus scoring)
     sig_no_frame = Signal()  # Signal to emit when no frame is captured
     sig_error = Signal(str)  # Signal to emit an error message
+    sig_camera_unavailable = Signal(str)  # Signal to emit when the camera cannot be reached at all
     
     def __init__(self, camera_controller:CameraController, stageHub:DataStreamer_StageCam, getter_imgcal:Callable[[],ImgMea_Cal]):
         super().__init__()
@@ -685,6 +699,53 @@ class ImageCapture_Worker(QObject):
         self._getter_imgcal = getter_imgcal
         self.time_fresh_start = 0.0 # Time when the last fresh capture started [s]
         self.time_fresh_done = 0.0  # Time when the last fresh capture returned from the camera [s]
+        self._last_error_msg: str|None = None   # Last reported capture error, to suppress identical repeats
+
+    def is_camera_available(self) -> bool:
+        """
+        Whether the camera controller currently has a usable camera.
+
+        Controllers that predate is_camera_available() fall back to their initialisation
+        status, so an older controller still behaves as before.
+
+        Returns:
+            bool: True if a capture may be attempted
+        """
+        try:
+            if hasattr(self._camera_controller, 'is_camera_available'):
+                return bool(self._camera_controller.is_camera_available())
+            return bool(self._camera_controller.get_initialisation_status())
+        except Exception:
+            # The controller lives in the stage hub subprocess: if even this call fails,
+            # there is certainly no camera to capture from
+            return False
+
+    def _report_capture_failure(self, context: str, exception: Exception | None = None) -> bool:
+        """
+        Reports a failed capture, distinguishing a missing camera from a one-off error.
+
+        Args:
+            context (str): Description of the failed operation, used in the error message
+            exception (Exception|None): The exception raised, if any
+
+        Returns:
+            bool: True if the failure was caused by the camera being unavailable
+        """
+        if not self.is_camera_available():
+            # Emitted once per capture attempt; the widget only reacts to the first one and
+            # then stops requesting frames, so this does not flood the console
+            self.sig_camera_unavailable.emit('No camera available')
+            return True
+
+        self.sig_no_frame.emit()
+        if exception is not None:
+            # The video feed retries at the frame rate, so a persistent fault would otherwise
+            # repeat the same message dozens of times per second: report each distinct one once
+            message = '{}: {}'.format(context, exception)
+            if message != self._last_error_msg:
+                self._last_error_msg = message
+                self.sig_error.emit(message)
+        return False
 
     def _overlay_scalebar(self,img:Image.Image) -> Image.Image:
         """
@@ -756,6 +817,11 @@ class ImageCapture_Worker(QObject):
         if not img_corr in Enum_CamCorrectionType:
             self.sig_error.emit('Invalid video correction type: {}'.format(img_corr))
             return
+
+        if not self.is_camera_available():
+            self.sig_camera_unavailable.emit('No camera available')
+            return
+
         try:
             # Always capture a fresh triggered frame from the camera directly
             self.time_fresh_start = time.time()     # Diagnostics: read by the tiling worker
@@ -764,7 +830,7 @@ class ImageCapture_Worker(QObject):
             timestamp_us = get_timestamp_us_int()   # Stamp on arrival, before the correction round-trip
 
             if not isinstance(img, Image.Image):
-                self.sig_no_frame.emit()
+                self._report_capture_failure('Failed to capture fresh frame')
                 return
 
             # Apply correction in the subprocess if requested (no new capture)
@@ -777,13 +843,12 @@ class ImageCapture_Worker(QObject):
             if crosshair: img = self._draw_crosshair(img)
 
             new_frame: QPixmap = ImageQt.toqpixmap(img)
+            self._last_error_msg = None
             self.sig_img.emit(img)
             self.sig_qpixmap.emit(new_frame)
 
         except Exception as e:
-            print(f'Fresh capture failed: {e}')
-            self.sig_no_frame.emit()
-            self.sig_error.emit('Failed to capture fresh frame: {}'.format(e))
+            self._report_capture_failure('Failed to capture fresh frame', e)
 
     @Slot(Enum_CamCorrectionType, bool, bool)
     def grab_image(self, img_corr:Enum_CamCorrectionType, scalebar:bool, crosshair:bool):
@@ -799,7 +864,11 @@ class ImageCapture_Worker(QObject):
         if not img_corr in Enum_CamCorrectionType:
             self.sig_error.emit('Invalid video correction type: {}'.format(img_corr))
             return
-        
+
+        if not self.is_camera_available():
+            self.sig_camera_unavailable.emit('No camera available')
+            return
+
         try:
             # Capture raw here and correct afterwards so the timestamp reflects frame arrival,
             # not arrival + correction time (which skews the autofocus z-correlation)
@@ -807,7 +876,7 @@ class ImageCapture_Worker(QObject):
             timestamp_us = get_timestamp_us_int()
 
             if not isinstance(img,Image.Image):
-                self.sig_no_frame.emit()
+                self._report_capture_failure('Failed to capture video frame')
                 return
 
             if img_corr != Enum_CamCorrectionType.RAW:
@@ -821,13 +890,12 @@ class ImageCapture_Worker(QObject):
 
             new_frame:QPixmap = ImageQt.toqpixmap(img)
 
+            self._last_error_msg = None
             self.sig_img.emit(img)
             self.sig_qpixmap.emit(new_frame)
             
         except Exception as e:
-            print(f'Video feed failed: {e}')
-            self.sig_no_frame.emit()
-            self.sig_error.emit('Failed to capture video frame: {}'.format(e))
+            self._report_capture_failure('Failed to capture video frame', e)
 
 class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
     """
@@ -893,6 +961,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         self._video_height = ControllerConfigEnum.VIDEOFEED_HEIGHT.value    # Video feed height in pixel
         self._iscapturing = threading.Event()  # A flag to prevent multiple concurrent video capture
         self._flg_pause_video = threading.Event()  # A flag to check if the video feed is running
+        self._flg_no_camera = threading.Event()    # A flag set while no camera is available (video feed idles)
         self._flg_img_ready = threading.Event()    # Set each time a new image (or no-frame) is received
         self._time_last_frame = 0.0   # The timestamp of the last frame captured, used to limit the frame rate
         self._time_last_img = 0.0     # The timestamp of the last image received
@@ -1398,6 +1467,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
     def _on_reinit_camera_done(self, resume_video: bool, success: bool) -> None:
         self._btn_reinit_conn.setEnabled(True)
         if success:
+            self._clear_no_camera_state()
             self._btn_reinit_conn.setStyleSheet('background-color: yellow')
             if resume_video:
                 self.resume_video()
@@ -1952,6 +2022,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         self._worker_img_capture.sig_img.connect(self._handle_img_capture)
         self._worker_img_capture.sig_qpixmap.connect(self._handle_qpixmap_capture)
         self._worker_img_capture.sig_no_frame.connect(self._handle_no_frame)
+        self._worker_img_capture.sig_camera_unavailable.connect(self._handle_camera_unavailable)
         
         # Defer thread start until after initialization is complete
         QTimer.singleShot(0, self._thread_video.start)
@@ -1994,7 +2065,10 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         QTimer.singleShot(0, self.video_update)
     
     def _init_video(self):
-        if not self._camera_ctrl.get_initialisation_status(): self._camera_ctrl.__init__()
+        if not self._worker_img_capture.is_camera_available():
+            # Starting without a camera is not an error: the first capture attempt puts the
+            # video feed into the 'no camera available' state, where it idles until one appears
+            print('Video feed: no camera available at start-up')
         self._currentFrame = None            # Empties the current frame
         
         # Loops the image updater to create outputs the video capture frame by frame
@@ -2023,6 +2097,50 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         self._flg_img_ready.set()
         self._iscapturing.clear()
         self._trigger_next_video_update()
+
+    def is_camera_available(self) -> bool:
+        """
+        Whether a camera is currently available for capture.
+
+        Returns:
+            bool: False while the video feed is in the 'no camera available' state
+        """
+        return not self._flg_no_camera.is_set()
+
+    @Slot(str)
+    def _handle_camera_unavailable(self, message: str):
+        """
+        Enters the 'no camera available' state: the video feed stops requesting frames and
+        only re-checks for a camera every NO_CAMERA_RETRY_INTERVAL_S, instead of hammering a
+        disconnected camera (and logging an error) at the full frame rate.
+
+        Args:
+            message (str): The reason reported by the video worker
+        """
+        self._flg_img_ready.set()
+        self._iscapturing.clear()
+
+        if not self._flg_no_camera.is_set():
+            # Report the transition once only - the retry loop below stays silent
+            self._flg_no_camera.set()
+            self._currentFrame = None   # Force a repaint once a camera comes back
+            self._lbl_video.show_message('No camera available\n\nReconnect the camera, then press "Reinitialise connection"')
+            self._btn_reinit_conn.setStyleSheet('background-color: red')
+            self.sig_statbar_message.emit('{} - video feed paused'.format(message), 'red')
+            print('Video feed: {} - retrying every {:.0f} s'.format(message, NO_CAMERA_RETRY_INTERVAL_S))
+
+        QTimer.singleShot(int(NO_CAMERA_RETRY_INTERVAL_S*1e3), self.video_update)
+
+    def _clear_no_camera_state(self):
+        """
+        Leaves the 'no camera available' state after a camera has become available again.
+        """
+        if not self._flg_no_camera.is_set(): return
+
+        self._flg_no_camera.clear()
+        self._btn_reinit_conn.setStyleSheet('background-color: yellow')
+        self.sig_statbar_message.emit('Camera available again - resuming video feed', 'green')
+        print('Video feed: camera available again')
     
     @Slot(QPixmap)
     def _handle_qpixmap_capture(self, img_qpixmap:QPixmap):
@@ -2114,11 +2232,19 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         """
         # Prevents multiple triggers of the video update if the camera is still processing the previous capture
         if self._iscapturing.is_set(): return
-        
+
         if self._flg_pause_video.is_set():
             QTimer.singleShot(int(1000/self._vid_refreshrate), self.video_update)
             return
-        
+
+        if self._flg_no_camera.is_set():
+            # Idle: poll the controller (which does not touch the camera in this state) slowly
+            # until a camera is reconnected, rather than requesting frames that cannot arrive
+            if not self._worker_img_capture.is_camera_available():
+                QTimer.singleShot(int(NO_CAMERA_RETRY_INTERVAL_S*1e3), self.video_update)
+                return
+            self._clear_no_camera_state()
+
         # Triggers the frame capture from the camera
         self.trigger_img_capture()
     

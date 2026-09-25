@@ -4,6 +4,8 @@ A controller to take in a video feed and display
 import numpy as np
 import cv2
 import time
+import logging
+from contextlib import contextmanager
 from PIL import Image
 
 import os
@@ -29,6 +31,25 @@ from iris.controllers import ControllerConfigEnum, ControllerSpecificConfigEnum
 absolute_path_to_dlls = ControllerSpecificConfigEnum.THORLABS_CAMERA_DLL_PATH.value
 os.environ['PATH'] = absolute_path_to_dlls + os.pathsep + os.environ['PATH']
 os.add_dll_directory(absolute_path_to_dlls)
+
+
+_TSI_SDK_LOGGER_NAME = 'thorlabs_tsi_sdk'
+
+
+@contextmanager
+def _quiet_tsi_sdk():
+    """
+    Temporarily silences the Thorlabs SDK logger.
+
+    The SDK logs an error for every failed call (e.g. 'Could not get exposure time; ...'),
+    which floods the console once the camera has been unplugged. Wrap calls that are
+    expected to fail in this state so the connection loss is reported once, by us.
+    """
+    logger = logging.getLogger(_TSI_SDK_LOGGER_NAME)
+    previous_level = logger.level
+    logger.setLevel(logging.CRITICAL)
+    try: yield
+    finally: logger.setLevel(previous_level)
 
 
 class CameraController_Thorlabs(Class_CameraController):
@@ -69,6 +90,7 @@ class CameraController_Thorlabs(Class_CameraController):
         self._mirrory: bool = False
 
         self.flg_initialised = False
+        self._flg_camera_lost = False   # True once the connection dropped at runtime (e.g. USB unplugged)
         self._identifier: str = "unidentified Thorlabs camera"
 
         self._fresh_last_frame_count: int | None = None  # Frame count of the last fresh capture since arming
@@ -86,13 +108,16 @@ class CameraController_Thorlabs(Class_CameraController):
 
     def reinitialise_connection(self) -> None:
         """Reinitialise the camera connection, preserving the current exposure time and gain."""
+        # Only worth reading back while the camera still answers: probing a disconnected
+        # camera just produces a wall of SDK errors
         exposure_time_us = None
-        try: exposure_time_us = self.get_exposure_time_us()
-        except Exception: pass
-
         gain = None
-        try: gain = self.get_gain()
-        except Exception: pass
+        if self.is_camera_available():
+            try: exposure_time_us = self.get_exposure_time_us()
+            except Exception: pass
+
+            try: gain = self.get_gain()
+            except Exception: pass
 
         try: self.camera_termination()
         except Exception as e: print('CameraController_Thorlabs reinitialise_connection error:\n{}'.format(e))
@@ -110,6 +135,7 @@ class CameraController_Thorlabs(Class_CameraController):
 
     def _initialisation(self) -> None:
         self._lock.acquire()
+        self._flg_camera_lost = False
         try:
             self.controller = TLCameraSDK()
 
@@ -171,6 +197,7 @@ class CameraController_Thorlabs(Class_CameraController):
         except Exception as e:
             print('CameraController_Thorlabs initialisation error:\n{}'.format(e))
             self.flg_initialised = False
+            self._flg_camera_lost = True
 
             # A partially-initialised controller (e.g. no cameras were discovered, or
             # open_camera/config failed) must be disposed here, otherwise it is leaked:
@@ -192,33 +219,37 @@ class CameraController_Thorlabs(Class_CameraController):
     def camera_termination(self):
         self._lock.acquire()
 
-        # Camera and controller are torn down independently: a failed initialisation
-        # (e.g. no camera detected) can leave self.controller set with self.camera still
-        # None. Bailing out early here whenever self.camera isn't a TLCamera used to skip
-        # disposing self.controller entirely, leaking the live TLCameraSDK instance and
-        # making every subsequent reinitialisation attempt fail with
-        # "TLCameraSDK is already in use". Both are now disposed independently below.
-        if not isinstance(self.camera, TLCamera):
-            print('CameraController_Thorlabs termination warning: camera was not properly initialised or already terminated.')
-        else:
-            try: self.camera.disarm()
-            except Exception as e: print('camera_disarm error:\n{}'.format(e))
+        # The camera may already be physically gone (e.g. the USB cable was pulled), in which
+        # case every teardown call fails and the SDK logs each one. Silence the SDK for the
+        # whole teardown: our own messages below are enough.
+        with _quiet_tsi_sdk():
+            # Camera and controller are torn down independently: a failed initialisation
+            # (e.g. no camera detected) can leave self.controller set with self.camera still
+            # None. Bailing out early here whenever self.camera isn't a TLCamera used to skip
+            # disposing self.controller entirely, leaking the live TLCameraSDK instance and
+            # making every subsequent reinitialisation attempt fail with
+            # "TLCameraSDK is already in use". Both are now disposed independently below.
+            if not isinstance(self.camera, TLCamera):
+                print('CameraController_Thorlabs termination warning: camera was not properly initialised or already terminated.')
+            else:
+                try: self.camera.disarm()
+                except Exception as e: print('camera_disarm error:\n{}'.format(e))
 
-            if self._is_color and isinstance(self._clrprc_monoToColour, MonoToColorProcessor) and isinstance(self._colour_processor, TL_MTC):
-                try: self._clrprc_monoToColour.dispose()
-                except Exception as e: print('camera_termination colour processor error:\n{}'.format(e))
+                if self._is_color and isinstance(self._clrprc_monoToColour, MonoToColorProcessor) and isinstance(self._colour_processor, TL_MTC):
+                    try: self._clrprc_monoToColour.dispose()
+                    except Exception as e: print('camera_termination colour processor error:\n{}'.format(e))
 
-                try: self._colour_processor.dispose()
-                except Exception as e: print('camera_termination colour processor SDK error:\n{}'.format(e))
+                    try: self._colour_processor.dispose()
+                    except Exception as e: print('camera_termination colour processor SDK error:\n{}'.format(e))
 
-            try: self.camera.dispose()
-            except Exception as e: print('camera_termination error:\n{}'.format(e))
+                try: self.camera.dispose()
+                except Exception as e: print('camera_termination error:\n{}'.format(e))
 
-        if not isinstance(self.controller, TLCameraSDK):
-            print('CameraController_Thorlabs termination warning: controller was not properly initialised or already terminated.')
-        else:
-            try: self.controller.dispose()
-            except Exception as e: print('controller_dispose error:\n{}'.format(e))
+            if not isinstance(self.controller, TLCameraSDK):
+                print('CameraController_Thorlabs termination warning: controller was not properly initialised or already terminated.')
+            else:
+                try: self.controller.dispose()
+                except Exception as e: print('controller_dispose error:\n{}'.format(e))
 
         self.camera = None
         self.controller = None
@@ -228,11 +259,53 @@ class CameraController_Thorlabs(Class_CameraController):
         time.sleep(3)   # Wait for all terminations to complete
 
         self.flg_initialised = False
+        self._flg_camera_lost = False   # Nothing left to lose; a fresh initialisation decides the state
 
         self._lock.release()
 
     def get_initialisation_status(self) -> bool:
         return self.flg_initialised
+
+    def _is_camera_responsive(self) -> bool:
+        """
+        Whether there is a camera object that has not (yet) been flagged as lost.
+
+        Used by the internal '_unlocked' helpers, which also run during _initialisation(),
+        i.e. before flg_initialised is set.
+
+        Returns:
+            bool: True if the camera object may be addressed
+        """
+        return isinstance(self.camera, TLCamera) and not self._flg_camera_lost
+
+    def is_camera_available(self) -> bool:
+        """
+        Whether the camera can currently be talked to.
+
+        Returns False once a call has failed because the connection dropped, so the
+        caller (the video feed) can stop polling instead of retrying forever.
+
+        Returns:
+            bool: True if captures and parameter reads may be attempted
+        """
+        return self.flg_initialised and self._is_camera_responsive()
+
+    def _mark_camera_lost(self, context: str, exception: Exception) -> None:
+        """
+        Flags the connection as lost and reports it once.
+
+        Every subsequent call is short-circuited by is_camera_available(), so neither this
+        controller nor the SDK keeps logging the same failure for every dropped frame.
+
+        Args:
+            context (str): The operation that failed, used in the message
+            exception (Exception): The exception raised by the SDK
+        """
+        if self._flg_camera_lost: return
+
+        self._flg_camera_lost = True
+        self.flg_initialised = False
+        print('CameraController_Thorlabs: camera connection lost during {} - no camera available.\n{}'.format(context, exception))
 
     def set_exposure_time_us(self, exposure_time_us: int | float) -> None:
         """
@@ -241,14 +314,16 @@ class CameraController_Thorlabs(Class_CameraController):
         Args:
             exposure_time_us (int | float): Exposure time in microseconds
         """
-        if not isinstance(self.camera, TLCamera):
-            print('CameraController_Thorlabs set_exposure_time_us warning: camera is not properly initialised.')
+        if not self.is_camera_available():
+            print('CameraController_Thorlabs set_exposure_time_us warning: no camera available.')
             return
-        
+
+        if not isinstance(exposure_time_us, (int, float)):
+            raise ValueError("Exposure time must be an integer or float")
+
         with self._lock:
-            if not isinstance(exposure_time_us, (int, float)):
-                raise ValueError("Exposure time must be an integer or float")
-            self.camera.exposure_time_us = int(exposure_time_us)
+            try: self.camera.exposure_time_us = int(exposure_time_us)
+            except Exception as e: self._mark_camera_lost('set_exposure_time_us()', e)
 
     def get_exposure_time_us(self) -> int | float | None:
         """
@@ -257,12 +332,15 @@ class CameraController_Thorlabs(Class_CameraController):
         Returns:
             int | float: Exposure time in microseconds
         """
-        if not isinstance(self.camera, TLCamera):
-            print('CameraController_Thorlabs get_exposure_time_us warning: camera is not properly initialised.')
+        if not self.is_camera_available():
+            print('CameraController_Thorlabs get_exposure_time_us warning: no camera available.')
             return None
 
         with self._lock:
-            return self.camera.exposure_time_us
+            try: return self.camera.exposure_time_us
+            except Exception as e:
+                self._mark_camera_lost('get_exposure_time_us()', e)
+                return None
 
     def _get_gain_range_unlocked(self) -> tuple[int, int] | None:
         """
@@ -271,7 +349,7 @@ class CameraController_Thorlabs(Class_CameraController):
         Returns:
             tuple[int, int] | None: (min, max) gain in camera device units, or None if unavailable
         """
-        if not isinstance(self.camera, TLCamera): return None
+        if not self._is_camera_responsive(): return None
 
         try:
             gain_range = self.camera.gain_range
@@ -288,8 +366,8 @@ class CameraController_Thorlabs(Class_CameraController):
         Returns:
             tuple[int, int] | None: (min, max) gain, or None if the camera is not initialised
         """
-        if not isinstance(self.camera, TLCamera):
-            print('CameraController_Thorlabs get_gain_range warning: camera is not properly initialised.')
+        if not self.is_camera_available():
+            print('CameraController_Thorlabs get_gain_range warning: no camera available.')
             return None
 
         with self._lock:
@@ -303,8 +381,8 @@ class CameraController_Thorlabs(Class_CameraController):
             tuple[float, float] | None: (min, max) gain in dB, or None if the camera
                 is not initialised or does not support gain
         """
-        if not isinstance(self.camera, TLCamera):
-            print('CameraController_Thorlabs get_gain_range_db warning: camera is not properly initialised.')
+        if not self.is_camera_available():
+            print('CameraController_Thorlabs get_gain_range_db warning: no camera available.')
             return None
 
         with self._lock:
@@ -339,7 +417,7 @@ class CameraController_Thorlabs(Class_CameraController):
         Returns:
             bool: True if the gain was applied, False if unsupported or on error
         """
-        if not isinstance(self.camera, TLCamera): return False
+        if not self._is_camera_responsive(): return False
 
         gain_range = self._get_gain_range_unlocked()
         if gain_range is None or gain_range[1] <= 0: return False
@@ -353,7 +431,7 @@ class CameraController_Thorlabs(Class_CameraController):
             self.camera.gain = gain_clamped
             return True
         except Exception as e:
-            print('CameraController_Thorlabs set_gain error:\n{}'.format(e))
+            self._mark_camera_lost('set_gain()', e)
             return False
 
     def set_gain(self, gain: int | float) -> None:
@@ -364,8 +442,8 @@ class CameraController_Thorlabs(Class_CameraController):
         Args:
             gain (int | float): Gain in camera device units
         """
-        if not isinstance(self.camera, TLCamera):
-            print('CameraController_Thorlabs set_gain warning: camera is not properly initialised.')
+        if not self.is_camera_available():
+            print('CameraController_Thorlabs set_gain warning: no camera available.')
             return
 
         if not isinstance(gain, (int, float)):
@@ -385,14 +463,14 @@ class CameraController_Thorlabs(Class_CameraController):
         Returns:
             int | None: Gain in camera device units, or None if unavailable
         """
-        if not isinstance(self.camera, TLCamera):
-            print('CameraController_Thorlabs get_gain warning: camera is not properly initialised.')
+        if not self.is_camera_available():
+            print('CameraController_Thorlabs get_gain warning: no camera available.')
             return None
 
         with self._lock:
             try: return int(self.camera.gain)
             except Exception as e:
-                print('CameraController_Thorlabs get_gain error:\n{}'.format(e))
+                self._mark_camera_lost('get_gain()', e)
                 return None
 
     def _set_gain_db_unlocked(self, gain_db: int | float) -> bool:
@@ -406,7 +484,7 @@ class CameraController_Thorlabs(Class_CameraController):
         Returns:
             bool: True if the gain was applied, False if unsupported or on error
         """
-        if not isinstance(self.camera, TLCamera): return False
+        if not self._is_camera_responsive(): return False
 
         try: gain = self.camera.convert_decibels_to_gain(float(gain_db))
         except Exception as e:
@@ -423,8 +501,8 @@ class CameraController_Thorlabs(Class_CameraController):
         Args:
             gain_db (int | float): Gain in decibels
         """
-        if not isinstance(self.camera, TLCamera):
-            print('CameraController_Thorlabs set_gain_db warning: camera is not properly initialised.')
+        if not self.is_camera_available():
+            print('CameraController_Thorlabs set_gain_db warning: no camera available.')
             return
 
         if not isinstance(gain_db, (int, float)):
@@ -447,8 +525,8 @@ class CameraController_Thorlabs(Class_CameraController):
         gain = self.get_gain()
         if gain is None: return None
 
-        if not isinstance(self.camera, TLCamera):
-            print('CameraController_Thorlabs get_gain_db warning: camera is not properly initialised.')
+        if not self.is_camera_available():
+            print('CameraController_Thorlabs get_gain_db warning: no camera available.')
             return None
 
         try: return float(self.camera.convert_gain_to_decibels(gain))
@@ -457,24 +535,30 @@ class CameraController_Thorlabs(Class_CameraController):
             return None
 
     def frame_capture(self) -> np.ndarray | None:
-        if not isinstance(self.camera, TLCamera):
-            print('CameraController_Thorlabs frame_capture warning: camera is not properly initialised.')
-            return None
-        
+        # Silent early-out: the video feed polls this continuously, so a message here would
+        # be printed for every frame while no camera is available
+        if not self.is_camera_available(): return None
+
         image_1d: np.ndarray | None = None
-        
+
         with self._lock:
-            frame = self.camera.get_pending_frame_or_null()
-            if frame is not None:
-                image_1d = frame.image_buffer.copy()
-                # Skip ahead to the newest buffered frame: when frames are produced faster than they
-                # are polled, the oldest pending frame can be a couple of frame periods stale, which
-                # skews anything that pairs a frame with the stage position (e.g. autofocus)
-                old_timeout = self.camera.image_poll_timeout_ms
-                self.camera.image_poll_timeout_ms = 0
-                while (newer := self.camera.get_pending_frame_or_null()) is not None:
-                    image_1d = newer.image_buffer.copy()   # Copy before the SDK recycles the buffer
-                self.camera.image_poll_timeout_ms = old_timeout
+            try:
+                frame = self.camera.get_pending_frame_or_null()
+                if frame is not None:
+                    image_1d = frame.image_buffer.copy()
+                    # Skip ahead to the newest buffered frame: when frames are produced faster than they
+                    # are polled, the oldest pending frame can be a couple of frame periods stale, which
+                    # skews anything that pairs a frame with the stage position (e.g. autofocus)
+                    old_timeout = self.camera.image_poll_timeout_ms
+                    self.camera.image_poll_timeout_ms = 0
+                    while (newer := self.camera.get_pending_frame_or_null()) is not None:
+                        image_1d = newer.image_buffer.copy()   # Copy before the SDK recycles the buffer
+                    self.camera.image_poll_timeout_ms = old_timeout
+            except Exception as e:
+                # A polling failure means the camera went away (e.g. the USB cable was pulled):
+                # report it once and stop talking to the SDK until the connection is reinitialised
+                self._mark_camera_lost('frame_capture()', e)
+                return None
 
         if frame is None: return None
         
@@ -509,19 +593,22 @@ class CameraController_Thorlabs(Class_CameraController):
 
     def set_single_frame_trigger_mode(self, enabled: bool) -> None:
         """Switch between single-frame software trigger (True) and continuous (False) mode."""
-        if not isinstance(self.camera, TLCamera):
-            print('CameraController_Thorlabs set_single_frame_trigger_mode warning: camera is not properly initialised.')
+        if not self.is_camera_available():
+            print('CameraController_Thorlabs set_single_frame_trigger_mode warning: no camera available.')
             return
-        
+
         with self._lock:
-            self.camera.disarm()
-            # Set explicitly rather than relying on the camera's default (e.g. left over from ThorCam)
-            self.camera.operation_mode = OPERATION_MODE.SOFTWARE_TRIGGERED
-            self.camera.frames_per_trigger_zero_for_unlimited = 1 if enabled else 0
-            self.camera.arm(2)  # Arming also clears any frames still queued
-            self._fresh_last_frame_count = None
-            if not enabled:
-                self.camera.issue_software_trigger()  # restart continuous stream
+            try:
+                self.camera.disarm()
+                # Set explicitly rather than relying on the camera's default (e.g. left over from ThorCam)
+                self.camera.operation_mode = OPERATION_MODE.SOFTWARE_TRIGGERED
+                self.camera.frames_per_trigger_zero_for_unlimited = 1 if enabled else 0
+                self.camera.arm(2)  # Arming also clears any frames still queued
+                self._fresh_last_frame_count = None
+                if not enabled:
+                    self.camera.issue_software_trigger()  # restart continuous stream
+            except Exception as e:
+                self._mark_camera_lost('set_single_frame_trigger_mode()', e)
 
     def _get_min_trigger_interval_s(self) -> float:
         """
@@ -557,12 +644,15 @@ class CameraController_Thorlabs(Class_CameraController):
         Camera must already be in single-frame trigger mode â€” call
         set_single_frame_trigger_mode(True) once before the tiling loop.
         """
-        if not isinstance(self.camera, TLCamera):
-            print('CameraController_Thorlabs img_capture_fresh warning: camera is not properly initialised.')
+        if not self.is_camera_available():
+            print('CameraController_Thorlabs img_capture_fresh warning: no camera available.')
             return None
         
         with self._lock:
-            old_timeout = self.camera.image_poll_timeout_ms
+            try: old_timeout = self.camera.image_poll_timeout_ms
+            except Exception as e:
+                self._mark_camera_lost('img_capture_fresh()', e)
+                return None
             self.camera.image_poll_timeout_ms = 0
             # In single-frame mode nothing should be queued here; anything that is is a stale frame
             list_stale_counts = []
