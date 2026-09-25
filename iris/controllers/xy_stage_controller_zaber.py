@@ -28,6 +28,24 @@ from zaber_motion.ascii import Connection
 
 from iris.controllers import ControllerConfigEnum, ControllerSpecificConfigEnum, ControllerDirectionEnum
 
+def _as_portable_exception(e:zm.MotionLibException) -> RuntimeError:
+    """
+    Converts a Zaber exception into one that survives a multiprocessing-manager round trip.
+
+    Zaber's exceptions declare required __init__ arguments that they do not keep in .args
+    (e.g. CommandFailedException(message, custom_data)). Pickle rebuilds an exception by calling
+    cls(*args), so unpickling one in the calling process raises TypeError instead - which destroys
+    the real device error and kills the calling thread before it can clean up.
+
+    Args:
+        e (zm.MotionLibException): The Zaber exception to convert
+
+    Returns:
+        RuntimeError: An equivalent exception. Zaber's __str__ already prefixes the original type
+            name, so str(e) alone preserves both it and the device's message.
+    """
+    return RuntimeError(str(e))
+
 class XYController_Zaber(Class_XYController):
     def __init__(self,**kwargs) -> None:
         self.conn:Connection = None         # Connection to the device
@@ -383,15 +401,20 @@ class XYController_Zaber(Class_XYController):
         
         print("\n!!!!! Coordinate calibration/Homing starting !!!!!")
         # Home the device, use multithreading to operate both motors at once
-        with self._lock:
-            self.motorx_state = 1
-            self.motory_state = 1
-            self.motorx.home(wait_until_idle=False)
-            self.motory.home(wait_until_idle=False)
-            
-            self.motorx.wait_until_idle()
-            self.motory.wait_until_idle()
-            
+        self.motorx_state = 1
+        self.motory_state = 1
+        try:
+            with self._lock:
+                self.motorx.home(wait_until_idle=False)
+                self.motory.home(wait_until_idle=False)
+
+                self.motorx.wait_until_idle()
+                self.motory.wait_until_idle()
+        except zm.MotionLibException as e:
+            raise _as_portable_exception(e) from None
+        finally:
+            # Must always run: a running flag left set blocks every subsequent movement request,
+            # for the whole application, until it is restarted.
             self.motorx_state = 0
             self.motory_state = 0
         print(">>>>> Coordinate calibration/Homing finished <<<<<")
@@ -408,27 +431,31 @@ class XYController_Zaber(Class_XYController):
             print("!!!!! Motor is currently running, movement request BLOCKED !!!!!")
             return
         
-        self.motorx_state = 1
-        self.motory_state = 1
-        
         # Remap the coordinates, ensure the motors move in the correct direction
         coor_x,coor_y = self._remap_coordinates_flip_set(coor_abs)
-        
-        with self._lock:
-            # Use multithreading to operate both motors at once
-            self.motorx.move_absolute(coor_x,unit=self.unit_len,
-                velocity=self.motorx_vel_mms,velocity_unit=self.unit_vel,
-                wait_until_idle=False)
-            self.motory.move_absolute(coor_y,unit=self.unit_len,
-                velocity=self.motory_vel_mms,velocity_unit=self.unit_vel,
-                wait_until_idle=False)
-        
-        self.motorx.wait_until_idle()
-        self.motory.wait_until_idle()
-        
-        self.motorx_state = 0
-        self.motory_state = 0
-        
+
+        self.motorx_state = 1
+        self.motory_state = 1
+        try:
+            with self._lock:
+                # Use multithreading to operate both motors at once
+                self.motorx.move_absolute(coor_x,unit=self.unit_len,
+                    velocity=self.motorx_vel_mms,velocity_unit=self.unit_vel,
+                    wait_until_idle=False)
+                self.motory.move_absolute(coor_y,unit=self.unit_len,
+                    velocity=self.motory_vel_mms,velocity_unit=self.unit_vel,
+                    wait_until_idle=False)
+
+            self.motorx.wait_until_idle()
+            self.motory.wait_until_idle()
+        except zm.MotionLibException as e:
+            raise _as_portable_exception(e) from None
+        finally:
+            # Must always run: a running flag left set blocks every subsequent movement request,
+            # for the whole application, until it is restarted.
+            self.motorx_state = 0
+            self.motory_state = 0
+
     def move_continuous(self,dir:str):
         """
         Moves the motor with a continuous motion until a stop command
@@ -442,36 +469,47 @@ class XYController_Zaber(Class_XYController):
             return
         
         dir = self.dict_ctrl_remap[dir] # Remap the control
-        
-        with self._lock:
-            if dir == 'xfwd':
-                self.motorx_state = 1
-                self.motorx.move_velocity(self.motorx_vel_mms,unit=self.unit_vel)
-            elif dir == 'xrev':
-                self.motorx_state = 1
-                self.motorx.move_velocity(-1*self.motorx_vel_mms,unit=self.unit_vel)
-            elif dir == 'yfwd':
-                self.motory_state = 1
-                self.motory.move_velocity(self.motory_vel_mms,unit=self.unit_vel)
-            elif dir == 'yrev':
-                self.motory_state = 1
-                self.motory.move_velocity(-1*self.motory_vel_mms,unit=self.unit_vel)
-            
+
+        # Unlike the other movements, the running flag is deliberately left set on success:
+        # the motion continues until stop_move() clears it.
+        try:
+            with self._lock:
+                if dir == 'xfwd':
+                    self.motorx_state = 1
+                    self.motorx.move_velocity(self.motorx_vel_mms,unit=self.unit_vel)
+                elif dir == 'xrev':
+                    self.motorx_state = 1
+                    self.motorx.move_velocity(-1*self.motorx_vel_mms,unit=self.unit_vel)
+                elif dir == 'yfwd':
+                    self.motory_state = 1
+                    self.motory.move_velocity(self.motory_vel_mms,unit=self.unit_vel)
+                elif dir == 'yrev':
+                    self.motory_state = 1
+                    self.motory.move_velocity(-1*self.motory_vel_mms,unit=self.unit_vel)
+        except zm.MotionLibException as e:
+            self.motorx_state = 0
+            self.motory_state = 0
+            raise _as_portable_exception(e) from None
+
     def stop_move(self):
         """
         Stops the continuous movement of the motors
         """
         
-        with self._lock:
-            self.motorx.stop(wait_until_idle=False)
-            self.motory.stop(wait_until_idle=False)
-        
-        self.motorx.wait_until_idle()
-        self.motory.wait_until_idle()
-        
-        # Update the motor test
-        self.motorx_state = 0
-        self.motory_state = 0
+        try:
+            with self._lock:
+                self.motorx.stop(wait_until_idle=False)
+                self.motory.stop(wait_until_idle=False)
+
+            self.motorx.wait_until_idle()
+            self.motory.wait_until_idle()
+        except zm.MotionLibException as e:
+            raise _as_portable_exception(e) from None
+        finally:
+            # Must always run: a running flag left set blocks every subsequent movement request,
+            # for the whole application, until it is restarted.
+            self.motorx_state = 0
+            self.motory_state = 0
     
     def get_jog(self):
         """
@@ -529,25 +567,31 @@ class XYController_Zaber(Class_XYController):
         
         self.motorx_state = 1
         self.motory_state = 1
-        with self._lock:
-            if direction == 'xfwd':
-                self.motorx.move_relative(self._jog_step_mm,unit=self.unit_len,
-                    velocity=self.motorx_vel_mms,velocity_unit=self.unit_vel,
-                    wait_until_idle=True)
-            elif direction == 'xrev':
-                self.motorx.move_relative(-1*self._jog_step_mm,unit=self.unit_len,
-                    velocity=self.motorx_vel_mms,velocity_unit=self.unit_vel,
-                    wait_until_idle=True)
-            elif direction == 'yfwd':
-                self.motory.move_relative(self._jog_step_mm,unit=self.unit_len,
-                    velocity=self.motory_vel_mms,velocity_unit=self.unit_vel,
-                    wait_until_idle=True)
-            elif direction == 'yrev':
-                self.motory.move_relative(-1*self._jog_step_mm,unit=self.unit_len,
-                    velocity=self.motory_vel_mms,velocity_unit=self.unit_vel,
-                    wait_until_idle=True)
-        self.motorx_state = 0
-        self.motory_state = 0
+        try:
+            with self._lock:
+                if direction == 'xfwd':
+                    self.motorx.move_relative(self._jog_step_mm,unit=self.unit_len,
+                        velocity=self.motorx_vel_mms,velocity_unit=self.unit_vel,
+                        wait_until_idle=True)
+                elif direction == 'xrev':
+                    self.motorx.move_relative(-1*self._jog_step_mm,unit=self.unit_len,
+                        velocity=self.motorx_vel_mms,velocity_unit=self.unit_vel,
+                        wait_until_idle=True)
+                elif direction == 'yfwd':
+                    self.motory.move_relative(self._jog_step_mm,unit=self.unit_len,
+                        velocity=self.motory_vel_mms,velocity_unit=self.unit_vel,
+                        wait_until_idle=True)
+                elif direction == 'yrev':
+                    self.motory.move_relative(-1*self._jog_step_mm,unit=self.unit_len,
+                        velocity=self.motory_vel_mms,velocity_unit=self.unit_vel,
+                        wait_until_idle=True)
+        except zm.MotionLibException as e:
+            raise _as_portable_exception(e) from None
+        finally:
+            # Must always run: a running flag left set blocks every subsequent movement request,
+            # for the whole application, until it is restarted.
+            self.motorx_state = 0
+            self.motory_state = 0
         
     def terminate(self):
         """

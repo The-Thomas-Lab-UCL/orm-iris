@@ -171,37 +171,54 @@ class CameraController_Thorlabs(Class_CameraController):
         except Exception as e:
             print('CameraController_Thorlabs initialisation error:\n{}'.format(e))
             self.flg_initialised = False
+
+            # A partially-initialised controller (e.g. no cameras were discovered, or
+            # open_camera/config failed) must be disposed here, otherwise it is leaked:
+            # the next reinitialisation attempt would call TLCameraSDK() again while the
+            # old instance is still alive, which the SDK rejects with
+            # "TLCameraSDK is already in use", permanently blocking further attempts.
+            if isinstance(self.camera, TLCamera):
+                try: self.camera.dispose()
+                except Exception as ce: print('CameraController_Thorlabs initialisation cleanup camera error:\n{}'.format(ce))
+                self.camera = None
+
+            if isinstance(self.controller, TLCameraSDK):
+                try: self.controller.dispose()
+                except Exception as ce: print('CameraController_Thorlabs initialisation cleanup controller error:\n{}'.format(ce))
+                self.controller = None
         finally:
             self._lock.release()
 
     def camera_termination(self):
         self._lock.acquire()
-        
+
+        # Camera and controller are torn down independently: a failed initialisation
+        # (e.g. no camera detected) can leave self.controller set with self.camera still
+        # None. Bailing out early here whenever self.camera isn't a TLCamera used to skip
+        # disposing self.controller entirely, leaking the live TLCameraSDK instance and
+        # making every subsequent reinitialisation attempt fail with
+        # "TLCameraSDK is already in use". Both are now disposed independently below.
         if not isinstance(self.camera, TLCamera):
             print('CameraController_Thorlabs termination warning: camera was not properly initialised or already terminated.')
-            self._lock.release()
-            return
-        
-        try: self.camera.disarm()
-        except Exception as e: print('camera_disarm error:\n{}'.format(e))
-        
-        if self._is_color and isinstance(self._clrprc_monoToColour, MonoToColorProcessor) and isinstance(self._colour_processor, TL_MTC):
-            try: self._clrprc_monoToColour.dispose()
-            except Exception as e: print('camera_termination colour processor error:\n{}'.format(e))
+        else:
+            try: self.camera.disarm()
+            except Exception as e: print('camera_disarm error:\n{}'.format(e))
 
-            try: self._colour_processor.dispose()
-            except Exception as e: print('camera_termination colour processor SDK error:\n{}'.format(e))
+            if self._is_color and isinstance(self._clrprc_monoToColour, MonoToColorProcessor) and isinstance(self._colour_processor, TL_MTC):
+                try: self._clrprc_monoToColour.dispose()
+                except Exception as e: print('camera_termination colour processor error:\n{}'.format(e))
 
-        try: self.camera.dispose()
-        except Exception as e: print('camera_termination error:\n{}'.format(e))
+                try: self._colour_processor.dispose()
+                except Exception as e: print('camera_termination colour processor SDK error:\n{}'.format(e))
+
+            try: self.camera.dispose()
+            except Exception as e: print('camera_termination error:\n{}'.format(e))
 
         if not isinstance(self.controller, TLCameraSDK):
             print('CameraController_Thorlabs termination warning: controller was not properly initialised or already terminated.')
-            self._lock.release()
-            return
-        
-        try: self.controller.dispose()
-        except Exception as e: print('controller_dispose error:\n{}'.format(e))
+        else:
+            try: self.controller.dispose()
+            except Exception as e: print('controller_dispose error:\n{}'.format(e))
 
         self.camera = None
         self.controller = None
