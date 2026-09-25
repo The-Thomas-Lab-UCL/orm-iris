@@ -56,8 +56,6 @@ class ImageTiling_Params:
     shape:tuple[int,int]
     cropx_pixel:int
     cropy_pixel:int
-    cropx_mm:float
-    cropy_mm:float
     exposure_ms:float = 0.0  # camera exposure time; used to compute per-tile capture timeout
 
     def check_validity(self) -> bool:
@@ -71,8 +69,6 @@ class ImageTiling_Params:
         assert all(isinstance(i, int) and i > 0 for i in self.shape), 'shape must be positive integers'
         assert isinstance(self.cropx_pixel, int) and self.cropx_pixel >= 0, 'cropx_pixel must be a non-negative integer'
         assert isinstance(self.cropy_pixel, int) and self.cropy_pixel >= 0, 'cropy_pixel must be a non-negative integer'
-        assert isinstance(self.cropx_mm, (int, float)), 'cropx_mm must be a number'
-        assert isinstance(self.cropy_mm, (int, float)), 'cropy_mm must be a number'
         return True    
 
 class ImageProcessor_Worker(QObject):
@@ -189,8 +185,6 @@ class ImageProcessor_Worker(QObject):
         shape = tiling_params.shape
         cropx_pixel = tiling_params.cropx_pixel
         cropy_pixel = tiling_params.cropy_pixel
-        cropx_mm = tiling_params.cropx_mm
-        cropy_mm = tiling_params.cropy_mm
 
         totalcoor = len(meaCoor_mm.mapping_coordinates)
         self.flg_stop.clear()
@@ -236,8 +230,9 @@ class ImageProcessor_Worker(QObject):
 
                 imgUnit.add_measurement(
                         timestamp=get_timestamp_us_str(),
-                        x_coor=x-cropx_mm,
-                        y_coor=y-cropy_mm,
+                        # Stage coordinate as-is: the crop is already compensated in the laser offset
+                        x_coor=x,
+                        y_coor=y,
                         z_coor=z,
                         image=img
                     )
@@ -662,8 +657,6 @@ class Wdg_HiLvlTiling(qw.QWidget):
             shape=shape,
             cropx_pixel=cropx_pixel,
             cropy_pixel=cropy_pixel,
-            cropx_mm=cropx_mm,
-            cropy_mm=cropy_mm,
             exposure_ms=exposure_ms,
         )
         
