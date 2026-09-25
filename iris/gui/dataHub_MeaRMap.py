@@ -38,6 +38,21 @@ DATAHUBPLUS_MAX_FREQ_HZ = 1.0 # Maximum update frequency for the DataHubPlus tre
 DATAHUB_OFFLOADCHECK_INTERVAL_SEC = 10.0  # Minimum interval between offload checks in seconds
 DATAHUB_OFFLOAD_MINMEMORY_GB = 1.0  # Minimum available memory in GB, under which offloading is triggered
 
+class SortableTreeItem(qw.QTreeWidgetItem):
+    """
+    QTreeWidgetItem that sorts numerically when a column holds a number in its
+    UserRole data (e.g., the index or measurement count columns), and falls back
+    to case-insensitive text comparison otherwise.
+    """
+    def __lt__(self, other: qw.QTreeWidgetItem) -> bool:
+        tree = self.treeWidget()
+        col = tree.sortColumn() if tree is not None else 0
+        val_self = self.data(col, Qt.ItemDataRole.UserRole)
+        val_other = other.data(col, Qt.ItemDataRole.UserRole)
+        if isinstance(val_self, (int, float)) and isinstance(val_other, (int, float)):
+            return val_self < val_other
+        return self.text(col).lower() < other.text(col).lower()
+
 class Dlg_PartialLoad(qw.QDialog, Ui_dataHub_Raman_partialLoad):
     """Dialog that lists all mapping units from a .db file as checkable items."""
 
@@ -331,6 +346,12 @@ class Wdg_DataHub_Mapping(qw.QWidget):
     
     sig_autosave_db_delete = Signal(str, threading.Event)  # Emitted to delete the autosaved database file
 
+    # Treeview column indices
+    _COL_INDEX = 0      # Order in which the unit was added to the hub (1-based)
+    _COL_NAME = 1
+    _COL_NUMMEA = 2
+    _COL_METADATA = 3
+
     def __init__(self, parent:Any, mappingHub:MeaRMap_Hub|None=None,autosave:bool=False):
         """
         Initialises the data hub frame. This frame stores all the data from the measurement session.
@@ -366,8 +387,11 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
         # Widgets to show the stored data
         self._tree = wdg.tree_data
-        self._tree.setColumnCount(3)
-        self._tree.setHeaderLabels(["Region of interest name", "Measurements", "Metadata"])
+        self._tree.setColumnCount(4)
+        self._tree.setHeaderLabels(["#", "Region of interest name", "Measurements", "Metadata"])
+        # Click a header to sort by that column; click '#' to return to the acquisition order
+        self._tree.setSortingEnabled(True)
+        self._tree.sortByColumn(self._COL_INDEX, Qt.SortOrder.AscendingOrder)
         
         # Set up the searchbar
         wdg.ent_searchbar.textChanged.connect(lambda: self.update_tree(keep_selection=False))
@@ -425,7 +449,10 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._update_tree_timer.setSingleShot(True)
         self._update_tree_timer.setInterval(50)  # 50 ms debounce
         self._update_tree_timer.timeout.connect(self.update_tree)
-        self._sig_req_update_tree.connect(self._update_tree_timer.start)
+        # The hub observers emit this signal from whichever thread modified the hub (e.g. another
+        # panel's DataHub_Worker). Force a queued connection to a slot on this widget so the timer
+        # is always (re)started from the GUI thread, never from the worker thread.
+        self._sig_req_update_tree.connect(self._request_update_tree, Qt.ConnectionType.QueuedConnection)
         
     # > Autosave info <
         # Autosave parameters
@@ -492,7 +519,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         if len(selections) == 0:
             self.sig_tree_selection_str.emit("")
         else:
-            unit_name = selections[0].text(0)
+            unit_name = selections[0].text(self._COL_NAME)
             self.sig_tree_selection_str.emit(unit_name)
             
         self.sig_tree_selection.emit()
@@ -511,7 +538,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
         list_units = []
         for item in selections:
-            unit_name = item.text(0)
+            unit_name = item.text(self._COL_NAME)
             try: unit = self._MappingHub.get_MappingUnit(unit_name=unit_name)
             except ValueError: continue
             list_units.append(unit)
@@ -552,6 +579,13 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         return list_matches_id
     
     @Slot()
+    def _request_update_tree(self):
+        """
+        Restarts the debounce timer for the treeview update. Must run in the GUI thread.
+        """
+        self._update_tree_timer.start()
+    
+    @Slot()
     def update_tree(self, keep_selection:bool=True):
         # Store the current selections
         list_unitID = [unit.get_unit_id() for unit in self.get_selected_MappingUnit()]
@@ -560,12 +594,21 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._tree.clearSelection()
         self._tree.clear()
         list_unit_ids, list_unit_names, list_metadata, list_num_measurements = self._MappingHub.get_summary_units()
-        
+
+        # While searching, show the results by relevance; otherwise use the user-selected column sort.
+        # (Disabling sorting keeps the header's sort column/order, so it is restored once the search is cleared)
+        flg_searching = bool(self._widget.ent_searchbar.text())
+        self._tree.setSortingEnabled(False)
+
         for unit_id in list_matched_ids:
             idx = list_unit_ids.index(unit_id)
-            qw.QTreeWidgetItem(self._tree,
-                [list_unit_names[idx], str(list_num_measurements[idx]), str(list_metadata[idx])])
-            
+            item = SortableTreeItem(self._tree,
+                [str(idx + 1), list_unit_names[idx], str(list_num_measurements[idx]), str(list_metadata[idx])])
+            item.setData(self._COL_INDEX, Qt.ItemDataRole.UserRole, idx + 1)
+            item.setData(self._COL_NUMMEA, Qt.ItemDataRole.UserRole, list_num_measurements[idx])
+
+        if not flg_searching: self._tree.setSortingEnabled(True)
+
         # Set the selection back to the previous selection
         if keep_selection: self.set_selection_unitID(list_unitID)
         
@@ -592,7 +635,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         # Iterate through all top-level items
         for i in range(root.childCount()):
             item = root.child(i)
-            unit_name_in_tree = item.text(0) 
+            unit_name_in_tree = item.text(self._COL_NAME) 
             
             # Check if the item's ID is in our target list
             if unit_name_in_tree in list_name: item.setSelected(True) 
@@ -662,7 +705,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
                 return
 
             if len(selections) == 1:
-                unit_name = selections[0].text(0)
+                unit_name = selections[0].text(self._COL_NAME)
                 unit = self._MappingHub.get_MappingUnit(unit_name=unit_name)
                 new_name, ok = qw.QInputDialog.getText(
                     None, "Rename Mapping Unit",
@@ -672,7 +715,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
                     self._MappingHub.rename_mapping_unit(unit.get_unit_id(), new_name)
                     self._flg_issaved_db = False
             else:
-                names = [item.text(0) for item in selections]
+                names = [item.text(self._COL_NAME) for item in selections]
                 dlg = Dlg_MultiRename(names, parent=self)
                 if dlg.exec() != qw.QDialog.DialogCode.Accepted:
                     return
@@ -706,7 +749,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
             qw.QMessageBox.Yes | qw.QMessageBox.No, qw.QMessageBox.No) # type: ignore
         if flg_remove != qw.QMessageBox.Yes: return  # type: ignore
         
-        list_names = [item.text(0) for item in selections]
+        list_names = [item.text(self._COL_NAME) for item in selections]
         
         self._sig_req_delte_unit.emit(list_names)
         

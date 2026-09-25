@@ -10,7 +10,7 @@ import os
 from multiprocessing import Lock
 
 from thorlabs_tsi_sdk.tl_camera import TLCameraSDK, TLCamera
-from thorlabs_tsi_sdk.tl_camera_enums import SENSOR_TYPE
+from thorlabs_tsi_sdk.tl_camera_enums import SENSOR_TYPE, OPERATION_MODE
 from thorlabs_tsi_sdk.tl_mono_to_color_processor import MonoToColorProcessorSDK as TL_MTC
 from thorlabs_tsi_sdk.tl_mono_to_color_processor import MonoToColorProcessor
 from thorlabs_tsi_sdk.tl_mono_to_color_enums import COLOR_SPACE as TL_ClrSpc
@@ -70,6 +70,10 @@ class CameraController_Thorlabs(Class_CameraController):
 
         self.flg_initialised = False
         self._identifier: str = "unidentified Thorlabs camera"
+
+        self._fresh_last_frame_count: int | None = None  # Frame count of the last fresh capture since arming
+        self._time_last_trigger: float = 0.0    # time.perf_counter() of the last single-frame software trigger
+        self._frame_time_supported: bool = True # frame_time_us is only supported by scientific CCD cameras
 
         try: self._initialisation()
         except Exception as e: print('CameraController_Thorlabs initialisation error:\n{}'.format(e))
@@ -461,7 +465,16 @@ class CameraController_Thorlabs(Class_CameraController):
         
         with self._lock:
             frame = self.camera.get_pending_frame_or_null()
-            if frame is not None: image_1d = frame.image_buffer.copy()
+            if frame is not None:
+                image_1d = frame.image_buffer.copy()
+                # Skip ahead to the newest buffered frame: when frames are produced faster than they
+                # are polled, the oldest pending frame can be a couple of frame periods stale, which
+                # skews anything that pairs a frame with the stage position (e.g. autofocus)
+                old_timeout = self.camera.image_poll_timeout_ms
+                self.camera.image_poll_timeout_ms = 0
+                while (newer := self.camera.get_pending_frame_or_null()) is not None:
+                    image_1d = newer.image_buffer.copy()   # Copy before the SDK recycles the buffer
+                self.camera.image_poll_timeout_ms = old_timeout
 
         if frame is None: return None
         
@@ -502,10 +515,41 @@ class CameraController_Thorlabs(Class_CameraController):
         
         with self._lock:
             self.camera.disarm()
+            # Set explicitly rather than relying on the camera's default (e.g. left over from ThorCam)
+            self.camera.operation_mode = OPERATION_MODE.SOFTWARE_TRIGGERED
             self.camera.frames_per_trigger_zero_for_unlimited = 1 if enabled else 0
-            self.camera.arm(2)
+            self.camera.arm(2)  # Arming also clears any frames still queued
+            self._fresh_last_frame_count = None
             if not enabled:
                 self.camera.issue_software_trigger()  # restart continuous stream
+
+    def _get_min_trigger_interval_s(self) -> float:
+        """
+        Minimum time between single-frame software triggers. The camera silently ignores a trigger
+        issued before the previous frame's frame time (exposure + readout) has elapsed.
+        The caller must already hold self._lock.
+
+        Returns:
+            float: Minimum trigger interval [s], including a safety margin
+        """
+        assert isinstance(self.camera, TLCamera)
+        frame_time_us = None
+        if self._frame_time_supported:
+            try: frame_time_us = self.camera.frame_time_us
+            except Exception: self._frame_time_supported = False    # Don't retry: the SDK logs every failure
+        if frame_time_us is None:
+            try: readout_us = self.camera.sensor_readout_time_ns / 1000
+            except Exception: readout_us = 0.0
+            frame_time_us = self.camera.exposure_time_us + readout_us
+        return frame_time_us * 1e-6 * 1.2 + 0.01
+
+    def _wait_trigger_ready(self) -> None:
+        """
+        Blocks until the camera can accept another single-frame software trigger.
+        The caller must already hold self._lock.
+        """
+        wait_s = self._time_last_trigger + self._get_min_trigger_interval_s() - time.perf_counter()
+        if wait_s > 0: time.sleep(wait_s)
 
     def img_capture_fresh(self) -> Image.Image | None:
         """
@@ -520,16 +564,41 @@ class CameraController_Thorlabs(Class_CameraController):
         with self._lock:
             old_timeout = self.camera.image_poll_timeout_ms
             self.camera.image_poll_timeout_ms = 0
-            while self.camera.get_pending_frame_or_null() is not None:
-                pass
+            # In single-frame mode nothing should be queued here; anything that is is a stale frame
+            list_stale_counts = []
+            while (stale := self.camera.get_pending_frame_or_null()) is not None:
+                list_stale_counts.append(stale.frame_count)
+            if list_stale_counts:
+                print(f'CameraController_Thorlabs img_capture_fresh warning: discarded {len(list_stale_counts)} '
+                      f'stale frame(s) before triggering (frame counts {list_stale_counts}, '
+                      f'last fresh frame count {self._fresh_last_frame_count})')
+
+            self._wait_trigger_ready()
             self.camera.issue_software_trigger()
-            self.camera.image_poll_timeout_ms = max(100, round(self.camera.exposure_time_us / 1000) * 2 + 50)
+            self._time_last_trigger = time.perf_counter()
+            # Generous window: exposure + readout + transfer. A too-tight window returns None while the
+            # frame is still in flight, and that late frame then gets delivered as the NEXT tile's image
+            self.camera.image_poll_timeout_ms = max(1000, round(self.camera.exposure_time_us / 1000) * 2 + 500)
             frame = self.camera.get_pending_frame_or_null()
+            if frame is None:
+                print('CameraController_Thorlabs img_capture_fresh warning: triggered frame timed out, re-arming')
+                # Re-arming clears the queue, so this trigger's late frame can never be delivered
+                # as the next capture's image
+                self.camera.disarm()
+                self.camera.arm(2)
+                self._fresh_last_frame_count = None
+                image_1d = None
+            else:
+                # Each trigger should produce exactly one frame, so frame counts must be consecutive
+                expected_count = None if self._fresh_last_frame_count is None else self._fresh_last_frame_count + 1
+                if expected_count is not None and frame.frame_count != expected_count:
+                    print(f'CameraController_Thorlabs img_capture_fresh warning: frame count {frame.frame_count}, '
+                          f'expected {expected_count}: the camera produced frames without a trigger')
+                self._fresh_last_frame_count = frame.frame_count
+                image_1d = frame.image_buffer.copy()    # Copy before the SDK recycles the buffer
             self.camera.image_poll_timeout_ms = old_timeout
 
-        if frame is None: return None
-
-        image_1d = frame.image_buffer.copy()
+        if image_1d is None: return None
         
         if self._is_color and isinstance(self._clrprc_monoToColour, MonoToColorProcessor):
             image_array = self._clrprc_monoToColour.transform_to_24(

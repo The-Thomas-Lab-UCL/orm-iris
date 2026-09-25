@@ -42,6 +42,62 @@
           </item>
          </layout>
         </widget>
+        <widget class="QWidget" name="tab_2">
+         <attribute name="title">
+          <string>Image visualiser</string>
+         </attribute>
+         <layout class="QHBoxLayout" name="horizontalLayout">
+          <item>
+           <layout class="QVBoxLayout" name="verticalLayout_3">
+            <item>
+             <layout class="QVBoxLayout" name="lyt_datahubImg"/>
+            </item>
+            <item>
+             <layout class="QVBoxLayout" name="lyt_datahubMap"/>
+            </item>
+            <item>
+             <layout class="QVBoxLayout" name="lyt_options">
+              <item>
+               <widget class="QGroupBox" name="groupBox">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="Preferred" vsizetype="Minimum">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="title">
+                 <string>Visualisation</string>
+                </property>
+                <layout class="QVBoxLayout" name="verticalLayout_4">
+                 <item>
+                  <widget class="QRadioButton" name="rad_onlyImg">
+                   <property name="text">
+                    <string>Only show image</string>
+                   </property>
+                   <property name="checked">
+                    <bool>true</bool>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QRadioButton" name="rad_overlay">
+                   <property name="text">
+                    <string>Overlay Raman mapping on the image</string>
+                   </property>
+                  </widget>
+                 </item>
+                </layout>
+               </widget>
+              </item>
+             </layout>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <layout class="QVBoxLayout" name="lyt_plotter"/>
+          </item>
+         </layout>
+        </widget>
        </widget>
       </item>
      </layout>
@@ -54,7 +110,7 @@
      <x>0</x>
      <y>0</y>
      <width>1088</width>
-     <height>30</height>
+     <height>39</height>
     </rect>
    </property>
   </widget>

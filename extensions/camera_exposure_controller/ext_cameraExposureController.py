@@ -13,6 +13,7 @@ if __name__ == '__main__':
 import math
 
 import numpy as np
+from PIL import Image
 
 import PySide6.QtWidgets as qw
 from PySide6.QtCore import Qt, Slot, Signal, QObject, QThread, QTimer
@@ -31,10 +32,17 @@ from extensions.camera_exposure_controller.camera_exposure_controller_ui import 
 class _HistogramWorker(QObject):
     sig_histogram = Signal(np.ndarray)
 
-    def __init__(self, camera: Camera):
+    def __init__(self):
         super().__init__()
-        self._camera = camera
+        self._latest_frame: Image.Image | None = None   # Latest video frame not yet histogrammed
         self._timer: QTimer | None = None
+
+    @Slot(object, Image.Image)
+    def set_latest_frame(self, _timestamp_us, img: Image.Image):
+        # Frames come from the video worker rather than being polled from the camera: polling
+        # competed with the video feed for frames and, in single-frame (tiling) mode, held the
+        # camera lock for the full poll timeout since no untriggered frames ever arrive
+        self._latest_frame = img
 
     @Slot()
     def start(self):
@@ -57,9 +65,10 @@ class _HistogramWorker(QObject):
     @Slot()
     def _capture_and_emit(self):
         try:
-            frame = self._camera.frame_capture()
-            if frame is None:
+            img, self._latest_frame = self._latest_frame, None
+            if img is None:
                 return
+            frame = np.asarray(img)
             gray = np.mean(frame, axis=2).astype(np.uint8) if frame.ndim == 3 else frame.astype(np.uint8)
             counts, _ = np.histogram(gray, bins=256, range=(0, 255))
             self.sig_histogram.emit(counts)
@@ -263,11 +272,13 @@ class Ext_CameraExposureController(Ui_camera_exposure_controller, Extension_Main
         self._hist_ax.set_ylabel('Count', fontsize=7)
         self._hist_ax.tick_params(labelsize=6)
 
-        self._hist_worker = _HistogramWorker(self._camera)
+        self._hist_worker = _HistogramWorker()
         self._hist_thread = QThread(self)
         self._hist_worker.moveToThread(self._hist_thread)
         self._hist_thread.finished.connect(self._hist_worker.deleteLater)
         self._hist_worker.sig_histogram.connect(self._update_histogram)
+        video_worker = self._intermediary.get_video_motion_controller_gui().get_video_worker()
+        video_worker.sig_raw_img.connect(self._hist_worker.set_latest_frame)
         self._sig_hist_start.connect(self._hist_worker.start)
         self._sig_hist_stop.connect(self._hist_worker.stop)
         self._hist_thread.start()

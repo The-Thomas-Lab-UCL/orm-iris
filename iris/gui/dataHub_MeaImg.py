@@ -3,7 +3,7 @@ A hub to manage all the ImageMeasurement_Units stored in an ImageMeasurement_Hub
 captured in the session. This is modeled after the sframe_dataHubMapping module.
 """
 import PySide6.QtWidgets as qw
-from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer
+from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, Qt
 
 import sys
 import os
@@ -24,7 +24,7 @@ from iris.data.calibration_objective import ImgMea_Cal, ImgMea_Cal_Hub
 from iris.resources.dataHub_image_ui import Ui_dataHub_image
 from iris.resources.objectives_ui import Ui_wdg_objectives
 from iris.resources.dialog_save_img_ui import Ui_dialog_save_imghub
-from iris.gui.dataHub_MeaRMap import Dlg_MultiRename
+from iris.gui.dataHub_MeaRMap import Dlg_MultiRename, SortableTreeItem
 
 class DataHub_Image_Design(Ui_dataHub_image,qw.QWidget):
     def __init__(self,parent):
@@ -342,6 +342,14 @@ class Wdg_DataHub_Image(qw.QWidget):
     sig_load = Signal(MeaImg_Hub, str)
     sig_save_png = Signal(MeaImg_Unit, str, float, bool)
     sig_updateTree = Signal()
+    sig_tree_selection_str = Signal(str)    # Emitted when the treeview selection is changed, with the selected unit name as argument
+    
+    # Treeview column indices
+    _COL_INDEX = 0      # Order in which the unit was added to the hub (1-based)
+    _COL_ID = 1
+    _COL_NAME = 2
+    _COL_NUMMEA = 3
+    _COL_METADATA = 4
     
     def __init__(self, main, getter_ImageHub: Callable[[], MeaImg_Hub]|None=None, **kwargs) -> None:
         """
@@ -377,8 +385,12 @@ class Wdg_DataHub_Image(qw.QWidget):
         
     # >>> Treeview setup <<<
         self._tree = wdg.tree
-        self._tree.setColumnCount(4)
-        self._tree.setHeaderLabels(['Unit ID', 'Unit Name', '# Pictures', 'Metadata'])
+        self._tree.setColumnCount(5)
+        self._tree.setHeaderLabels(['#', 'Unit ID', 'Unit Name', '# Pictures', 'Metadata'])
+        # Click a header to sort by that column; click '#' to return to the acquisition order
+        self._tree.setSortingEnabled(True)
+        self._tree.sortByColumn(self._COL_INDEX, Qt.SortOrder.AscendingOrder)
+        self._tree.itemSelectionChanged.connect(self._emit_signal_selection)
         
     # >>> Other control widgets <<<
         # Widgets to manipulate the entries
@@ -578,7 +590,7 @@ class Wdg_DataHub_Image(qw.QWidget):
             return
         
         for item in selections:
-            unit_id = item.text(0)
+            unit_id = item.text(self._COL_ID)
             unit = self.ImageHub.get_ImageMeasurementUnit(unit_id=unit_id)
             self.sig_save_png.emit(unit, dirpath, resolution, self._widget.chk_scalebar.isChecked())
             
@@ -630,7 +642,7 @@ class Wdg_DataHub_Image(qw.QWidget):
 
         try:
             if len(selections) == 1:
-                unit_id = selections[0].text(0)
+                unit_id = selections[0].text(self._COL_ID)
                 current_name = self.ImageHub.get_ImageMeasurementUnit(unit_id=unit_id).get_IdName()[1]
                 new_name, ok = qw.QInputDialog.getText(
                     self, 'Rename', 'Enter the new name:', text=current_name)
@@ -640,8 +652,8 @@ class Wdg_DataHub_Image(qw.QWidget):
                 self.ImageHub.rename_ImageMeasurementUnit(unit_id, new_name)
                 self._flg_issaved = False
             else:
-                unit_ids = [item.text(0) for item in selections]
-                names = [item.text(1) for item in selections]
+                unit_ids = [item.text(self._COL_ID) for item in selections]
+                names = [item.text(self._COL_NAME) for item in selections]
                 dlg = Dlg_MultiRename(names, parent=self)
                 if dlg.exec() != qw.QDialog.DialogCode.Accepted:
                     return
@@ -663,7 +675,7 @@ class Wdg_DataHub_Image(qw.QWidget):
             qw.QMessageBox.warning(self, 'Error', 'No entry selected.')
             return
         
-        list_unit_id = [item.text(0) for item in selection]
+        list_unit_id = [item.text(self._COL_ID) for item in selection]
         confirm = qw.QMessageBox.question(
             self, 'Confirm Removal',
             f'Are you sure you want to remove the selected ImageMeasurementUnit(s)?\nThis action cannot be undone.',
@@ -698,23 +710,58 @@ class Wdg_DataHub_Image(qw.QWidget):
         self.sig_updateTree.emit()
         
     @Slot()
+    def _emit_signal_selection(self):
+        """
+        Emit the selection changed signal with the selected unit name
+        """
+        selections = self._tree.selectedItems()
+        if len(selections) == 0: return
+        self.sig_tree_selection_str.emit(selections[0].text(self._COL_NAME))
+        
+    @Slot(str)
+    def set_selection_unitName(self, unit_name:str):
+        """
+        Sets the selection in the treeview to the given unit name, without emitting the selection signal.
+
+        Args:
+            unit_name (str): The unit name to select.
+        """
+        self._tree.blockSignals(True)
+        self._tree.clearSelection()
+        root = self._tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            item = root.child(i)
+            if item.text(self._COL_NAME) == unit_name: item.setSelected(True)
+        self._tree.blockSignals(False)
+        
+    @Slot()
     def update_tree(self):
         """
         Update the treeview widget with the data from the ImageMeasurement_Hub.
         """
         tree = self._tree
+        list_selected_names = [item.text(self._COL_NAME) for item in tree.selectedItems()]
+        tree.blockSignals(True)
         tree.clear()
         
         list_id, list_name, list_num_measurements, list_metadata = self.ImageHub.get_summary_units()
         
-        for id,name,num,meta in zip(list_id, list_name, list_num_measurements, list_metadata):
+        # Disable sorting while populating so items are not re-sorted on every insert
+        tree.setSortingEnabled(False)
+        for i,(id,name,num,meta) in enumerate(zip(list_id, list_name, list_num_measurements, list_metadata)):
             # Add to the treeview
-            item = qw.QTreeWidgetItem()
-            item.setText(0, str(id))
-            item.setText(1, str(name))
-            item.setText(2, str(num))
-            item.setText(3, str(meta))
+            item = SortableTreeItem()
+            item.setText(self._COL_INDEX, str(i + 1))
+            item.setText(self._COL_ID, str(id))
+            item.setText(self._COL_NAME, str(name))
+            item.setText(self._COL_NUMMEA, str(num))
+            item.setText(self._COL_METADATA, str(meta))
+            item.setData(self._COL_INDEX, Qt.ItemDataRole.UserRole, i + 1)
+            item.setData(self._COL_NUMMEA, Qt.ItemDataRole.UserRole, num)
             tree.addTopLevelItem(item)
+            if name in list_selected_names: item.setSelected(True)
+        tree.setSortingEnabled(True)
+        tree.blockSignals(False)
             
     def check_safeToTerminate(self) -> bool:
         """

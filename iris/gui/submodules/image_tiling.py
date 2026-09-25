@@ -45,6 +45,14 @@ from iris.gui import AppPlotEnum
 
 from iris.resources.tiling_method_ui import Ui_tiling_method
 
+LIVEVIEW_MIN_INTERVAL_S = 1.0   # Minimum interval between live-view stitch updates during tiling [s]
+LIVEVIEW_COST_RATIO = 4.0       # Wait at least this many times the last stitch duration before re-stitching
+CAPTURE_MAX_ATTEMPTS = 3        # Maximum capture attempts per tile before the tile is skipped
+TIMING_REPORT_EVERY = 20        # Print the per-phase tiling timing summary every N tiles
+# Tiling phases timed per tile: stage move+settle, request -> video thread starts the capture,
+# camera trigger+readout, correction + main-thread delivery, crop+store, live-view stitch
+TIMING_PHASES = ('move', 'dispatch', 'camera', 'deliver', 'store', 'liveview')
+
 class TilingMethod_Design(Ui_tiling_method, qw.QWidget):
     def __init__(self,parent):
         super().__init__(parent)
@@ -56,8 +64,6 @@ class ImageTiling_Params:
     shape:tuple[int,int]
     cropx_pixel:int
     cropy_pixel:int
-    cropx_mm:float
-    cropy_mm:float
     exposure_ms:float = 0.0  # camera exposure time; used to compute per-tile capture timeout
 
     def check_validity(self) -> bool:
@@ -71,8 +77,6 @@ class ImageTiling_Params:
         assert all(isinstance(i, int) and i > 0 for i in self.shape), 'shape must be positive integers'
         assert isinstance(self.cropx_pixel, int) and self.cropx_pixel >= 0, 'cropx_pixel must be a non-negative integer'
         assert isinstance(self.cropy_pixel, int) and self.cropy_pixel >= 0, 'cropy_pixel must be a non-negative integer'
-        assert isinstance(self.cropx_mm, (int, float)), 'cropx_mm must be a number'
-        assert isinstance(self.cropy_mm, (int, float)), 'cropy_mm must be a number'
         return True    
 
 class ImageProcessor_Worker(QObject):
@@ -163,6 +167,36 @@ class ImageProcessor_Worker(QObject):
             print(self.msg_error, e)
             self.sig_finished_msg.emit(self.msg_error + str(e))
 
+    def _capture_fresh_image(self, timeout_s:float) -> Image.Image|None:
+        """
+        Triggers a fresh capture and returns the newly captured image, retrying failed captures.
+
+        Args:
+            timeout_s (float): Timeout for each capture attempt [s]
+
+        Returns:
+            Image.Image|None: The new image, or None if every attempt failed
+        """
+        flg_ready = self._motion_ctrl.get_img_ready_event()
+        for attempt in range(1, CAPTURE_MAX_ATTEMPTS + 1):
+            img_prev, _ = self._motion_ctrl.get_latest_image_with_timestamp()
+            flg_ready.clear()
+            self.sig_req_img_capture.emit()
+
+            if not flg_ready.wait(timeout=timeout_s):
+                print(f'Timeout ({timeout_s:.1f} s) waiting for image capture (attempt {attempt}/{CAPTURE_MAX_ATTEMPTS})')
+                # Let the in-flight capture finish so its late result isn't taken for the next request
+                flg_ready.wait(timeout=timeout_s)
+                continue
+
+            # A failed capture sets the ready flag without delivering a new image, leaving the
+            # previous tile's image as the latest one: it must not be stored at this coordinate
+            img, _ = self._motion_ctrl.get_latest_image_with_timestamp()
+            if isinstance(img, Image.Image) and img is not img_prev:
+                return img
+            print(f'Image capture failed (attempt {attempt}/{CAPTURE_MAX_ATTEMPTS})')
+        return None
+
     def _take_image(self, meaCoor_mm:MeaCoor_mm, imgUnit:MeaImg_Unit,
         tiling_params:ImageTiling_Params,
         unit_idx:int = 1, total_units:int = 1,
@@ -189,8 +223,6 @@ class ImageProcessor_Worker(QObject):
         shape = tiling_params.shape
         cropx_pixel = tiling_params.cropx_pixel
         cropy_pixel = tiling_params.cropy_pixel
-        cropx_mm = tiling_params.cropx_mm
-        cropy_mm = tiling_params.cropy_mm
 
         totalcoor = len(meaCoor_mm.mapping_coordinates)
         self.flg_stop.clear()
@@ -202,6 +234,9 @@ class ImageProcessor_Worker(QObject):
         # Timeout must cover the camera's own poll window (exposure_ms * 2 + 50 ms) plus delivery
         # overhead. Default floor is 15 s so short-exposure tiles always get a generous window.
         capture_timeout_s = max(15.0, tiling_params.exposure_ms * 3 / 1000 + 3.0)
+        t_next_liveview = 0.0
+        vid_worker = self._motion_ctrl.get_video_worker()
+        dict_timings:dict[str,list[float]] = {key:[] for key in TIMING_PHASES}
 
         try:
             for i,coor in enumerate(meaCoor_mm.mapping_coordinates):
@@ -213,38 +248,53 @@ class ImageProcessor_Worker(QObject):
                 self.sig_statbar_update.emit(
                     f'Unit {unit_idx}/{total_units} | Tile {i+1}/{totalcoor} | Elapsed: {self._fmt_elapsed(elapsed)}')
 
+                t_start = time.time()
                 flg_mvmt_done = threading.Event()
                 self.sig_gotocoor.emit(coor, flg_mvmt_done)
                 flg_mvmt_done.wait()
+                t_moved = time.time()
 
-                self._motion_ctrl.get_img_ready_event().clear()
-                self.sig_req_img_capture.emit()
-
-                if not self._motion_ctrl.get_img_ready_event().wait(timeout=capture_timeout_s):
-                    print(f'Timeout ({capture_timeout_s:.1f} s) waiting for image capture at coordinate {coor}')
-                    # Wait for the in-flight capture to complete so the stale sig_img doesn't
-                    # corrupt _flg_img_ready for the next tile.
-                    self._motion_ctrl.get_img_ready_event().wait(timeout=capture_timeout_s)
-                    continue
-
-                img, _ = self._motion_ctrl.get_latest_image_with_timestamp()
-                if not isinstance(img,Image.Image):
-                    print('Error in _take_image: No image received from the controller')
+                img = self._capture_fresh_image(capture_timeout_s)
+                t_ready = time.time()
+                if img is None:
+                    print(f'Error in _take_image: no image captured at coordinate {coor}, tile skipped')
                     continue
 
                 img = img.crop((cropx_pixel,cropy_pixel,shape[0]-cropx_pixel,shape[1]-cropy_pixel))
 
                 imgUnit.add_measurement(
                         timestamp=get_timestamp_us_str(),
-                        x_coor=x-cropx_mm,
-                        y_coor=y-cropy_mm,
+                        # Stage coordinate as-is: the crop is already compensated in the laser offset
+                        x_coor=x,
+                        y_coor=y,
                         z_coor=z,
                         image=img
                     )
+                t_stored = time.time()
 
-                if self._getter_liveview():
+                # Re-stitching costs O(tiles so far), so throttle it to keep the per-tile overhead
+                # bounded; otherwise the loop slows down progressively over a long tiling run
+                is_last_tile = i == totalcoor - 1
+                if self._getter_liveview() and (time.time() >= t_next_liveview or is_last_tile):
+                    t_stitch = time.time()
                     img = imgUnit.get_image_all_stitched(low_res=True)[0]
                     self.sig_ret_image_processed.emit(img)
+                    dt_stitch = time.time() - t_stitch
+                    t_next_liveview = time.time() + max(LIVEVIEW_MIN_INTERVAL_S, dt_stitch * LIVEVIEW_COST_RATIO)
+
+                # Diagnostics: per-phase timing to locate which step slows down over a long run
+                t_cam_start, t_cam_done = vid_worker.time_fresh_start, vid_worker.time_fresh_done
+                cam_valid = t_moved <= t_cam_start <= t_cam_done <= t_ready
+                dict_timings['move'].append(t_moved - t_start)
+                dict_timings['dispatch'].append(t_cam_start - t_moved if cam_valid else np.nan)
+                dict_timings['camera'].append(t_cam_done - t_cam_start if cam_valid else np.nan)
+                dict_timings['deliver'].append(t_ready - t_cam_done if cam_valid else np.nan)
+                dict_timings['store'].append(t_stored - t_ready)
+                dict_timings['liveview'].append(time.time() - t_stored)
+                if (i + 1) % TIMING_REPORT_EVERY == 0 or is_last_tile:
+                    summary = ', '.join(f'{key} {np.nanmean(vals[-TIMING_REPORT_EVERY:])*1e3:.0f}'
+                                        for key, vals in dict_timings.items())
+                    print(f'Tiling timings [ms, mean of last {TIMING_REPORT_EVERY}] tile {i+1}/{totalcoor}: {summary}')
         finally:
             # Always restore camera/video state, even if a capture step above raised.
             self._motion_ctrl.exit_tiling_mode()        # restore continuous streaming
@@ -662,8 +712,6 @@ class Wdg_HiLvlTiling(qw.QWidget):
             shape=shape,
             cropx_pixel=cropx_pixel,
             cropy_pixel=cropy_pixel,
-            cropx_mm=cropx_mm,
-            cropy_mm=cropy_mm,
             exposure_ms=exposure_ms,
         )
         

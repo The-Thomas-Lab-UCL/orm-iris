@@ -1,5 +1,6 @@
 import os
 import sys
+import threading
 from typing import Callable
 
 if __name__ == '__main__':
@@ -55,7 +56,7 @@ class MappingPlotter_ImageOverlay(MeaRMap_Plotter):
         super().__init__()
         
     def overlay_image(self, image: Image.Image, extent:tuple[float,float,float,float],
-                      callback=None) -> None:
+                      callback=None, fit_to_image:bool=False) -> None:
         """
         Overlay an image on the heatmap plot
         
@@ -63,6 +64,8 @@ class MappingPlotter_ImageOverlay(MeaRMap_Plotter):
             ax (Axes): Axis object to plot the image
             image (Image.Image): Image object to overlay
             extent (tuple): Extent of the image in the plot (left,right,bottom,top) coordinates
+            fit_to_image (bool): If True, the plot limits are set to the image extent only instead
+                of the union of the current limits and the image extent
         """
         assert isinstance(image,Image.Image), "Invalid image object."
         assert isinstance(extent,tuple) and len(extent)==4, "Invalid extent object."
@@ -77,6 +80,9 @@ class MappingPlotter_ImageOverlay(MeaRMap_Plotter):
         y_min_all = min(y_min, min(extent[2], extent[3]))
         x_max_all = max(x_max, max(extent[0], extent[1]))
         y_max_all = max(y_max, max(extent[2], extent[3]))
+        if fit_to_image:
+            x_min_all, x_max_all = min(extent[0], extent[1]), max(extent[0], extent[1])
+            y_min_all, y_max_all = min(extent[2], extent[3]), max(extent[2], extent[3])
         
         ax.imshow(image, extent=extent, interpolation='lanczos')
         
@@ -92,9 +98,35 @@ class ImageProcessor_Worker(QObject):
     Worker class to process images in a separate thread
     """
     sig_finished = Signal()
-    def __init__(self, plotter:MappingPlotter_ImageOverlay):
+    def __init__(self, plotter:MappingPlotter_ImageOverlay, heatmap_plotter:MeaRMap_Plotter,
+                 fig_lock:threading.RLock):
+        """
+        Args:
+            plotter (MappingPlotter_ImageOverlay): Plotter used to draw the image
+            heatmap_plotter (MeaRMap_Plotter): Plotter that owns the heatmap (and its colorbar)
+                on the same figure, used to clear the plot in the image-only mode
+            fig_lock (threading.RLock): Lock guarding the shared figure (see _LockedCanvas)
+        """
         super().__init__()
         self._plotter = plotter
+        self._heatmap_plotter = heatmap_plotter
+        self._fig_lock = fig_lock
+        
+    @staticmethod
+    def _get_stitched_image(imgUnit:MeaImg_Unit, low_res:bool) -> tuple[Image.Image,tuple[float,float,float,float]]:
+        """
+        Get the stitched image and its extent (left,right,bottom,top) from the ImageUnit
+        """
+        img_stitched,img_stitched_limit_min,img_stitched_limit_max =\
+            imgUnit.get_image_all_stitched(low_res=low_res)
+            
+        img_stitched_extent = (
+            min(img_stitched_limit_min[0],img_stitched_limit_max[0]),
+            max(img_stitched_limit_max[0],img_stitched_limit_min[0]),
+            min(img_stitched_limit_min[1],img_stitched_limit_max[1]),
+            max(img_stitched_limit_max[1],img_stitched_limit_min[1])
+        )
+        return img_stitched, img_stitched_extent
         
     @Slot(MeaImg_Unit,bool)
     def overlay_stitched_image(self, imgUnit:MeaImg_Unit, low_res:bool) -> None:
@@ -106,20 +138,36 @@ class ImageProcessor_Worker(QObject):
             low_res (bool): Whether to get low resolution image
         """
         try:
-            img_stitched,img_stitched_limit_min,img_stitched_limit_max =\
-                imgUnit.get_image_all_stitched(low_res=low_res)
-                
-            img_stitched_extent = (
-                min(img_stitched_limit_min[0],img_stitched_limit_max[0]),
-                max(img_stitched_limit_max[0],img_stitched_limit_min[0]),
-                min(img_stitched_limit_min[1],img_stitched_limit_max[1]),
-                max(img_stitched_limit_max[1],img_stitched_limit_min[1])
-            )
-            
-            self._plotter.overlay_image(image=img_stitched,extent=img_stitched_extent)
+            img_stitched, img_stitched_extent = self._get_stitched_image(imgUnit, low_res)
+            with self._fig_lock:
+                self._plotter.overlay_image(image=img_stitched,extent=img_stitched_extent)
             self.sig_finished.emit()
         except Exception as e:
             print('Error in get_stitched_image:', e)
+            self.sig_finished.emit()
+            
+    @Slot(MeaImg_Unit,bool,XYLimits)
+    def plot_stitched_image_only(self, imgUnit:MeaImg_Unit, low_res:bool, limits_xy:XYLimits) -> None:
+        """
+        Clear the heatmap and plot only the stitched image from the ImageUnit
+        
+        Args:
+            imgUnit (MeaImg_Unit): Image unit to process
+            low_res (bool): Whether to get low resolution image
+            limits_xy (XYLimits): User-defined plot limits (None values are left as the image extent)
+        """
+        try:
+            img_stitched, img_stitched_extent = self._get_stitched_image(imgUnit, low_res)
+            with self._fig_lock:
+                self._heatmap_plotter.initialise_empty_plot()   # Clears the axes and the heatmap colorbar
+                ax = self._plotter.get_figure_axes()[1]
+                ax.set_title(imgUnit.get_IdName()[1])
+                self._plotter.overlay_image(image=img_stitched,extent=img_stitched_extent,fit_to_image=True)
+                ax.set_xlim(limits_xy.x_min, limits_xy.x_max)
+                ax.set_ylim(limits_xy.y_min, limits_xy.y_max)
+            self.sig_finished.emit()
+        except Exception as e:
+            print('Error in plot_stitched_image_only:', e)
             self.sig_finished.emit()
         
 class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
@@ -132,6 +180,9 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
     sig_update_plot_overlay = Signal()
     
     sig_overlay_stitched_image = Signal(MeaImg_Unit,bool)
+    sig_plot_stitched_image_only = Signal(MeaImg_Unit,bool,XYLimits)
+    
+    sig_imgUnit_changed = Signal(str)  # Emitted when the ImageUnit selection is changed, sends (imgUnit_name (str))
     
     def __init__(
         self,
@@ -170,8 +221,10 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
         
         # Parameters to control the plots
         self._alpha = 0.5
+        self._image_only = False    # If True, only the image is plotted (no heatmap)
         
         # Plotter — must share the same fig/ax that the FigureCanvas was built from
+        self._heatmap_plotter = self._plotter   # The base plotter used by the heatmap worker
         self._plotter = MappingPlotter_ImageOverlay()
         self._plotter._ax = self._ax   # self._ax / self._fig are set by super().__init__()
         self._plotter._fig = self._fig
@@ -197,6 +250,7 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
         self._chk_overlay = wdg_ovl.chk_overlay
 
         self._combo_ImageUnits.currentTextChanged.connect(self.plot_heatmap)
+        self._combo_ImageUnits.currentTextChanged.connect(self.sig_imgUnit_changed.emit)
         self._chk_lres.stateChanged.connect(self.plot_heatmap)
         self._chk_overlay.stateChanged.connect(self.plot_heatmap)
         self._combo_plot_mappingUnitName.currentTextChanged.connect(self.plot_heatmap)
@@ -228,13 +282,15 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
         Initialise the worker thread and object
         """
         self._thread_worker = QThread()
-        self._worker = ImageProcessor_Worker(plotter=self._plotter)
+        self._worker = ImageProcessor_Worker(plotter=self._plotter, heatmap_plotter=self._heatmap_plotter,
+                                             fig_lock=self._fig_lock)
         self._worker.moveToThread(self._thread_worker)
         self._thread_worker.start()
         
         # Connect signals
         self._worker.sig_finished.connect(self.handle_plot_overlay_finished)
         self.sig_overlay_stitched_image.connect(self._worker.overlay_stitched_image)
+        self.sig_plot_stitched_image_only.connect(self._worker.plot_stitched_image_only)
         
     @Slot()
     def _update_img_combobox(self):
@@ -262,6 +318,43 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
         # Re-enable the combo box
         self._combo_ImageUnits.blockSignals(False)
         self._combo_ImageUnits.setEnabled(True)
+        
+    @Slot(str)
+    def set_imgUnit_combobox_name(self, imgUnit_name:str) -> None:
+        """
+        Set the ImageUnit selection in the combobox (without emitting sig_imgUnit_changed) and replot
+        
+        Args:
+            imgUnit_name (str): Name of the ImageUnit to be selected. If it doesn't exist, no change is made.
+        """
+        if self._combo_ImageUnits.findText(imgUnit_name) < 0: return
+        self._combo_ImageUnits.blockSignals(True)
+        self._combo_ImageUnits.setCurrentText(imgUnit_name)
+        self._combo_ImageUnits.blockSignals(False)
+        self.sig_request_update_plot.emit()
+        
+    def set_image_only(self, image_only:bool) -> None:
+        """
+        Set the visualisation mode and replot
+        
+        Args:
+            image_only (bool): If True, only the image is shown. Otherwise, the heatmap is plotted
+                with the image overlay (if the overlay is enabled).
+        """
+        self._image_only = image_only
+        self.sig_request_update_plot.emit()
+        
+    def set_overlay_checkbox_visible(self, visible:bool) -> None:
+        """
+        Show/hide the 'Enable image overlay' checkbox, e.g., when the overlay is controlled externally
+        """
+        self._chk_overlay.setVisible(visible)
+        
+    def set_overlay_enabled(self, enabled:bool) -> None:
+        """
+        Enable/disable the image overlay (the checkbox state change triggers a replot)
+        """
+        self._chk_overlay.setChecked(enabled)
         
     def _finetune_calibration(self) -> None:
         """
@@ -369,6 +462,12 @@ class Wdg_HeatmapOverlay(Wdg_MappingMeasurement_Plotter, qw.QWidget):
             flg_lowResImg = self._chk_lres.isChecked()
         except Exception as e:
             print('plot_heatmap:\n',e)
+            return
+        
+        if self._image_only:
+            self._isplotting = True
+            self._overlay_in_progress = True
+            self.sig_plot_stitched_image_only.emit(img_unit, flg_lowResImg, self._get_plot_xylim())
             return
 
         mappingUnit_name = self._combo_plot_mappingUnitName.currentText()

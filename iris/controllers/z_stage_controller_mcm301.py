@@ -80,7 +80,10 @@ class ZController_MCM301(Class_ZController):
         # Continue by setting up the motors and initializing (calibrating) the coordinate system of the motors
         try:
             self.set_vel_acc_relative()
-            self.homing_n_coor_calibration()
+            if not self.is_homed():
+                self.homing_n_coor_calibration()
+            else:
+                print('MCM301: Stage already homed, skipping homing')
         except Exception as e:
             print('Coordinate calibration has failed:')
             print(e)
@@ -159,6 +162,22 @@ class ZController_MCM301(Class_ZController):
         # Update the stored value
         self._vel = vel
     
+    def is_homed(self) -> bool:
+        """
+        Checks if the stage has been homed (its coordinate system calibrated). The homed
+        flag is kept by the MCM301 controller itself, so it persists across app restarts
+        as long as the controller stays powered.
+
+        Returns:
+            bool: True if the stage is homed and not currently homing, False otherwise
+        """
+        # Status bits (MCM301 APT command reference): 0x200 = homing in progress, 0x400 = homed
+        ret = self.controller.get_mot_status(self.slot, self.encoder, self.status_bit)
+        if ret < 0:
+            return False
+        status = self.status_bit[0]
+        return bool(status & 0x400) and not bool(status & 0x200)
+    
     def homing_n_coor_calibration(self):
         """
         A function to recalibrate the coordinate system of the device.
@@ -173,19 +192,41 @@ class ZController_MCM301(Class_ZController):
             print("Homing failed")
             return
         
-        # Wait for the motor to stop moving
-        self._wait_stop()
+        # Wait for homing to finish. Any movement command sent before then interrupts
+        # the homing routine and marks the stage as not homed (MCM301 APT reference).
+        self._wait_homing_done()
         self._isrunning_motor = False
-        
+
+        if not self.is_homed():
+            print("MCM301: Homing did not complete (note: homing is disabled when soft limits are set)")
+
+    def _wait_homing_done(self, timeout:float=120.0):
+        """
+        Wait until the homing routine has finished, i.e. the 'homed' bit (0x400) is set
+        and the 'homing' bit (0x200) is cleared.
+
+        Args:
+            timeout (float, optional): Maximum time to wait [sec]. Defaults to 120.
+        """
+        t_start = time.time()
+        while time.time() - t_start < timeout:
+            self.controller.get_mot_status(self.slot, self.encoder, self.status_bit)
+            status = self.status_bit[0]
+            if (status & 0x400) and not (status & 0x200):
+                return
+            time.sleep(self.mot_waittime)
+        print("MCM301: Timed out waiting for homing to finish")
+
     def _wait_stop(self):
         """
-        Wait for all movements to stop
+        Wait for all movements (including homing) to stop
         """
         isrunning = True
         while isrunning:
             self.controller.get_mot_status(self.slot, self.encoder, self.status_bit)
             isrunning = (self.status_bit[0] & 0x10) or (self.status_bit[0] & 0x20)\
-                or (self.status_bit[0] & 0x40) or (self.status_bit[0] & 0x80)
+                or (self.status_bit[0] & 0x40) or (self.status_bit[0] & 0x80)\
+                or (self.status_bit[0] & 0x200)
             time.sleep(self.mot_waittime)
         
     def _wait_moving_stop(self):
