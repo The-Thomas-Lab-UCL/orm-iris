@@ -33,7 +33,7 @@ from iris.utils.general import validator_float_greaterThanZero, messagebox_reque
 
 from iris.data.calibration_objective import ImgMea_Cal
 
-from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam, Enum_CamCorrectionType
+from iris.multiprocessing.dataStreamer_StageCam import DataStreamer_StageCam, Enum_CamCorrectionType, CorrectionUnavailableError
 
 from iris.gui import AppVideoEnum
 from iris.controllers import ControllerConfigEnum
@@ -691,6 +691,7 @@ class ImageCapture_Worker(QObject):
     sig_no_frame = Signal()  # Signal to emit when no frame is captured
     sig_error = Signal(str)  # Signal to emit an error message
     sig_camera_unavailable = Signal(str)  # Signal to emit when the camera cannot be reached at all
+    sig_correction_unavailable = Signal(str)  # Signal to emit when the selected image correction cannot be applied
     
     def __init__(self, camera_controller:CameraController, stageHub:DataStreamer_StageCam, getter_imgcal:Callable[[],ImgMea_Cal]):
         super().__init__()
@@ -835,7 +836,11 @@ class ImageCapture_Worker(QObject):
 
             # Apply correction in the subprocess if requested (no new capture)
             if img_corr != Enum_CamCorrectionType.RAW:
-                img = self._stageHub.apply_correction(img, img_corr)
+                try:
+                    img = self._stageHub.apply_correction(img, img_corr)
+                except CorrectionUnavailableError as e:
+                    # Keep the raw frame and let the UI drop back to RAW
+                    self.sig_correction_unavailable.emit(str(e))
 
             self.sig_raw_img.emit(timestamp_us, img)
 
@@ -880,7 +885,11 @@ class ImageCapture_Worker(QObject):
                 return
 
             if img_corr != Enum_CamCorrectionType.RAW:
-                img = self._stageHub.apply_correction(img, img_corr)
+                try:
+                    img = self._stageHub.apply_correction(img, img_corr)
+                except CorrectionUnavailableError as e:
+                    # Keep the raw frame and let the UI drop back to RAW
+                    self.sig_correction_unavailable.emit(str(e))
 
             # Add a scalebar to it
             self.sig_raw_img.emit(timestamp_us, img)
@@ -2023,6 +2032,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         self._worker_img_capture.sig_qpixmap.connect(self._handle_qpixmap_capture)
         self._worker_img_capture.sig_no_frame.connect(self._handle_no_frame)
         self._worker_img_capture.sig_camera_unavailable.connect(self._handle_camera_unavailable)
+        self._worker_img_capture.sig_correction_unavailable.connect(self._handle_correction_unavailable)
         
         # Defer thread start until after initialization is complete
         QTimer.singleShot(0, self._thread_video.start)
@@ -2130,6 +2140,25 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
             print('Video feed: {} - retrying every {:.0f} s'.format(message, NO_CAMERA_RETRY_INTERVAL_S))
 
         QTimer.singleShot(int(NO_CAMERA_RETRY_INTERVAL_S*1e3), self.video_update)
+
+    @Slot(str)
+    def _handle_correction_unavailable(self, message: str):
+        """
+        Handles a selected image correction that cannot be applied (e.g. no flatfield
+        reference has been set yet): warns the user once and drops the correction combo box
+        back to RAW so the video feed keeps running uncorrected.
+
+        Args:
+            message (str): The reason reported by the video worker
+        """
+        # The worker reports per frame - only act on the first one until the mode changes again
+        if self._combo_vidcorrection.currentText() == Enum_CamCorrectionType.RAW.name: return
+
+        self._combo_vidcorrection.setCurrentText(Enum_CamCorrectionType.RAW.name)
+        self.sig_statbar_message.emit('{} - image correction set back to RAW'.format(message), 'red')
+        qw.QMessageBox.warning(
+            self, 'Image correction unavailable',
+            '{}\n\nThe image correction has been set back to RAW.'.format(message))
 
     def _clear_no_camera_state(self):
         """
