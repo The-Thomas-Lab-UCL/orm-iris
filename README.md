@@ -65,7 +65,7 @@ https://www.alphr.com/wp-content/uploads/2022/08/install-5.png<img width="660" h
 (Screenshot obtained from: https://www.alphr.com/install-pip-windows/ on the 22nd October 2025)
 
 ### Other OS
-The instrument controls have only been developed for Windows and so, usage on Linux or macOS to control the microscope is not recommended. However, the app and IRIS package do install (and work) as intended on Linux and macOS, which you might find helpful for non-control-related operations such as opening/modifying/format-changing a saved measurement file, developing extensions, coupling the IRIS package to your project, etc.
+The instrument controls part of the app have been developed for and tested on Windows as instrument drivers are typically only provided for it. As such, usage on Linux or macOS to control the microscope is not recommended. However, the app and IRIS package do install (and work) as intended on Linux and macOS, which you might find helpful for non-control-related operations such as opening/modifying/format-changing a saved measurement file, developing extensions, integrating the IRIS package to your other Python project, etc.
 
 IRIS can be installed in unix/CLI as follows:
 ```
