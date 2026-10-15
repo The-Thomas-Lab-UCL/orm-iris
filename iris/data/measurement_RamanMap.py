@@ -30,6 +30,7 @@ import matplotlib
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 from matplotlib.colorbar import Colorbar
+from matplotlib.collections import PathCollection
 # matplotlib.use('Agg')
 
 if __name__ == '__main__':
@@ -2203,8 +2204,13 @@ class PlotterExtraParamsBase:
 class PlotterExtParams_Scattering(PlotterExtraParamsBase):
     """
     Dataclass for the scattering plotter parameters
+    
+    Note:
+        - marker_size <= 0 auto-sizes the markers to tile the measurement grid
+            on the current canvas (recomputed on resize/zoom)
+        - marker_size > 0 is used as-is (matplotlib scatter size, points^2)
     """
-    marker_size:float = 20.0
+    marker_size:float = 0.0
     
 @dataclass
 class PlotterExtParams_Empty(PlotterExtraParamsBase):
@@ -2238,6 +2244,10 @@ class MeaRMap_Plotter:
         self._fig = Figure()
         self._ax = self._fig.add_subplot(111)
         self._cbar:Colorbar|None = None
+        
+        # Auto marker sizing state for the scatter plotter (see update_scatter_marker_size)
+        self._scatter:PathCollection|None = None
+        self._scatter_spacing:tuple[float,float]|None = None    # Grid spacing (dx,dy) in data units, None = fixed size
         
     def get_figure_axes(self) -> tuple[Figure,Axes]:
         """
@@ -2435,14 +2445,13 @@ class MeaRMap_Plotter:
         
         self._ax.set_aspect(AppPlotEnum.PLT_ASPECT.value)
         
-        figsize = self._fig.get_size_inches()
-        number_of_points = len(x_val)
-        
-        point_size = (figsize[0]*figsize[1])/number_of_points*750 if not isinstance(size,float) else size
-        self._ax.scatter(x_val, y_val, c=intensity, cmap=AppPlotEnum.PLT_COLOUR_MAP.value, s=point_size, linewidths=0, marker='s')
+        flg_auto = not isinstance(size,(int,float)) or size <= 0
+        self._scatter = self._ax.scatter(x_val, y_val, c=intensity, cmap=AppPlotEnum.PLT_COLOUR_MAP.value,
+                                         s=1.0 if flg_auto else size, linewidths=0, marker='s')
+        self._scatter_spacing = self._estimate_grid_spacing(x_val, y_val) if flg_auto else None
         
         # Add colourbar and labels
-        self._cbar = self._fig.colorbar(self._ax.collections[0], ax=self._ax)
+        self._cbar = self._fig.colorbar(self._scatter, ax=self._ax)
         self._ax.set_title(title)
         self._ax.set_xlabel(AppPlotEnum.PLT_LBL_X_AXIS.value)
         self._ax.set_ylabel(AppPlotEnum.PLT_LBL_Y_AXIS.value)
@@ -2452,6 +2461,74 @@ class MeaRMap_Plotter:
             if isinstance(clim[0],float) and isinstance(clim[1],float):
                 list(clim).sort()
             self._cbar.mappable.set_clim(vmin=clim[0],vmax=clim[1])
+        
+        # Size the markers only after the colourbar has taken its share of the figure
+        self.update_scatter_marker_size()
+    
+    @staticmethod
+    def _estimate_grid_spacing(x_val:list, y_val:list) -> tuple[float,float]:
+        """
+        Estimates the measurement grid spacing along x and y in data units.
+        
+        Uses the median gap between unique coordinates (robust to the odd missing
+        or jittered point). Falls back to the mean area per point for scattered
+        (non-gridded) data, where the unique-coordinate count is close to the
+        point count.
+        
+        Returns:
+            tuple[float,float]: (dx, dy) spacing in data units
+        """
+        x = np.asarray(x_val, dtype=float)
+        y = np.asarray(y_val, dtype=float)
+        n = len(x)
+        
+        def median_gap(arr:np.ndarray) -> float:
+            uniq = np.unique(arr)
+            if len(uniq) < 2: return 0.0
+            span = uniq[-1]-uniq[0]
+            gaps = np.diff(uniq)
+            gaps = gaps[gaps > span*1e-6]   # Ignore floating point noise between "identical" coordinates
+            return float(np.median(gaps)) if len(gaps) else 0.0
+        
+        dx, dy = median_gap(x), median_gap(y)
+        
+        # Not a grid: every point has its own x and y -> use area per point instead
+        if len(np.unique(x))*len(np.unique(y)) > 4*n or dx <= 0 or dy <= 0:
+            area = np.ptp(x)*np.ptp(y)
+            d = float(np.sqrt(area/n)) if area > 0 else max(dx, dy)
+            dx, dy = d, d
+        return dx, dy
+    
+    def update_scatter_marker_size(self) -> None:
+        """
+        Re-computes the auto marker size so that each square marker covers one grid
+        cell at the current axes size, axis limits, and DPI. Does nothing if the
+        current plot is not an auto-sized scatter plot.
+        
+        Note:
+            Should be called whenever the canvas is resized or the axis limits change.
+            It must be called from the thread that owns the figure (or under its lock).
+        """
+        scatter = self._scatter
+        spacing = self._scatter_spacing
+        if scatter is None or spacing is None or scatter not in self._ax.collections: return
+        
+        try:
+            self._ax.apply_aspect()     # Resolves the final axes box for aspect='equal'
+            bbox = self._ax.get_window_extent()
+            xmin, xmax = self._ax.get_xlim()
+            ymin, ymax = self._ax.get_ylim()
+            if bbox.width <= 0 or bbox.height <= 0 or xmax == xmin or ymax == ymin: return
+            
+            # Grid spacing in display pixels
+            px_dx = spacing[0]*bbox.width/abs(xmax-xmin)
+            px_dy = spacing[1]*bbox.height/abs(ymax-ymin)
+            
+            # The larger spacing so neighbouring markers touch (no white gaps).
+            # Scatter sizes are in points^2 (1 pt = dpi/72 px).
+            side_pt = max(px_dx, px_dy)*72.0/self._fig.dpi
+            scatter.set_sizes([side_pt**2])
+        except Exception as e: print(f'Error in update_scatter_marker_size: {e}')
     
 def test_datasaveload_system_txt(storage_main:MeaRMap_Hub|None=None):
     if storage_main is None: storage_main = generate_dummy_mappingHub()

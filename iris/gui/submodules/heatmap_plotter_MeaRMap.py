@@ -11,7 +11,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 
 import threading
 import queue
-from typing import Any
+from typing import Any, Callable
 from dataclasses import dataclass, fields
 from uuid import uuid4
 
@@ -110,9 +110,10 @@ class _LockedCanvas(FigureCanvas):
     figure.
     """
 
-    def __init__(self, figure, fig_lock: threading.RLock):
+    def __init__(self, figure, fig_lock: threading.RLock, pre_draw: Callable[[], None] | None = None):
         super().__init__(figure=figure)
         self._fig_lock = fig_lock
+        self._pre_draw = pre_draw   # Run under the lock right before each render (e.g. marker auto-sizing)
 
     def paintEvent(self, event):
         with self._fig_lock:
@@ -120,6 +121,7 @@ class _LockedCanvas(FigureCanvas):
 
     def draw(self):
         with self._fig_lock:
+            if self._pre_draw is not None: self._pre_draw()
             return super().draw()
 
 
@@ -249,7 +251,8 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
     # > Matplotlib plot setup <
         holder = wdg.lyt_heatmap_holder
         self._fig_lock = threading.RLock()  # guards self._fig against the worker thread
-        self._canvas_widget = _LockedCanvas(figure=self._fig, fig_lock=self._fig_lock) # The plot widget
+        self._canvas_widget = _LockedCanvas(figure=self._fig, fig_lock=self._fig_lock,
+            pre_draw=self._plotter.update_scatter_marker_size) # The plot widget; re-fits scatter markers on resize/zoom
         holder.addWidget(self._canvas_widget)
         self._canvas_id_interaction = self._canvas_widget.mpl_connect('button_press_event', self._retrieve_click_idxcol) # The plot widget's canvas ID for interaction setups
         self._isplotting = False
@@ -810,6 +813,7 @@ class Wdg_MappingMeasurement_Plotter(qw.QWidget):
             # rendered from a consistent figure.
             with self._fig_lock:
                 self._fig.tight_layout()
+                self._plotter.update_scatter_marker_size()  # tight_layout changes the axes size
                 self._canvas_widget.print_figure(filepath, format='png')
 
             qw.QMessageBox.information(self, 'Save plot', 'Plot saved successfully')
