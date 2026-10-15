@@ -146,7 +146,8 @@ class DataStreamer_StageCam(mp.Process):
             self._lock = mp.Lock()   # Threading lock for the list because it's only going to be accessed by the child process
             
             # > Constants <
-            self._max_measurement = MPMeaHubEnum.STAGEHUB_MAXSTORAGE.value # Maximum number of coordinates stored
+            self._retention_us = int(MPMeaHubEnum.STAGEHUB_RETENTION_SEC.value * 1e6) # How long the coordinates are kept [us]
+            self._prune_slack_us = max(int(self._retention_us * 0.1), 1)  # Prune in chunks of this age, not on every append
             
             # > Thread <
             self._thread:threading.Thread = threading.Thread()
@@ -163,9 +164,13 @@ class DataStreamer_StageCam(mp.Process):
                 self._list_timestamp.append(timestamp)
                 self._list_coordinates.append(coordinate)
                 
-                if len(self._list_timestamp) > self._max_measurement:
-                    self._list_timestamp.pop(0)
-                    self._list_coordinates.pop(0)
+                # Drop the coordinates older than the retention window. Done in chunks since every
+                # deletion from the front shifts the whole list.
+                ts_cutoff = timestamp - self._retention_us
+                if self._list_timestamp[0] < ts_cutoff - self._prune_slack_us:
+                    idx = bisect.bisect_left(self._list_timestamp, ts_cutoff)
+                    del self._list_timestamp[:idx]
+                    del self._list_coordinates[:idx]
             self._flg_data_added.set()
 
         def get_closest_coordinate(self,timestamp:int) -> tuple[int,tuple[float,float,float]]|None:
@@ -221,7 +226,12 @@ class DataStreamer_StageCam(mp.Process):
                     with self._lock: idx = bisect.bisect_left(self._list_timestamp,timestamp)
                     if idx >= len(self._list_timestamp)-1:
                         self.wait_coordinate()
-                    elif idx == 0: return self._list_timestamp[idx]  # If the requested timestamp is before the first recorded timestamp, return the first recorded coordinate
+                    elif idx == 0:
+                        # The requested timestamp is older than the retained history: there is no
+                        # coordinate to give, and guessing one would misplace the measurement
+                        print(f'get_interpolated_coordinate: Timestamp {timestamp} is older than the stored '
+                              'stage history. Increase "stagehub_retention_sec" in the config.ini file.')
+                        return None
                     else: break
                     
                 with self._lock:

@@ -477,9 +477,13 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         for i, coor in enumerate(mapping_coordinates_ends):
             try:
                 if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled; break
-                # Hold here while the data hub is writing a database file. The park happens
-                # between coordinates, so a scan line is never interrupted part-way through.
-                self._pause_checkpoint(progress)
+                # Hold here while the data hub is writing a database file. Only park before going to a
+                # line START (even i), i.e. after the previous line was STOREd: the IGNORE issued on
+                # arrival then discards the spectra acquired while parked. Parking before a line END
+                # (odd i) would leave the stage sitting at the line start after its IGNORE, so the whole
+                # pause gets stored with that line and its oldest spectra outlive the stage hub's
+                # coordinate history (dropped by the autosaver -> missing left side of the map).
+                if i % 2 == 0: self._pause_checkpoint(progress)
                 if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled; break
                 self._execute_scan_continuous_step(mapping_speed_param, q_mea_out, event_finish_setvel, event_finish_goto, q_trig, i, coor, goto_timeout)
             except Exception as e:
