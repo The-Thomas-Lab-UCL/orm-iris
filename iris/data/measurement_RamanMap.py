@@ -1990,6 +1990,45 @@ class MeaRMap_Handler():
 
         conn.close()
         return dict_unit_id_to_name
+    
+    def load_MappingMeasurementUnit_from_database(self, unit_name:str, loadpath:str, flg_readraw:bool=True) -> MeaRMap_Unit:
+        """
+        Loads a single mapping measurement unit from a database.
+
+        Args:
+            unit_name (str): Name of the mapping measurement unit to load
+            loadpath (str): path to the .db file
+            flg_readraw (bool): flag to read the raw data (in addition to the averaged spectrum). Defaults to True.
+            
+        Returns:
+            MeaRMap_Unit: loaded mapping measurement unit
+            
+        Raises:
+            ValueError: if no unit, or more than one unit, with the given name is found
+            MissingDataFileError: if the unit's data file(s) (.parquet) could not be found
+        """
+        conn, db_tableName_meta = self._resolve_meta_table(loadpath)
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM {}'.format(db_tableName_meta))
+            list_unit_ids = [row[self._unit_id_key] for row in cursor.fetchall()
+                             if row[self._unit_name_key] == unit_name]
+            
+            if len(list_unit_ids) == 0:
+                raise ValueError('load_MappingMeasurementUnit_from_database: No mapping unit named "{}" found in {}'\
+                    .format(unit_name, loadpath))
+            if len(list_unit_ids) > 1:
+                raise ValueError('load_MappingMeasurementUnit_from_database: {} mapping units named "{}" found in {}'\
+                    .format(len(list_unit_ids), unit_name, loadpath))
+                
+            unit_id = list_unit_ids[0]
+            mappingUnit = MeaRMap_Unit(unit_name=unit_name, unit_id=unit_id)
+            mappingUnit = self._load_MappingMeasurementUnit_metadata_database(unit_id, conn, mappingUnit)
+            mappingUnit = self._load_MappingMeasurementUnit_measurement_database(unit_id, conn, loadpath, mappingUnit, flg_readraw)
+        finally:
+            conn.close()
+            
+        return mappingUnit
 
     def load_MappingMeasurementHub_database(self, hub:MeaRMap_Hub, loadpath:str,
         flg_readraw:bool=True, unit_names:list[str]|None=None,
