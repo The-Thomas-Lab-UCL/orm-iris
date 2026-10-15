@@ -9,6 +9,7 @@ from PySide6.QtCore import Signal, Slot, QObject, QThread, QTimer, QCoreApplicat
 
 import os
 import psutil
+from collections import deque
 import shutil
 from typing import Any, TypedDict
 import time
@@ -34,10 +35,15 @@ from iris.resources.dataHubPlus_Raman_ui import Ui_DataHubPlus_mapping
 from iris.resources.dataHub_Raman_partialLoad_ui import Ui_dataHub_Raman_partialLoad
 from iris.resources.dialog_multiRename_ui import Ui_Dialog_MultiRename
 from iris.gui.submodules.dialog_metadata import Dlg_MetadataViewer
+from iris.utils.mea_pause import MeasurementPauseGate
 
 DATAHUBPLUS_MAX_FREQ_HZ = 1.0 # Maximum update frequency for the DataHubPlus treeview in Hertz
 DATAHUB_OFFLOADCHECK_INTERVAL_SEC = 10.0  # Minimum interval between offload checks in seconds
 DATAHUB_OFFLOAD_MINMEMORY_GB = 1.0  # Minimum available memory in GB, under which offloading is triggered
+# A database job that never reports back would wedge the queue for the rest of the session, so
+# one is given this long to finish before it is written off and the queue moves on. Generous on
+# purpose: a large hub legitimately takes minutes to write.
+DATAHUB_DBJOB_TIMEOUT_SEC = 1800.0
 
 class SortableTreeItem(qw.QTreeWidgetItem):
     """
@@ -119,11 +125,17 @@ class DataHub_Worker(QObject):
     load_error = "Error in loading the data: "
     offload_success = "Autosaved and offloaded the data successfully."
     offload_error = "Error in autosaving and offloading the data: "
+    offload_nothing = "Nothing to offload: every stored measurement is still in progress."
+    autosave_nothing = "Nothing to autosave yet."
     autosave_success = "Autosaved the data successfully."
     autosave_error = "Error in autosaving the data: "
     
-    sig_delete_done = Signal()
+    sig_delete_done = Signal(int, list)   # (number deleted, list of per-unit error messages)
     sig_delete_error = Signal(str)
+
+    # How long a save waits for a running scan to park itself before going ahead anyway.
+    # An autosave that never runs is worse than one taken while the scan is mid-point.
+    PAUSE_WAIT_TIMEOUT_SEC = 120.0
 
     def __init__(self, mapping_hub:MeaRMap_Hub):
         super().__init__()
@@ -131,6 +143,66 @@ class DataHub_Worker(QObject):
         self._handler = MeaRMap_Handler()
         
         self._flg_issaved = True
+        self._pause_gate:MeasurementPauseGate|None = None
+        self._set_units_in_progress:set[str] = set()
+
+    def set_pause_gate(self, gate:MeasurementPauseGate|None) -> None:
+        """
+        Sets the gate used to park a running scan while a database write is in progress.
+        
+        Args:
+            gate (MeasurementPauseGate|None): The gate, or None to write without pausing
+        """
+        self._pause_gate = gate
+
+    def set_units_in_progress(self, set_unit_ids:set) -> None:
+        """
+        Updates the set of unit IDs that a measurement is still writing into. Those units
+        are left out of an autosave and are never offloaded, so that only finished
+        measurements are persisted and freed.
+        
+        Args:
+            set_unit_ids (set): The unit IDs currently being measured into
+        """
+        self._set_units_in_progress = set(set_unit_ids)
+
+    def _get_finished_unit_ids(self) -> list[str]:
+        """
+        Returns the IDs of the stored units that no measurement is writing into.
+        
+        Returns:
+            list[str]: The finished units' IDs, in the order they were added to the hub
+        """
+        set_in_progress = self._set_units_in_progress
+        return [unit_id for unit_id in self._mappinghub.get_list_MappingUnit_ids()
+                if unit_id not in set_in_progress]
+
+    def _write_database(self, savedirpath:str, savename:str, list_unit_ids:list|None) -> None:
+        """
+        Writes the given units to a database file, parking any running scan for the
+        duration so that it cannot append to the units while they are being written.
+        
+        Args:
+            savedirpath (str): The directory path to save the database to
+            savename (str): The name of the database file
+            list_unit_ids (list|None): The units to write, or None for every unit
+        
+        Raises:
+            Exception: Whatever the underlying save raises
+        """
+        gate = self._pause_gate
+        if gate is not None: gate.request_pause(self.PAUSE_WAIT_TIMEOUT_SEC)
+        try:
+            # Called synchronously (this already runs in the worker thread) so that a
+            # failure propagates here instead of dying unseen in a detached thread.
+            MeaRMap_Handler().save_MappingHub_database_sync(
+                mappingHub=self._mappinghub,
+                savedirpath=savedirpath,
+                savename=savename,
+                list_unit_ids=list_unit_ids,
+            )
+        finally:
+            if gate is not None: gate.release()
 
     @Slot(str,str)
     def save_database(self,savedirpath:str,savename:str) -> None:
@@ -140,15 +212,14 @@ class DataHub_Worker(QObject):
         Args:
             savedirpath (str): The directory path to save the database to
             savename (str): The name of the database file
+        
+        Note:
+            A manual save writes every unit, in-progress ones included: the user asked for
+            the data on disk, so a partial scan is better than nothing.
         """
         try:
             if not self._mappinghub.check_measurement_exist(): raise ValueError("No measurements to save in the MappingMeasurement_Hub.")
-            thread = MeaRMap_Handler().save_MappingHub_database(
-                mappingHub=self._mappinghub,
-                savedirpath=savedirpath,
-                savename=savename,
-            )
-            thread.join()
+            self._write_database(savedirpath, savename, None)
             self._flg_issaved = True
             self.sig_saveload_done.emit(self.save_success)
         except Exception as e:
@@ -157,20 +228,24 @@ class DataHub_Worker(QObject):
     @Slot(str, str)
     def autosave_database(self, savedirpath:str, savename:str) -> None:
         """
-        Save the MappingMeasurement_Hub stored internally to the local disk.
+        Autosave the finished measurements to the local disk.
         
         Args:
             savedirpath (str): The directory path to save the database to
             savename (str): The name of the database file
+        
+        Note:
+            Units still being measured into are left out: the live unit is already being
+            autosaved by the measurement storer, and writing it here would mean parking
+            the scan for a snapshot it is about to invalidate anyway. This always reports
+            an outcome, so the caller's autosave cycle can never be left hanging.
         """
         try:
-            if not self._mappinghub.check_measurement_exist(): return
-            thread = MeaRMap_Handler().save_MappingHub_database(
-                mappingHub=self._mappinghub,
-                savedirpath=savedirpath,
-                savename=savename,
-            )
-            thread.join()
+            list_unit_ids = self._get_finished_unit_ids()
+            if not self._mappinghub.check_measurement_exist() or len(list_unit_ids) == 0:
+                self.sig_saveload_done.emit(self.autosave_nothing)
+                return
+            self._write_database(savedirpath, savename, list_unit_ids)
             self._flg_issaved = True
             self.sig_saveload_done.emit(self.autosave_success)
         except Exception as e:
@@ -179,40 +254,37 @@ class DataHub_Worker(QObject):
     @Slot(str, str)
     def autoOffload_database(self, savedirpath:str, savename:str) -> None:
         """
-        Save the MappingMeasurement_Hub stored internally to the local disk and delete previous units to free up memory.
+        Save the finished measurements to the local disk and drop them from memory.
         
         Args:
             savedirpath (str): The directory path to save the database to
             savename (str): The name of the database file
-            autodelete (bool): If True, will delete the saved mappingUnit after saving
+        
+        Note:
+            Only the units no measurement is writing into are offloaded, and exactly those
+            units are then removed, so an in-progress scan keeps its unit in memory and is
+            never written twice. This always reports an outcome.
         """
         try:
-            if not self._mappinghub.check_measurement_exist(): return
+            if not self._mappinghub.check_measurement_exist():
+                self.sig_autoOffload_done.emit(self.offload_nothing)
+                return
             
-            list_unit_ids = self._mappinghub.get_list_MappingUnit_ids().copy()
-            last_unit_id = list_unit_ids.pop(-1)
-            
-            # NOTE: Currently disabled functionality: option to also offload the measurement in the last unit
-            # Expected use-case: if the measurement is still on going (i.e., last unit is being added to),
-            # we do not offload it just yet. But presently, the GUI is already overcrowded with too many widgets
-            # to add this functionality. We will put this back in when it is absolutely necessary.
-            
-            # last_unit = self._mappinghub.get_MappingUnit(last_unit_id)
-            # list_mea_ids = last_unit.get_list_RamanMeasurement_ids(copy=True)
+            list_unit_ids = self._get_finished_unit_ids()
+            if len(list_unit_ids) == 0:
+                self.sig_autoOffload_done.emit(self.offload_nothing)
+                return
             
             if savename.endswith('.db'): savename = savename[:-3]
             savename = f'{savename}_offload_{get_timestamp_sec()}.db'
             
-            thread = MeaRMap_Handler().save_MappingHub_database(
-                mappingHub=self._mappinghub,
-                savedirpath=savedirpath,
-                savename=savename,
-            )
-            thread.join()
+            self._write_database(savedirpath, savename, list_unit_ids)
             self._flg_issaved = True
             
-            [self._mappinghub.remove_mapping_unit_id(unit_id) for unit_id in list_unit_ids]
-            # last_unit.clear_measurements(list_mea_ids) # NOTE: Use in conjunction with the above disabled functionality
+            # Remove exactly the units that were written, so nothing is dropped unsaved
+            for unit_id in list_unit_ids:
+                try: self._mappinghub.remove_mapping_unit_id(unit_id)
+                except Exception as e: print(f'autoOffload_database: could not remove {unit_id}: {e}')
             self.sig_autoOffload_done.emit(self.offload_success)
         except Exception as e:
             self.sig_autoOffload_done.emit(self.offload_error + str(e))
@@ -315,13 +387,21 @@ class DataHub_Worker(QObject):
     @Slot(list)
     def delete_unit(self, list_names: list[str]):
         """
-        Delete the selected MappingMeasurement_Unit from the MappingMeasurement_Hub
+        Delete the given MappingMeasurement_Units from the MappingMeasurement_Hub.
+        
+        Args:
+            list_names (list[str]): Names of the units to delete
+        
+        Note:
+            Runs in the worker thread: releasing the spectra of many units takes a noticeable
+            time. The failures are collected and reported once, rather than one dialog per unit.
         """
+        list_errors = []
         for unit_name in list_names:
             try: self._mappinghub.remove_mapping_unit_name(unit_name)
-            except Exception as e: self.sig_delete_error.emit(f"Error in deleting Mapping Unit '{unit_name}':\n{e}")
+            except Exception as e: list_errors.append(f"{unit_name}: {e}")
             
-        self.sig_delete_done.emit()
+        self.sig_delete_done.emit(len(list_names) - len(list_errors), list_errors)
             
 class Wdg_DataHub_Mapping_Ui(qw.QWidget, Ui_DataHub_mapping):
     def __init__(self, parent: Any) -> None:
@@ -382,6 +462,23 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._sessionid = get_timestamp_us_str()
         self._flg_issaving_db = False
         self._flg_issaved_db = True   # Indicate if the stored data has been saved
+        
+        # Database writes are serialised: concurrent writers to one .db file risk corrupting
+        # it, so a request made while another is in flight is queued rather than dropped.
+        self._queue_dbjobs:deque = deque()
+        self._active_dbjob:str|None = None
+        self._last_autoOffloadCheck_time = 0.0
+        
+        # Backstop: releases the queue if a job never reports back (see _handle_dbjob_timeout)
+        self._timer_dbjob_watchdog = QTimer(self)
+        self._timer_dbjob_watchdog.setSingleShot(True)
+        self._timer_dbjob_watchdog.setInterval(int(DATAHUB_DBJOB_TIMEOUT_SEC * 1000))
+        self._timer_dbjob_watchdog.timeout.connect(self._handle_dbjob_timeout)
+        
+        # Units a measurement is still writing into. Those are left out of an autosave and are
+        # never offloaded, so only finished measurements are persisted and freed.
+        self._set_units_in_progress:set[str] = set()
+        self._pause_gate:MeasurementPauseGate|None = None
         self._list_pickled = []    # List of pickled files
         self._temp_savedir = SaveParamsEnum.DEFAULT_SAVE_PATH.value + r'\temp'
         if not os.path.exists(self._temp_savedir): os.makedirs(self._temp_savedir)
@@ -401,6 +498,9 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         wdg.btn_refresh.clicked.connect(self.update_tree)
         wdg.btn_rename.clicked.connect(self.rename_unit)
         wdg.btn_delete.clicked.connect(self.delete_unit)
+        self._btn_rename = wdg.btn_rename
+        self._btn_delete = wdg.btn_delete
+        self._btn_delete_ori = self._btn_delete.text()
         self._btn_save_ext = wdg.btn_save_ext 
         self._btn_save_db = wdg.btn_save_db
         self._btn_load_db = wdg.btn_load_db
@@ -439,10 +539,15 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self.sig_autosave_db_delete.connect(self._worker.autosave_database_delete)
         self.sig_load_db.connect(self._worker.load_database)
         self.sig_load_db_partial.connect(self._worker.load_database_partial)
+        # Wired unconditionally: these used to be connected only when autosave was enabled, so
+        # an offload requested with autosave off was emitted into the void and left the save
+        # queue waiting on a job that could never report back.
+        self.sig_autoOffload_db.connect(self._worker.autoOffload_database)
+        self._worker.sig_autoOffload_done.connect(self._handle_autoOffload_result)
         
         # Delete unit connection setup
         self._sig_req_delte_unit.connect(self._worker.delete_unit)
-        self._worker.sig_delete_done.connect(self._sig_req_update_tree.emit)
+        self._worker.sig_delete_done.connect(self._handle_delete_result)
         self._worker.sig_delete_error.connect(lambda msg: qw.QMessageBox.warning(self, "Delete error", msg))
 
         # Other connection setup
@@ -470,23 +575,27 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._flg_autosave = SaveParamsEnum.AUTOSAVE_ENABLED.value and autosave
         self._autosave_interval = SaveParamsEnum.AUTOSAVE_INTERVAL_HOURS.value
         if self._autosave_interval <= 0.0: self._flg_autosave = False
+        
+        # A repeating timer, rather than each autosave scheduling the next one: a chain of
+        # single shots dies for good the moment one link fails to re-arm, which is how autosave
+        # used to stop silently for the rest of the session.
+        self._timer_autosave = QTimer(self)
+        self._timer_autosave.timeout.connect(self._start_autosave)
         if self._flg_autosave:
             self._widget.chk_autoOffload.setChecked(True)
             QTimer.singleShot(0, self._init_autoOffload_signals)
-            QTimer.singleShot(0, self._start_autosave)
+            self._timer_autosave.setInterval(int(self._autosave_interval * 3600 * 1000))
+            QTimer.singleShot(0, self._timer_autosave.start)
             wdg.lbl_autosave.setText(f'Autosave: every {self._autosave_interval} hours to\n{self._autosave_dirpath}. Last autosave: N/A')
         
     def _init_autoOffload_signals(self):
+        """
+        Arms the automatic low-memory offload check. The offload signals themselves are wired in
+        __init__ regardless, so an offload requested by other means still runs.
+        """
         # Trigger a check of system memory whenever the MappingHub is updated
         self._MappingHub.add_observer(self._sig_check_system_memory.emit)
         self._sig_check_system_memory.connect(self._check_system_memory)
-        
-        # Connect the autoOffload signal
-        self.sig_autoOffload_db.connect(self._worker.autoOffload_database)
-        self._worker.sig_autoOffload_done.connect(self._handle_autoOffload_result)
-        
-        # Parameters
-        self._last_autoOffloadCheck_time = 0.0
         
         # Test
         # btn_offload = qw.QPushButton("Test AutoOffload", self)
@@ -500,8 +609,9 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         """
         if time.time() - self._last_autoOffloadCheck_time < DATAHUB_OFFLOADCHECK_INTERVAL_SEC: return
         if not self._widget.chk_autoOffload.isChecked(): return
-        if self._flg_issaving_db: return
         if self._flg_issaved_db: return
+        # An offload already running or queued is enough; no need to pile up another
+        if self._is_dbjob_pending('offload'): return
         
         memory = psutil.virtual_memory()
         self._last_autoOffloadCheck_time = time.time()
@@ -513,8 +623,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
                 "Low system memory",
                 "System memory is low (<1GB available). Autosaving and offloading data to free up memory."
             )
-            self.sig_autoOffload_db.emit(self._autooffload_dirpath, f"{self._sessionid}.db")
-            self._flg_issaving_db = True
+            self._request_dbjob('offload', self._autooffload_dirpath, f"{self._sessionid}.db")
         
     @Slot()
     def _emit_signal_selection(self):
@@ -789,7 +898,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         selections = self._tree.selectedItems()
 
         if len(selections) == 0:
-            qw.QErrorMessage().showMessage("No unit selected")
+            qw.QMessageBox.warning(self, "No selection", "No unit selected.")
             return
 
         flg_remove = qw.QMessageBox.question(
@@ -802,8 +911,51 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
         list_names = [item.text(self._COL_NAME) for item in selections]
         
+        # The deletion runs in the worker thread, so the buttons are gated until it reports back
+        # to stop the hub being saved, loaded or deleted from again mid-deletion.
+        self._disable_buttons_deletion()
         self._sig_req_delte_unit.emit(list_names)
         
+    def _disable_buttons_deletion(self):
+        """
+        Disables every button that touches the hub while a deletion runs in the worker thread.
+        """
+        self._btn_delete.setEnabled(False)
+        self._btn_delete.setText("Deleting...")
+        self._btn_rename.setEnabled(False)
+        self._btn_save_ext.setEnabled(False)
+        self._btn_save_db.setEnabled(False)
+        self._btn_load_db.setEnabled(False)
+
+    def _reset_buttons_deletion(self):
+        """
+        Re-enables the buttons disabled by _disable_buttons_deletion.
+        """
+        self._btn_delete.setEnabled(True)
+        self._btn_delete.setText(self._btn_delete_ori)
+        self._btn_rename.setEnabled(True)
+        self._btn_save_ext.setEnabled(True)
+        self._btn_save_db.setEnabled(True)
+        self._btn_load_db.setEnabled(True)
+
+    @Slot(int, list)
+    def _handle_delete_result(self, num_deleted:int, list_errors:list):
+        """
+        Re-enables the buttons and refreshes the treeview once a worker deletion has finished.
+        
+        Args:
+            num_deleted (int): Number of units that were deleted
+            list_errors (list): One message per unit that could not be deleted
+        """
+        self._reset_buttons_deletion()
+        if num_deleted > 0: self._flg_issaved_db = False
+        self._sig_req_update_tree.emit()
+
+        if list_errors:
+            qw.QMessageBox.warning(
+                self, "Partially deleted",
+                f"{num_deleted} unit(s) deleted.\n\nCould not delete:\n" + "\n".join(list_errors))
+
     @Slot()
     def _save_unit_ext(self) -> None:
         """
@@ -835,29 +987,162 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
         self.sig_save_ext.emit(list_ids[0], save_path, save_ext)
         
+    @Slot()
     def _start_autosave(self):
         """
-        Start the autosave timer
+        Autosave tick. Queues an autosave unless there is nothing new to save or one is already
+        pending. The repeating timer is never stopped here, so a skipped or failed tick costs
+        nothing more than that tick.
         """
         if not self._flg_autosave: return
+        if self._flg_issaved_db: return
+        if self._is_dbjob_pending('autosave'): return
         
-        if self._flg_issaved_db or self._flg_issaving_db:
-            QTimer.singleShot(int(self._autosave_interval * 3600 * 1000), self._start_autosave)
-            return
+        self._request_dbjob('autosave', self._autosave_dirpath, f"{self._sessionid}.db")
+
+    # >>> Serialised database jobs <<<
+
+    def _is_dbjob_pending(self, kind:str) -> bool:
+        """
+        Returns whether a database job of this kind is running or already queued.
         
-        self._btn_save_db.setEnabled(False)
-        self._btn_save_db.setText("Autosaving...")
-        self.sig_autosave_db.emit(self._autosave_dirpath, f"{self._sessionid}.db")
+        Args:
+            kind (str): The job kind ('save', 'autosave' or 'offload')
+        
+        Returns:
+            bool: True if such a job is in flight or waiting its turn
+        """
+        if self._active_dbjob == kind: return True
+        return any(job_kind == kind for job_kind, _ in self._queue_dbjobs)
+
+    def _request_dbjob(self, kind:str, savedirpath:str, savename:str) -> None:
+        """
+        Requests a database write, running it now if nothing else is writing, or queueing it
+        behind the job in flight. Requests are never silently dropped.
+        
+        Args:
+            kind (str): The job kind ('save', 'autosave' or 'offload')
+            savedirpath (str): The directory path to save the database to
+            savename (str): The name of the database file
+        """
+        self._queue_dbjobs.append((kind, (savedirpath, savename)))
+        self._dispatch_next_dbjob()
+
+    def _dispatch_next_dbjob(self) -> None:
+        """
+        Starts the next queued database job, if any, provided none is currently running.
+        """
+        if self._active_dbjob is not None: return
+        if not self._queue_dbjobs: return
+        
+        kind, (savedirpath, savename) = self._queue_dbjobs.popleft()
+        self._active_dbjob = kind
         self._flg_issaving_db = True
+        
+        # Hand the worker the current in-progress set, so an autosave/offload decided a moment
+        # ago still acts on what is live right now
+        self._worker.set_units_in_progress(self._set_units_in_progress)
+        
+        self._disable_saveload_buttons()
+        if kind == 'save': self._btn_save_db.setText("Saving...")
+        elif kind == 'autosave': self._btn_save_db.setText("Autosaving...")
+        elif kind == 'offload': self._btn_save_db.setText("Offloading...")
+        
+        self._timer_dbjob_watchdog.start()
+        
+        if kind == 'save': self.sig_save_db.emit(savedirpath, savename)
+        elif kind == 'autosave': self.sig_autosave_db.emit(savedirpath, savename)
+        elif kind == 'offload': self.sig_autoOffload_db.emit(savedirpath, savename)
+        else:
+            self._timer_dbjob_watchdog.stop()
+            self._active_dbjob = None
+            self._flg_issaving_db = False
+            raise ValueError(f'Unknown database job kind: {kind}')
+
+    def _finish_dbjob(self) -> None:
+        """
+        Marks the running database job as done and starts whatever was queued behind it.
+
+        Note:
+            Also called for results that never went through the queue (a hub load, or a single-unit
+            export, which reports with the same message as a database save). Those simply release
+            the buttons: there is no job to retire and nothing to dispatch.
+        """
+        self._timer_dbjob_watchdog.stop()
+        self._flg_issaving_db = False
+        self._reset_reenable_saveload_buttons()
+
+        if self._active_dbjob is None: return
+
+        self._active_dbjob = None
+        self._dispatch_next_dbjob()
+
+    @Slot()
+    def _handle_dbjob_timeout(self) -> None:
+        """
+        Gives up on a database job that never reported back, so that one stuck operation cannot
+        block every later save, autosave and offload for the rest of the session.
+        """
+        kind = self._active_dbjob
+        if kind is None: return
+        
+        print(f'{get_timestamp_sec()}: database job \'{kind}\' did not report back within '
+              f'{DATAHUB_DBJOB_TIMEOUT_SEC/60:.0f} min; releasing the save queue.')
+        self._active_dbjob = None
+        self._flg_issaving_db = False
+        self._reset_reenable_saveload_buttons()
+        self._dispatch_next_dbjob()
+
+    # >>> Measurement coordination <<<
+
+    def set_pause_gate(self, gate:MeasurementPauseGate|None) -> None:
+        """
+        Sets the gate used to park a running scan for the duration of every database write, so
+        that the scan cannot append to a unit while it is being written out.
+        
+        Args:
+            gate (MeasurementPauseGate|None): The gate, or None to write without pausing
+        """
+        self._pause_gate = gate
+        self._worker.set_pause_gate(gate)
+
+    def mark_unit_in_progress(self, unit_id:str) -> None:
+        """
+        Marks a unit as being measured into. Such a unit is left out of an autosave and is never
+        offloaded, so an in-progress measurement is neither half-written nor dropped from memory.
+        
+        Args:
+            unit_id (str): The ID of the unit the measurement is writing into
+        """
+        self._set_units_in_progress.add(unit_id)
+        self._worker.set_units_in_progress(self._set_units_in_progress)
+
+    def clear_unit_in_progress(self, unit_id:str|None=None) -> None:
+        """
+        Marks a unit as finished, so it becomes eligible for autosaving and offloading.
+        
+        Args:
+            unit_id (str|None): The unit to clear, or None to clear every unit. Clearing all is
+                the robust choice on a measurement-done signal, which covers a successful,
+                cancelled and failed measurement alike.
+        """
+        if unit_id is None: self._set_units_in_progress.clear()
+        else: self._set_units_in_progress.discard(unit_id)
+        self._worker.set_units_in_progress(self._set_units_in_progress)
+
+    def get_units_in_progress(self) -> set:
+        """
+        Returns:
+            set: A copy of the IDs of the units currently being measured into
+        """
+        return set(self._set_units_in_progress)
         
     @Slot()
     def _save_hub_database(self) -> None:
         """
-        Save the MappingMeasurement_Hub stored internally to the local disk as a database
+        Save the MappingMeasurement_Hub stored internally to the local disk as a database.
+        Queued behind any autosave or offload already writing, so the two cannot interleave.
         """
-        self._btn_save_db.setEnabled(False)
-        self._btn_save_db.setText("Saving...")
-        
         savepath = qw.QFileDialog.getSaveFileName(
             None,
             "Save Mapping Hub database...",
@@ -865,10 +1150,15 @@ class Wdg_DataHub_Mapping(qw.QWidget):
             "Database files (*.db)"
         )[0]
         
-        savedirpath, savename = os.path.split(savepath)
-        self.sig_save_db.emit(savedirpath, savename)
+        # The user cancelled the dialog: leave the buttons as they were
+        if not savepath: return
         
-        self._flg_issaving_db = True
+        savedirpath, savename = os.path.split(savepath)
+        if not savename:
+            qw.QMessageBox.warning(self, "Save error", "No file name was given for the database.")
+            return
+        
+        self._request_dbjob('save', savedirpath, savename)
 
     @Slot()
     def _load_hub_database(self) -> None:
@@ -942,9 +1232,12 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         elif message == DataHub_Worker.offload_success:
             qw.QMessageBox.warning(None, "Autosave and offload operation", message)
             self._flg_issaved_db = True
-                
-        self._flg_issaving_db = False
-        self._reset_reenable_saveload_buttons()
+        elif message == DataHub_Worker.offload_nothing:
+            # Everything still in memory belongs to a running measurement: nothing to free yet.
+            # Not worth a dialog, as this is checked automatically on every hub change.
+            print(f'{get_timestamp_sec()}: {message}')
+        
+        self._finish_dbjob()
         self._sig_req_update_tree.emit()
         
     @Slot(str)
@@ -970,13 +1263,16 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         elif message == DataHub_Worker.autosave_success:
             wdg = self._widget.lbl_autosave
             wdg.setText(f'Autosave: every {self._autosave_interval} hours to\n{self._autosave_dirpath}. Last autosave: {get_timestamp_sec()}')
-            QTimer.singleShot(int(self._autosave_interval * 3600 * 1000), self._start_autosave)
+        elif message == DataHub_Worker.autosave_nothing:
+            # Only in-progress measurements are stored: the measurement storer is already
+            # autosaving those, so there is nothing for the hub autosave to do this tick.
+            print(f'{get_timestamp_sec()}: {message}')
         elif message.startswith(DataHub_Worker.autosave_error):
             qw.QMessageBox.warning(None, "Autosave operation", message)
-            QTimer.singleShot(int(self._autosave_interval * 3600 * 1000), self._start_autosave)
-                
-        self._flg_issaving_db = False
-        self._reset_reenable_saveload_buttons()
+        
+        # The repeating autosave timer re-arms itself, so a failed or skipped autosave does not
+        # need to schedule the next one (and cannot cancel the cycle by failing to).
+        self._finish_dbjob()
         self._sig_req_update_tree.emit()
         
     def _handle_hub_change(self):

@@ -1743,32 +1743,80 @@ class MeaRMap_Handler():
     @thread_assign
     def save_MappingHub_database(self,mappingHub:MeaRMap_Hub,savedirpath:str,savename:str) -> threading.Thread:
         """
-        Saves the mapping measurement data into a database.
+        Saves the mapping measurement data into a database, in a thread of its own.
         
         Args:
             mappingHub (mapping_measurement_new): mapping_measurement_new object to be saved
-            savepath (str): path to save the data. Defaults to None.
+            savedirpath (str): directory to save the data in
+            savename (str): name of the database file
+        
+        Note:
+            The work happens in a detached thread, so a failure here cannot be observed by the
+            caller: joining the returned thread tells you it has stopped, not that it
+            succeeded. Callers that must report success or failure (and callers that already
+            run in a thread of their own) should call save_MappingHub_database_sync instead.
+        """
+        self.save_MappingHub_database_sync(
+            mappingHub=mappingHub, savedirpath=savedirpath, savename=savename)
+    
+    def save_MappingHub_database_sync(
+        self,
+        mappingHub:MeaRMap_Hub,
+        savedirpath:str,
+        savename:str,
+        list_unit_ids:list[str]|None=None,
+        ) -> str:
+        """
+        Saves the mapping measurement data into a database in the calling thread, raising on
+        failure so that the caller can report what happened.
+        
+        Args:
+            mappingHub (MeaRMap_Hub): The hub holding the units to be saved
+            savedirpath (str): directory to save the data in
+            savename (str): name of the database file
+            list_unit_ids (list[str]|None): Save only these units. Defaults to None, which
+                saves every unit in the hub. Used to leave an in-progress measurement out of
+                an autosave or an offload.
+        
+        Returns:
+            str: The full path the database was written to
+        
+        Raises:
+            AssertionError: The hub, the unit selection or the savename is not usable
+            Exception: Whatever the underlying sqlite/file write raises
         """
         assert isinstance(mappingHub, MeaRMap_Hub), 'save_mapping_measurement: The input data type is not correct. Expected mapping_measurement_new object.'
         assert mappingHub.check_measurement_exist(), 'save_mapping_measurement: The measurement data does not exist.'
         assert isinstance(savename,str) and savename != '', 'save_mapping_measurement: The input savename is not correct. Expected a valid filename.'
         
+        if list_unit_ids is None: list_unit_ids = mappingHub.get_list_MappingUnit_ids()
+        assert len(list_unit_ids) > 0, 'save_mapping_measurement: There are no units to save.'
+        
         if not os.path.exists(savedirpath) or not os.path.isdir(savedirpath): os.makedirs(savedirpath)
         
         if savename[-3:] != '.db': savename += '.db'
         savepath = os.path.join(savedirpath,savename)
-            
+        
+        # Resolve the units before opening the database: a unit that has gone away in the
+        # meantime (e.g. removed from another panel) is skipped rather than aborting the save.
+        list_measurement_units = []
+        for unit_id in list_unit_ids:
+            try: list_measurement_units.append(mappingHub.get_MappingUnit(unit_id))
+            except Exception: continue
+        assert len(list_measurement_units) > 0, 'save_mapping_measurement: None of the requested units could be resolved.'
+        
         # Connect to the database
         conn:sql.Connection = sql.connect(savepath)
         
         # Save the mapping_measurement_unit metadata and measurement data
-        list_unit_ids = mappingHub.get_list_MappingUnit_ids()
-        list_measurement_units = [mappingHub.get_MappingUnit(id) for id in list_unit_ids]
-        for measurement_unit in list_measurement_units:
-            self._save_MappingMeasurementUnit_metadata_database(measurement_unit,conn)    
-            self._save_MappingMeasurementUnit_measurement_database(measurement_unit,conn,savepath)
-            
-        conn.close()
+        try:
+            for measurement_unit in list_measurement_units:
+                self._save_MappingMeasurementUnit_metadata_database(measurement_unit,conn)    
+                self._save_MappingMeasurementUnit_measurement_database(measurement_unit,conn,savepath)
+        finally:
+            conn.close()
+        
+        return savepath
     
     @thread_assign
     def save_MappingHub_pickle(self,mappingHub:MeaRMap_Hub,savedirpath:str,

@@ -233,10 +233,13 @@ class Image_SaverLoader_Worker(QObject):
     msg_load_db = 'ImageMeasurementHub loaded successfully (.db): '
     msg_load_db_partial = 'ImageMeasurementHub loaded, but some unit(s) were skipped (.db): '
     msg_save_png = 'ImageMeasurementUnit saved successfully as PNG: '
+    msg_remove = 'ImageMeasurementUnit(s) removed successfully: '
+    msg_remove_partial = 'ImageMeasurementUnit(s) removed, but some could not be removed: '
     
     msg_error_save = 'Error saving ImageMeasurementHub (.db): '
     msg_error_load = 'Error loading ImageMeasurementHub (.db): '
     msg_error_save_png = 'Error saving ImageMeasurementUnit as PNG: '
+    msg_error_remove = 'Error removing ImageMeasurementUnit(s): '
     
     def __init__(self):
         super().__init__()
@@ -291,6 +294,32 @@ class Image_SaverLoader_Worker(QObject):
         except Exception as e:
             self.error.emit(self.msg_error_save + str(e))
 
+    @Slot(MeaImg_Hub,list)
+    def remove_ImageMeasurementUnits(self, hub:MeaImg_Hub, list_unit_id:list[str]):
+        """
+        Remove the given ImageMeasurement_Units from the hub.
+        
+        Args:
+            hub (MeaImg_Hub): ImageMeasurement_Hub object to remove the units from
+            list_unit_id (list[str]): IDs of the ImageMeasurement_Units to remove
+        
+        Note:
+            Removing a unit releases its (potentially large) image data, so this is done off the
+            GUI thread. The hub notifies its observers once, after every unit has been removed.
+        """
+        try:
+            list_errors = hub.remove_ImageMeasurementUnits(list_unit_id)
+            num_removed = len(list_unit_id) - len(list_errors)
+            if list_errors:
+                self.finished.emit(
+                    self.msg_remove_partial
+                    + f"{num_removed} of {len(list_unit_id)} unit(s) removed.\n\nCould not remove:\n"
+                    + '\n'.join(list_errors))
+            else:
+                self.finished.emit(self.msg_remove + f"{num_removed} unit(s)")
+        except Exception as e:
+            self.error.emit(self.msg_error_remove + str(e))
+
     @Slot(MeaImg_Hub,str)
     def load_ImageMeasurementHub(self, hub:MeaImg_Hub, file_path:str):
         """
@@ -342,6 +371,7 @@ class Wdg_DataHub_Image(qw.QWidget):
     sig_save_with_options = Signal(MeaImg_Hub, str, str, float, bool, bool)
     sig_load = Signal(MeaImg_Hub, str)
     sig_save_png = Signal(MeaImg_Unit, str, float, bool)
+    sig_remove = Signal(MeaImg_Hub, list)   # Emitted to remove the given unit IDs off the GUI thread
     sig_updateTree = Signal()
     sig_tree_selection_str = Signal(str)    # Emitted when the treeview selection is changed, with the selected unit name as argument
     
@@ -433,6 +463,7 @@ class Wdg_DataHub_Image(qw.QWidget):
         self.sig_save_with_options.connect(self._worker.save_ImageMeasurementHub_with_options)
         self.sig_load.connect(self._worker.load_ImageMeasurementHub)
         self.sig_save_png.connect(self._worker.save_ImageMeasurementUnit_png)
+        self.sig_remove.connect(self._worker.remove_ImageMeasurementUnits)
         
         self._worker.finished.connect(self._handle_worker_finished)
         self._worker.error.connect(self._handle_worker_error)
@@ -443,9 +474,25 @@ class Wdg_DataHub_Image(qw.QWidget):
         # Defer thread start until after initialization is complete
         QTimer.singleShot(0, self._thread.start)
         
-        # Signals
-        self.sig_updateTree.connect(self.update_tree)
-        
+        # Debounce tree updates: a removal or a load makes the hub notify its observers while this
+        # widget also asks for a refresh, so several requests can arrive in rapid succession.
+        # Collapsing them into one update keeps the GUI thread from rebuilding the tree repeatedly.
+        self._update_tree_timer = QTimer(self)
+        self._update_tree_timer.setSingleShot(True)
+        self._update_tree_timer.setInterval(50)  # 50 ms debounce
+        self._update_tree_timer.timeout.connect(self.update_tree)
+        # The hub observers emit this signal from whichever thread modified the hub (e.g. the worker
+        # during a removal). Force a queued connection so the timer is always (re)started from the
+        # GUI thread, never from the worker thread.
+        self.sig_updateTree.connect(self._request_update_tree, Qt.ConnectionType.QueuedConnection)
+
+    @Slot()
+    def _request_update_tree(self):
+        """
+        Restarts the debounce timer for the treeview update. Must run in the GUI thread.
+        """
+        self._update_tree_timer.start()
+
     def _handle_worker_finished(self, msg:str):
         """
         Slot to handle the finished signal from the worker.
@@ -469,6 +516,19 @@ class Wdg_DataHub_Image(qw.QWidget):
             return
         elif msg.startswith(self._worker.msg_save_png):
             self.reset_buttons('save_png')
+        elif msg.startswith(self._worker.msg_remove_partial):
+            # Some units could not be removed: the rest are gone, the user is told which failed
+            self._flg_issaved = False
+            self._reset_buttons_removal()
+            self.sig_updateTree.emit()
+            qw.QMessageBox.warning(self, 'Partially removed', msg)
+            return
+        elif msg.startswith(self._worker.msg_remove):
+            # No success dialog: the units disappearing from the treeview is feedback enough
+            self._flg_issaved = False
+            self._reset_buttons_removal()
+            self.sig_updateTree.emit()
+            return
         else: raise ValueError('Unknown finished message from worker.')
         
         qw.QMessageBox.information(self, 'Success', msg)
@@ -487,8 +547,27 @@ class Wdg_DataHub_Image(qw.QWidget):
             self.reset_buttons('load')
         elif error_msg.startswith(self._worker.msg_error_save_png):
             self.reset_buttons('save_png')
+        elif error_msg.startswith(self._worker.msg_error_remove):
+            self._reset_buttons_removal()
+            self.sig_updateTree.emit()
         else: raise ValueError('Unknown error message from worker.')
         
+    def _disable_buttons_removal(self):
+        """
+        Disables every button that touches the hub while a removal runs in the worker thread,
+        so the hub cannot be saved, loaded, renamed or removed from underneath the removal.
+        """
+        for option in ('save','load','remove','save_png'): self.disable_buttons(option)
+        self._btn_rename.setEnabled(False)
+        self._btn_remove.setText('Removing...')
+
+    def _reset_buttons_removal(self):
+        """
+        Re-enables the buttons disabled by _disable_buttons_removal.
+        """
+        for option in ('save','load','remove','save_png'): self.reset_buttons(option)
+        self._btn_rename.setEnabled(True)
+
     def reset_buttons(self, option:Literal['save','load','remove','save_png']):
         """
         Reset the button texts and states to their original values.
@@ -690,11 +769,10 @@ class Wdg_DataHub_Image(qw.QWidget):
         if confirm != qw.QMessageBox.Yes: # pyright: ignore[reportAttributeAccessIssue] ; QMessageBox.Yes exists
             return
         
-        for unit_id in list_unit_id:
-            self.ImageHub.remove_ImageMeasurementUnit(unit_id)
-        
-        self._flg_issaved = False
-        self.sig_updateTree.emit()
+        # The removal itself runs in the worker thread: releasing the image data of many units
+        # can take a noticeable time and would otherwise freeze the GUI.
+        self._disable_buttons_removal()
+        self.sig_remove.emit(self.ImageHub, list_unit_id)
         
     @Slot()
     def _show_tree_context_menu(self, pos):

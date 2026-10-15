@@ -24,6 +24,8 @@ if __name__ == '__main__':
 import threading
 import time
 from iris.utils.general import messagebox_request_input, get_all_widgets
+from iris.utils.scan_progress import ScanPathProgress, continuous_group_labels
+from iris.utils.mea_pause import MeasurementPauseGate
 
 from iris.gui.motion_video import Wdg_MotionController, Motion_GoToCoor_Worker
 from iris.gui.raman import Wdg_SpectrometerController, RamanMeasurement_Worker, AcquisitionParams, Enum_ContinuousMeasurementTrigger as EnumTrig, Syncer_Raman
@@ -244,7 +246,8 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     _sig_acquire_continuous_mea = Signal(AcquisitionParams, queue.Queue, queue.Queue, queue.Queue)
     _sig_acquire_list_coors = Signal(list, threading.Event)
 
-    def __init__(self, mapping_hub:MeaRMap_Hub, syncer_raman:Syncer_Raman, event_isacquiring:threading.Event):
+    def __init__(self, mapping_hub:MeaRMap_Hub, syncer_raman:Syncer_Raman, event_isacquiring:threading.Event,
+                 pause_gate:MeasurementPauseGate|None=None):
         """
         Worker to perform the measurement acquisition for Raman imaging. For the slots details, refer to the
         methods in RamanMeasurement_Worker class in raman.py.
@@ -253,52 +256,30 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             mapping_hub (MeaRMap_Hub): The mapping measurement hub to store the measurement data
             syncer_raman (Syncer_Raman): The synchronization object for Raman measurements
             event_isacquiring (threading.Event): The event flag to indicate if a measurement is ongoing
+            pause_gate (MeasurementPauseGate|None): Gate used to park the scan while the data hub
+                writes a database file, so that the scan cannot append to a unit mid-write.
+                Defaults to None, which runs the scan without ever pausing.
         """
         super().__init__()
         self.mapping_hub = mapping_hub
         self._syncer = syncer_raman
         self._event_isacquiring = event_isacquiring
+        self._pause_gate = pause_gate
+
+    def _pause_checkpoint(self, progress:ScanPathProgress|None=None) -> None:
+        """
+        Parks the scan if the data hub is writing a database file, and discounts the time spent
+        parked from the progress estimate so the pause is not mistaken for a slow stage.
+
+        Args:
+            progress (ScanPathProgress|None): The scan's progress estimator, if any
+        """
+        if self._pause_gate is None: return
+        duration_paused = self._pause_gate.checkpoint(self._event_isacquiring)
+        if duration_paused > 0:
+            if progress is not None: progress.add_paused_time(duration_paused)
+            print(f'Scan resumed after being paused for {duration_paused:.1f} s by a data hub save')
     
-    def _calculate_time_remaining(self, points_done:int, total_points:int, time_elapsed:float) -> str:
-        """
-        Calculates the estimated time remaining for the measurement.
-
-        Args:
-            points_done (int): The number of points already measured
-            total_points (int): The total number of points to be measured
-            time_elapsed (float): The time elapsed since the start of the measurement in seconds
-            
-        Returns:
-            str: The estimated time remaining (auto converted to hours, minutes, seconds)
-        """
-        if points_done == 0:
-            return "Waiting for first point..."
-        time_per_point = time_elapsed / points_done
-        points_remaining = total_points - points_done
-        time_remaining = time_per_point * points_remaining
-        return self._convert_time_to_hms(time_remaining)
-        
-    def _convert_time_to_hms(self, time_remaining:float) -> str:
-        """
-        Converts time in seconds to a string in hours, minutes, and seconds.
-        
-        Args:
-            time_remaining (float): The time remaining in seconds
-        
-        Returns:
-            str: The time remaining in "Xh Ym Zs" format
-        """
-        hours = int(time_remaining // 3600)
-        minutes = int((time_remaining % 3600) // 60)
-        seconds = int(time_remaining % 60)
-        
-        if hours > 0:
-            return f"{hours}h {minutes}m {seconds}s"
-        elif minutes > 0:
-            return f"{minutes}m {seconds}s"
-        else:
-            return f"{seconds}s"
-
     def _calculate_goto_stall_timeout(self, params:AcquisitionParams) -> float:
         """
         Calculates the stall-timeout to use for a "go to coordinate" movement during a mapping
@@ -343,13 +324,29 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         accumulation = params['accumulation']
         goto_timeout = self._calculate_goto_stall_timeout(params)
 
-        time_start = time.time()
-        total_points = len(mapping_coordinates)
+        # Pre-compute the XY path of the scan, so that the progress/time estimates can be based on
+        # the distance actually travelled rather than on the plain point count. The per-point
+        # integration time is a known, distance-independent cost, so it is given to the estimator.
+        progress = ScanPathProgress(
+            mapping_coordinates,
+            fixed_time_per_point_sec=accumulation * int_time / 1000.0,
+        )
+        self.sig_progress_update_str.emit(progress.initial_message('points'))
+
         self._event_isacquiring.set()
+        if self._pause_gate is not None: self._pause_gate.scan_started()
         msg = self.msg_mea_finished
+        progress.start()
         for i, coor in enumerate(mapping_coordinates):
             try:
                 # time1 = time.time()
+                if not self._event_isacquiring.is_set():
+                    msg = self.msg_mea_cancelled
+                    break
+
+                # Hold here while the data hub is writing a database file. Between points is a
+                # safe place to park: nothing is being integrated and the stage is stationary.
+                self._pause_checkpoint(progress)
                 if not self._event_isacquiring.is_set():
                     msg = self.msg_mea_cancelled
                     break
@@ -401,13 +398,10 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 
             finally:
                 # Update progress
-                points_done = i + 1
-                time_elapsed = time.time() - time_start
-                time_remaining_str = self._calculate_time_remaining(points_done, total_points, time_elapsed)
-                progress_msg = f'Measured {points_done}/{total_points} points. Remaining est.: {time_remaining_str}. Elapsed: {self._convert_time_to_hms(time_elapsed)}. Total est.: {self._convert_time_to_hms(time_elapsed + (time_elapsed/points_done)*(total_points-points_done))}.'
-                self.sig_progress_update_str.emit(progress_msg)
+                self.sig_progress_update_str.emit(progress.update(i + 1).message('points'))
         
         self._event_isacquiring.clear()
+        if self._pause_gate is not None: self._pause_gate.scan_finished()
         self.emit_finish_signals(msg)
         return
 
@@ -440,9 +434,18 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         
         print('Acquisition started, moving to start position...')
         # >>> Perform the mapping measurement <<<
-        time_start = time.time()
-        total_points = len(mapping_coordinates_ends)
+        # Pre-compute the XY path of the scan for the progress/time estimates. There is no
+        # distance-independent per-line cost here (the spectra are acquired while the stage moves),
+        # but the scan lines and the retraces are travelled at very different speeds, so they are
+        # labelled as separate groups and get their own measured travel rate.
+        progress = ScanPathProgress(
+            mapping_coordinates_ends,
+            group_labels=continuous_group_labels(len(mapping_coordinates_ends)),
+        )
+        self.sig_progress_update_str.emit(progress.initial_message('lines'))
+
         self._event_isacquiring.set()
+        if self._pause_gate is not None: self._pause_gate.scan_started()
         goto_timeout = self._calculate_goto_stall_timeout(params)
 
         # Prepare the start of the measurement
@@ -468,8 +471,15 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             print('Error in _auto_adjust_mapping_speed:',e)
 
         msg = self.msg_mea_finished
+        # Start the scan clock only now, so the speed auto-adjustment above is excluded from both the
+        # elapsed time and the measured travel rate
+        progress.start()
         for i, coor in enumerate(mapping_coordinates_ends):
             try:
+                if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled; break
+                # Hold here while the data hub is writing a database file. The park happens
+                # between coordinates, so a scan line is never interrupted part-way through.
+                self._pause_checkpoint(progress)
                 if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled; break
                 self._execute_scan_continuous_step(mapping_speed_param, q_mea_out, event_finish_setvel, event_finish_goto, q_trig, i, coor, goto_timeout)
             except Exception as e:
@@ -477,11 +487,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 print('Error in run_scan_continuous:',e)
             finally:
                 # Update progress
-                points_done = i + 1
-                time_elapsed = time.time() - time_start
-                time_remaining_str = self._calculate_time_remaining(points_done, total_points, time_elapsed)
-                progress_msg = f'Measured {points_done}/{total_points} lines. Remaning est.: {time_remaining_str}. Elapsed: {self._convert_time_to_hms(time_elapsed)}. Total est.: {self._convert_time_to_hms(time_elapsed + (time_elapsed/points_done)*(total_points-points_done))}.'
-                self.sig_progress_update_str.emit(progress_msg)
+                self.sig_progress_update_str.emit(progress.update(i + 1).message('lines'))
         
         # Stop raman frame's continuous measurement and store the final measurements
         q_trig.put(EnumTrig.STORE)
@@ -495,6 +501,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         event_finish_setvel.wait()
 
         self._event_isacquiring.clear()
+        if self._pause_gate is not None: self._pause_gate.scan_finished()
         self.emit_finish_signals(msg)
 
     def _execute_scan_continuous_step(
@@ -924,10 +931,15 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         """
     # >>> Worker setups <<<
         self._event_isacquiring = threading.Event()
+        # Shared with the data hub: every database write parks the scan for its duration, and
+        # the scan in turn tells the hub when it is safe to write.
+        self._pause_gate = MeasurementPauseGate()
+        self._dataHub_map.set_pause_gate(self._pause_gate)
         self._worker_hilvlacq = Hilvl_MeasurementAcq_Worker(
             self._dataHub_map.get_MappingHub(),
             self.raman_controller.get_syncer_acquisition(),
-            self._event_isacquiring)
+            self._event_isacquiring,
+            pause_gate=self._pause_gate)
         
         # Try to get the goto worker, but be defensive about timing
         try:
@@ -975,6 +987,10 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
     # >>> Autosaver worker setup <<<
         # Signal to stop the autosaver
         self._worker_hilvlacq.sig_mea_done.connect(self._worker_autoMeaStorer.stop_autosaver)
+        
+        # The measurement is over (finished, cancelled or failed alike), so its unit may now be
+        # autosaved and offloaded by the data hub
+        self._worker_hilvlacq.sig_mea_done.connect(self._dataHub_map.clear_unit_in_progress)
         
         # Signal to start and set the autosaver
         self.sig_start_autosaver.connect(self._worker_autoMeaStorer.start_autosaver)
@@ -1516,7 +1532,14 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         
         # Initialise the mapping measurement data class
         mea_unit = MeaRMap_Unit(unit_name, extra_metadata=extra_metadata)
+<<<<<<< Updated upstream
         if not self._dataHub_map.append_MappingUnit(mea_unit): return False
+=======
+        self._dataHub_map.append_MappingUnit(mea_unit)
+        # Tell the data hub this unit is live, so its autosave leaves it out and its offload
+        # never drops it from memory while the scan is still writing into it
+        self._dataHub_map.mark_unit_in_progress(mea_unit.get_unit_id())
+>>>>>>> Stashed changes
 
         # Scramble the mapping coordinates if requested
         mapping_coordinates = self._scramble_mapping_coordinates(mapping_coordinates, method)
