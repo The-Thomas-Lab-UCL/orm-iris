@@ -702,19 +702,24 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         unit = self._MappingHub.get_MappingUnit(unit_name=unit_name)
         self.set_selection_unitID(unit.get_unit_id())
         
-    def append_MappingUnit(self, unit: MeaRMap_Unit, persist:bool=True):
+    def append_MappingUnit(self, unit: MeaRMap_Unit, persist:bool=True) -> bool:
         """
         Append a MappingMeasurement_Unit to the MappingMeasurement_Hub
         
         Args:
             unit (MappingMeasurement_Unit): The unit to append
             persist (bool, optional): If True, will ask for a new unit ID. Defaults to True.
+            
+        Returns:
+            bool: True if the unit was appended, False otherwise (e.g., name exists and the user cancelled)
         """
+        appended = False
         while True:
             try:
                 self._MappingHub.append_mapping_unit(unit)
                 self._flg_issaved_db = False
                 self.update_tree()
+                appended = True
                 break
             except FileExistsError as e:
                 if not persist: qw.QErrorMessage().showMessage("Unit ID already exists:\n" + str(e)); break
@@ -725,6 +730,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
                 else: break
                 
         self._sig_req_update_tree.emit()
+        return appended
                 
     def extend_MappingUnit(self, list_unit:list[MeaRMap_Unit], persist:bool=True):
         """

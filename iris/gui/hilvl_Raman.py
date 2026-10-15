@@ -1182,7 +1182,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         return total_distance
     
     def _initialise_mapping_parameters(self, mappingHub:MeaRMap_Hub, mapping_coordinates_mm:MeaCoor_mm,
-                                       mappingUnit_name:str|None=None) -> tuple[list,float,str]:
+                                       mappingUnit_name:str|None=None) -> tuple[list,float,str]|None:
         """
         Performs the initial checks prior to the mapping measurement:
             1. Running status check
@@ -1197,7 +1197,8 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             mappingUnit_name (str|None): The mapping ID. If None, the user will be prompted to enter it. Defaults to None.
             
         Returns:
-            tuple: mapping coordinates, mapping speed (mm/sec), mapping ID
+            tuple|None: mapping coordinates, mapping speed (mm/sec), mapping ID.
+                None if the user cancelled the mapping ID request.
             
         NOTE:
             Assumes that the mapping coordinate will be followed as a pathway
@@ -1224,20 +1225,24 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             f"The speed modifier in the config file must be a positive number. Got {AppRamanEnum.CONTINUOUS_SPEED_MODIFIER.value}"
         
         # Mapping ID request and check
-        list_mappingUnit_names = list(mappingHub.get_dict_nameToID().keys())
         if mappingUnit_name is None and mapping_coordinates_mm.mappingUnit_name != '':
             mappingUnit_name = mapping_coordinates_mm.mappingUnit_name
         
-        while mappingUnit_name is None:
+        def validator(name:str) -> bool: return name.strip() != '' and mappingHub.validate_new_unit_name(name)
+        
+        if mappingUnit_name is None or not validator(mappingUnit_name):
+            message = 'Enter the ID for the mapping measurement:' if mappingUnit_name is None else \
+                f"The mapping ID '{mappingUnit_name}' already exists.\nEnter a new ID for the mapping measurement:"
             mappingUnit_name = messagebox_request_input(
                 parent=self,
                 title='Mapping ID',
-                message='Enter the ID for the mapping measurement:',
-                default='',
-                validator=self._dataHub_map.get_MappingHub().validate_new_unit_name,
+                message=message,
+                default=mappingUnit_name or '',
+                validator=validator,
                 invalid_msg="Invalid 'mappingUnit name'. The name cannot be empty or already exist. Please try again.",
                 loop_until_valid=True
             )
+            if mappingUnit_name is None: return None    # User cancelled
             
         return (list_coor_mm, mapping_speed_mmPerSec, mappingUnit_name)
         
@@ -1439,7 +1444,11 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         """
         Performs discrete mapping based on the mapping coordinates stored in the list
         """
-        def reset(): self.enable_widgets()
+        def reset():
+            self._list_sel_mapCoor.clear()
+            self.raman_controller.reset_enable_widgets()
+            self.motion_controller.enable_widgets()
+            self.reset_mapping_widgets()
         assert method in MappingMethods, "Invalid mapping method. Check the MappingMethods enum."
         
         mapping_hub = self._dataHub_map.get_MappingHub()
@@ -1458,6 +1467,10 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             qw.QMessageBox.critical(self,'Error',f"Failed to initialise mapping parameters for '{mappingUnit_name}': {e}")
             reset()
             return
+        if result is None:  # User cancelled the mapping ID request
+            reset()
+            qw.QMessageBox.warning(self,'Mapping measurement cancelled','The mapping measurement was cancelled by the user')
+            return
         
         list_coor, mapping_speed_mmPerSec, unit_name = result
         if method == MappingMethods.CONTINUOUS: ends_only = True
@@ -1474,7 +1487,9 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             self._widget.chk_contMap_autoAdjustSpeed.setEnabled(False)
             self._btn_stop.setEnabled(True)
             assert list_coor is not None and len(list_coor)>0, "No coordinates to perform mapping"
-            self._request_Mapping(mapping_coordinates=list_coor, unit_name=unit_name, method=method, mapping_speed_param=mappingSpeedParam)
+            if not self._request_Mapping(mapping_coordinates=list_coor, unit_name=unit_name, method=method, mapping_speed_param=mappingSpeedParam):
+                reset()
+                qw.QMessageBox.warning(self,'Mapping measurement cancelled','The mapping measurement was cancelled by the user')
         except Exception as e:
             qw.QMessageBox.critical(self,'Error',f"Failed to perform mapping for '{mappingUnit_name}': {e}")
             reset()
@@ -1486,7 +1501,14 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         unit_name:str,
         method:MappingMethods,
         mapping_speed_param:MappingSpeedParam,
-        ) -> None:
+        ) -> bool:
+        """
+        Requests the mapping measurement from the worker.
+        
+        Returns:
+            bool: True if the measurement was requested, False if it was cancelled
+                (e.g., the user cancelled the unit renaming prompt)
+        """
         assert method in MappingMethods, "Invalid mapping method. Check the MappingMethods enum."
     # >>> Initialisations <<<
         # Generate the extra metadata for the mapping measurement
@@ -1494,7 +1516,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         
         # Initialise the mapping measurement data class
         mea_unit = MeaRMap_Unit(unit_name, extra_metadata=extra_metadata)
-        self._dataHub_map.append_MappingUnit(mea_unit)
+        if not self._dataHub_map.append_MappingUnit(mea_unit): return False
 
         # Scramble the mapping coordinates if requested
         mapping_coordinates = self._scramble_mapping_coordinates(mapping_coordinates, method)
@@ -1520,6 +1542,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
                 mapping_speed_param,
                 q_autosave,
                 )
+        return True
 
 def test_hilvl_Raman_app(processor:mpp.Pool|None=None):
     """
