@@ -66,6 +66,15 @@ from iris.multiprocessing import MPMeaHubEnum
 
 IMAGECAL_KERNELSIZE = 61
 
+class CorrectionUnavailableError(RuntimeError):
+    """
+    Raised when an image correction cannot be applied because its prerequisites are
+    missing (e.g. no flatfield reference has been set yet). Carries only a message so it
+    stays picklable across the camera pipe, where it is sent back to the main process in
+    place of the corrected image.
+    """
+    pass
+
 class Enum_CamCorrectionType(Enum):
     """
     Enumeration for the type of camera image request
@@ -342,13 +351,14 @@ class DataStreamer_StageCam(mp.Process):
 
             Returns:
                 np.ndarray: Corrected image
+                
+            Raises:
+                CorrectionUnavailableError: If no usable flatfield reference has been set
             """
-            try:
-                assert isinstance(self._ff_arr_correction,np.ndarray), "Reference image has not been set."
-                assert img.shape == self._ff_arr_correction.shape, "Image and reference image must have the same dimensions."
-            except AssertionError as e:
-                print(f'Error in _correct_image_flatfield: {e}')
-                return img
+            if not isinstance(self._ff_arr_correction,np.ndarray):
+                raise CorrectionUnavailableError('Flatfield reference image has not been set.')
+            if img.shape != self._ff_arr_correction.shape:
+                raise CorrectionUnavailableError('Flatfield reference image does not match the current image dimensions.')
             
             # Convert to float for division
             img_float = img.astype(np.float32)
@@ -458,6 +468,10 @@ class DataStreamer_StageCam(mp.Process):
                         if proc_img is None: raise ValueError('Processed image is None')
                         return_pkg = self._convert_arr2img(proc_img)
                         
+                except CorrectionUnavailableError as e:
+                    # Expected condition, not a fault: hand it back so the main process can
+                    # tell the user and fall back to RAW, instead of logging every frame.
+                    return_pkg = e
                 except Exception as e:
                     print(f'Error in child process: {e}')
                     print(f'Received data: {request}')
@@ -589,11 +603,16 @@ class DataStreamer_StageCam(mp.Process):
 
         Returns:
             Image.Image: Corrected image, or the original if correction fails
+            
+        Raises:
+            CorrectionUnavailableError: If the correction's prerequisites are missing,
+                e.g. no flatfield reference has been set
         """
         arr = np.array(img)
         with self._lock_cam_pipe:
             self._cam_pipe_main.send((correction, arr))
             result = self._cam_pipe_main.recv()
+        if isinstance(result, CorrectionUnavailableError): raise result
         return result if isinstance(result, Image.Image) else img
 
     def get_image(self, request:Enum_CamCorrectionType) -> Image.Image:
@@ -610,6 +629,7 @@ class DataStreamer_StageCam(mp.Process):
         with self._lock_cam_pipe:
             self._cam_pipe_main.send(request)
             img = self._cam_pipe_main.recv()
+        if isinstance(img, CorrectionUnavailableError): raise img
         return img
     
     def get_camera_controller(self) -> CameraController:

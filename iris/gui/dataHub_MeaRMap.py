@@ -33,6 +33,7 @@ from iris.resources.dataHub_Raman_ui import Ui_DataHub_mapping
 from iris.resources.dataHubPlus_Raman_ui import Ui_DataHubPlus_mapping
 from iris.resources.dataHub_Raman_partialLoad_ui import Ui_dataHub_Raman_partialLoad
 from iris.resources.dialog_multiRename_ui import Ui_Dialog_MultiRename
+from iris.gui.submodules.dialog_metadata import Dlg_MetadataViewer
 
 DATAHUBPLUS_MAX_FREQ_HZ = 1.0 # Maximum update frequency for the DataHubPlus treeview in Hertz
 DATAHUB_OFFLOADCHECK_INTERVAL_SEC = 10.0  # Minimum interval between offload checks in seconds
@@ -411,6 +412,11 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         # Other connection setups
         self._tree.itemSelectionChanged.connect(self._emit_signal_selection)
         
+        # Right-click context menu on the treeview
+        self._dlg_metadata = None   # Keeps the modeless metadata dialog alive
+        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(self._show_tree_context_menu)
+        
     # > Save/load worker and thread setup <
         self._worker = DataHub_Worker(self._MappingHub)
         self._thread_save = QThread(self)
@@ -524,6 +530,45 @@ class Wdg_DataHub_Mapping(qw.QWidget):
             
         self.sig_tree_selection.emit()
         
+    @Slot()
+    def _show_tree_context_menu(self, pos):
+        """
+        Shows the treeview's right-click context menu at the given position.
+
+        Args:
+            pos (QPoint): Position of the request, in the treeview's viewport coordinates.
+        """
+        item = self._tree.itemAt(pos)
+        # Right-clicking outside the current selection acts on the clicked item instead
+        if item is not None and not item.isSelected():
+            self._tree.setCurrentItem(item)
+
+        menu = qw.QMenu(self._tree)
+        act_metadata = menu.addAction("Show all metadata...")
+        act_metadata.setEnabled(item is not None)
+        act_metadata.triggered.connect(self.show_metadata_table)
+
+        menu.exec(self._tree.viewport().mapToGlobal(pos))
+
+    @Slot()
+    def show_metadata_table(self):
+        """
+        Opens a scrollable table showing the full metadata of the selected unit(s).
+        """
+        list_units = self.get_selected_MappingUnit()
+        if len(list_units) == 0:
+            qw.QMessageBox.information(self, "No selection", "Select at least one region of interest first.")
+            return
+
+        dict_name_metadata = {unit.get_unit_name(): unit.get_dict_unit_metadata() for unit in list_units}
+        if len(dict_name_metadata) == 1:
+            title = f"Metadata - {list(dict_name_metadata.keys())[0]}"
+        else:
+            title = f"Metadata - {len(dict_name_metadata)} regions of interest"
+
+        self._dlg_metadata = Dlg_MetadataViewer(dict_name_metadata, parent=self, title=title)
+        self._dlg_metadata.show()
+
     def get_tree(self) -> qw.QTreeWidget:
         return self._tree
         

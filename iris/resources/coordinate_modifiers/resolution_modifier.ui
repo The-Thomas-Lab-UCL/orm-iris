@@ -92,6 +92,12 @@
    </item>
   </layout>
  </widget>
+ <tabstops>
+  <tabstop>spin_xresUm</tabstop>
+  <tabstop>spin_yresUm</tabstop>
+  <tabstop>chk_deleteOri</tabstop>
+  <tabstop>btn_commit</tabstop>
+ </tabstops>
  <resources/>
  <connections/>
 </ui>

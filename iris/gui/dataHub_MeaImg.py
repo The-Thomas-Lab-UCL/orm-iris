@@ -25,6 +25,7 @@ from iris.resources.dataHub_image_ui import Ui_dataHub_image
 from iris.resources.objectives_ui import Ui_wdg_objectives
 from iris.resources.dialog_save_img_ui import Ui_dialog_save_imghub
 from iris.gui.dataHub_MeaRMap import Dlg_MultiRename, SortableTreeItem
+from iris.gui.submodules.dialog_metadata import Dlg_MetadataViewer
 
 class DataHub_Image_Design(Ui_dataHub_image,qw.QWidget):
     def __init__(self,parent):
@@ -392,6 +393,11 @@ class Wdg_DataHub_Image(qw.QWidget):
         self._tree.sortByColumn(self._COL_INDEX, Qt.SortOrder.AscendingOrder)
         self._tree.itemSelectionChanged.connect(self._emit_signal_selection)
         
+        # Right-click context menu on the treeview
+        self._dlg_metadata = None   # Keeps the modeless metadata dialog alive
+        self._tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._tree.customContextMenuRequested.connect(self._show_tree_context_menu)
+        
     # >>> Other control widgets <<<
         # Widgets to manipulate the entries
         self._btn_save = wdg.btn_save
@@ -690,6 +696,56 @@ class Wdg_DataHub_Image(qw.QWidget):
         self._flg_issaved = False
         self.sig_updateTree.emit()
         
+    @Slot()
+    def _show_tree_context_menu(self, pos):
+        """
+        Shows the treeview's right-click context menu at the given position.
+
+        Args:
+            pos (QPoint): Position of the request, in the treeview's viewport coordinates.
+        """
+        item = self._tree.itemAt(pos)
+        # Right-clicking outside the current selection acts on the clicked item instead
+        if item is not None and not item.isSelected():
+            self._tree.setCurrentItem(item)
+
+        menu = qw.QMenu(self._tree)
+        act_metadata = menu.addAction("Show all metadata...")
+        act_metadata.setEnabled(item is not None)
+        act_metadata.triggered.connect(self.show_metadata_table)
+
+        menu.exec(self._tree.viewport().mapToGlobal(pos))
+
+    @Slot()
+    def show_metadata_table(self):
+        """
+        Opens a scrollable table showing the full metadata of the selected ImageMeasurement_Unit(s).
+        """
+        selections = self._tree.selectedItems()
+        if len(selections) == 0:
+            qw.QMessageBox.information(self, "No selection", "Select at least one image unit first.")
+            return
+
+        dict_name_metadata = {}
+        for item in selections:
+            unit_id = item.text(self._COL_ID)
+            try: unit = self.ImageHub.get_ImageMeasurementUnit(unit_id=unit_id)
+            except (ValueError, KeyError, AssertionError): continue
+            dict_name_metadata[item.text(self._COL_NAME)] = unit.get_metadata()
+
+        if not dict_name_metadata:
+            qw.QMessageBox.warning(self, "Metadata unavailable",
+                                   "Could not retrieve the metadata of the selected unit(s).")
+            return
+
+        if len(dict_name_metadata) == 1:
+            title = f"Metadata - {list(dict_name_metadata.keys())[0]}"
+        else:
+            title = f"Metadata - {len(dict_name_metadata)} image units"
+
+        self._dlg_metadata = Dlg_MetadataViewer(dict_name_metadata, parent=self, title=title)
+        self._dlg_metadata.show()
+
     def get_ImageMeasurement_Hub(self) -> MeaImg_Hub:
         """
         Get the ImageMeasurement_Hub object.

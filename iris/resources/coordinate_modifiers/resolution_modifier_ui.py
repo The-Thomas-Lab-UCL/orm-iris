@@ -78,6 +78,9 @@ class Ui_ResolutionModifier(object):
 
         self.verticalLayout.addLayout(self.gridLayout)
 
+        QWidget.setTabOrder(self.spin_xresUm, self.spin_yresUm)
+        QWidget.setTabOrder(self.spin_yresUm, self.chk_deleteOri)
+        QWidget.setTabOrder(self.chk_deleteOri, self.btn_commit)
 
         self.retranslateUi(ResolutionModifier)
 
