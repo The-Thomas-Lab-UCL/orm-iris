@@ -76,6 +76,12 @@ AUTO_ADJUST_MIN_SPECTRA = 10                # Minimum number of spectra before a
 AUTO_ADJUST_CONVERGENCE_WINDOW = 5          # Number of consecutive estimates that must agree
 AUTO_ADJUST_CONVERGENCE_TOLERANCE = 0.01    # Relative spread (max-min)/mean allowed within the window to count as converged
 
+# Stopping a continuous mapping mid-movement: while the stage moves, the scan checks for a cancellation at this
+# interval and then asks the stages to stop straight away (see Wdg_MotionController.stop_motion). The stop is
+# re-sent at STOP_RESEND_INTERVAL_SEC in case it arrived just before the movement started.
+GOTO_CANCEL_POLL_INTERVAL_SEC = 0.05
+STOP_RESEND_INTERVAL_SEC = 1.0
+
 class Hilvl_Raman_Design(Ui_Hilvl_Raman,qw.QWidget):
     def __init__(self,parent):
         super().__init__(parent)
@@ -255,7 +261,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     _sig_stop_autosaver = Signal()
     _sig_gotocor = Signal(tuple, threading.Event, float, queue.Queue)
     _sig_setvelrel = Signal(float, float, threading.Event)
-    _sig_stop_xy = Signal(threading.Event)
+    _sig_stop_motion = Signal(threading.Event)
     _sig_acquire_discrete_mea = Signal(AcquisitionParams, queue.Queue)
     _sig_acquire_continuous_mea = Signal(AcquisitionParams, queue.Queue, queue.Queue, queue.Queue)
     _sig_acquire_list_coors = Signal(list, threading.Event)
@@ -360,6 +366,28 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         """
         try: return result_goto.get_nowait()
         except queue.Empty: return None
+
+    def _wait_goto_cancellable(self, event_finish_goto:threading.Event) -> bool:
+        """
+        Waits for a "go to coordinate" movement to finish. If the measurement is cancelled in the meantime,
+        asks the stages to stop immediately (re-sent every STOP_RESEND_INTERVAL_SEC until the movement ends).
+        A stage that cannot be stopped mid-movement simply finishes its move.
+
+        Args:
+            event_finish_goto (threading.Event): The event passed alongside the _sig_gotocor emission
+
+        Returns:
+            bool: True if a stop was requested, i.e. the movement may have ended before its target
+        """
+        flg_stop_requested = False
+        time_last_stop = 0.0
+        while not event_finish_goto.wait(GOTO_CANCEL_POLL_INTERVAL_SEC):
+            if self._event_isacquiring.is_set(): continue
+            if time.time() - time_last_stop >= STOP_RESEND_INTERVAL_SEC:
+                self._sig_stop_motion.emit(threading.Event())
+                time_last_stop = time.time()
+                flg_stop_requested = True
+        return flg_stop_requested
 
     @Slot(AcquisitionParams, list, queue.Queue)
     def run_scan_discrete(
@@ -544,14 +572,18 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled; break
                 self._execute_scan_continuous_step(mapping_speed_param, q_mea_out, event_finish_setvel, event_finish_goto, q_trig, i, coor, goto_timeout)
             except Exception as e:
+                if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled; break   # A side effect of the stop, not an error
                 self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
                 print('Error in run_scan_continuous:',e)
             finally:
                 # Update progress
                 self.sig_progress_update_str.emit(progress.update(i + 1).message('lines'))
+        if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled   # Also catches a stop during the last line
         
-        # Stop raman frame's continuous measurement and store the final measurements
-        q_trig.put(EnumTrig.STORE)
+        # Stop raman frame's continuous measurement and store the final measurements. On a cancellation the
+        # spectra since the last line was stored are discarded instead: they belong to a line (or a retrace)
+        # that was interrupted part-way, now that the stage can be stopped mid-movement.
+        q_trig.put(EnumTrig.IGNORE if msg == self.msg_mea_cancelled else EnumTrig.STORE)
         q_trig.put(EnumTrig.FINISH)
 
         # Restore the stage speed to normal (100%), whether the scan finished or was stopped early.
@@ -603,10 +635,12 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                     result_goto,
                 )
         # No externally-imposed cap: Motion_GoToCoor_Worker guarantees the event is always
-        # eventually set, bounded by its own stall-detection using goto_timeout.
-        event_finish_goto.wait()
+        # eventually set, bounded by its own stall-detection using goto_timeout. A cancellation
+        # stops the stage mid-movement where supported.
+        flg_stop_requested = self._wait_goto_cancellable(event_finish_goto)
         goto_result_msg = self._get_goto_result(result_goto)
         if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
+            if flg_stop_requested: return   # Stopped on purpose: the caller sees the cancellation and ends the scan
             raise TimeoutError(f"Failed to reach the target coordinate: {goto_result_msg or 'unknown error'}")
         # time2 = time.time()
 
@@ -755,7 +789,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         if not event_finish_goto.is_set():
             flg_stopped = True
             event_finish_stop = threading.Event()
-            self._sig_stop_xy.emit(event_finish_stop)
+            self._sig_stop_motion.emit(event_finish_stop)
             event_finish_stop.wait(CONTINUOUS_SETVEL_WAIT_TIMEOUT_SEC)
         event_finish_goto.wait()
         goto_result_msg = self._get_goto_result(result_goto)
@@ -832,8 +866,8 @@ class WorkerPipelineManager(QObject):
             motion_controller.set_vel_relative,
             qc.Qt.ConnectionType.QueuedConnection
         )
-        hilvlacq_worker._sig_stop_xy.connect(
-            motion_controller.stop_xy,
+        hilvlacq_worker._sig_stop_motion.connect(
+            motion_controller.stop_motion,
             qc.Qt.ConnectionType.QueuedConnection
         )
         hilvlacq_worker._sig_acquire_discrete_mea.connect(raman_worker.acquire_single_measurement)

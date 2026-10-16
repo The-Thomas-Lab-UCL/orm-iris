@@ -226,6 +226,29 @@ class Class_ZController():
         # <<<<< Insert the stop movement commands here
         pass
         
+    def stop_motion(self) -> bool:
+        """
+        Stops any ongoing movement of the motor as soon as possible, including a blocking move_direct()
+        running in another thread, which must then return early without raising. Used e.g. to stop a mapping
+        scan immediately instead of letting the stage finish its current move.
+        
+        Requirements for an implementation:
+            - Use a controlled (decelerating) stop that keeps the coordinate calibration, i.e. the stage
+              must not need re-homing afterwards.
+            - Never interrupt a homing routine: decorate homing_n_coor_calibration() with
+              stage_motion_stop.homing_guard and return False while stage_motion_stop.is_homing(self).
+            - Set self._flg_stop_requested = True before stopping, and clear it at the start of
+              move_direct(), so move_direct() can swallow an error caused by its own interruption
+              (see stage_motion_stop.is_stop_requested).
+            - Return False if the device cannot be stopped this way. The caller then lets the movement
+              finish (the behaviour before this method existed).
+        
+        Returns:
+            bool: True if the stop was sent (or nothing was moving), False if not supported/not possible
+        """
+        # <<<<< Insert the stop commands here and return True, if the device supports it
+        return False
+    
     def _MoveTestAbsolute(self):
         """
         Test the motor movement

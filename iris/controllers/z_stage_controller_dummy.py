@@ -33,6 +33,7 @@ class ZController_Dummy(Class_ZController):
         
         self._thread_movecontinuous:threading.Thread|None = None    # Thread to move the motor continuously
         self._flg_movecontinuous = threading.Event()    # Flag to stop the continuous movement
+        self._flg_stop_direct = threading.Event()       # Set by stop_motion() to interrupt move_direct()
         
         self._isrunning_motor = False   # Flag to check if the motor is running
         print('\n>>>>> DUMMY Z controller is used <<<<<')
@@ -104,7 +105,8 @@ class ZController_Dummy(Class_ZController):
         
         target = self._coor_mm + count*self._motor_step_mm
         
-        while True:
+        self._flg_stop_direct.clear()
+        while not self._flg_stop_direct.is_set():
             if self._coor_mm < target:
                 self._coor_mm += self._motor_step_mm
             elif self._coor_mm > target:
@@ -208,6 +210,18 @@ class ZController_Dummy(Class_ZController):
             else:
                 self._thread_movecontinuous = None
         
+    def stop_motion(self) -> bool:
+        """
+        Stops any ongoing movement, including a move_direct() running in another thread.
+        See Class_ZController.stop_motion().
+        
+        Returns:
+            bool: Always True
+        """
+        self._flg_stop_direct.set()
+        self.stop_move()
+        return True
+    
     def _MoveTestAbsolute(self):
         """
         Test the motor movement

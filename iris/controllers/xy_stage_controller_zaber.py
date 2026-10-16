@@ -27,6 +27,7 @@ from zaber_motion import Units, ascii
 from zaber_motion.ascii import Connection
 
 from iris.controllers import ControllerConfigEnum, ControllerSpecificConfigEnum, ControllerDirectionEnum
+from iris.controllers.stage_motion_stop import homing_guard, is_homing, is_stop_requested
 
 def _as_portable_exception(e:zm.MotionLibException) -> RuntimeError:
     """
@@ -390,6 +391,7 @@ class XYController_Zaber(Class_XYController):
         coor_x,coor_y = self._remap_coordinates_flip_get((coor_x,coor_y))
         return (coor_x,coor_y)
     
+    @homing_guard
     def homing_n_coor_calibration(self):
         """
         A function to recalibrate the coordinate system of the device.
@@ -434,6 +436,7 @@ class XYController_Zaber(Class_XYController):
         # Remap the coordinates, ensure the motors move in the correct direction
         coor_x,coor_y = self._remap_coordinates_flip_set(coor_abs)
 
+        self._flg_stop_requested = False
         self.motorx_state = 1
         self.motory_state = 1
         try:
@@ -449,6 +452,7 @@ class XYController_Zaber(Class_XYController):
             self.motorx.wait_until_idle()
             self.motory.wait_until_idle()
         except zm.MotionLibException as e:
+            if is_stop_requested(self): return  # Interrupted by stop_motion(): an expected early return
             raise _as_portable_exception(e) from None
         finally:
             # Must always run: a running flag left set blocks every subsequent movement request,
@@ -510,6 +514,22 @@ class XYController_Zaber(Class_XYController):
             # for the whole application, until it is restarted.
             self.motorx_state = 0
             self.motory_state = 0
+    
+    def stop_motion(self) -> bool:
+        """
+        Stops any ongoing movement as soon as possible (decelerating stop, keeps the homing), including a
+        move_direct() running in another thread. See Class_XYController.stop_motion().
+        
+        Returns:
+            bool: True if the stop was sent, False if not possible (homing in progress, or a comms error)
+        """
+        if is_homing(self): return False
+        self._flg_stop_requested = True
+        try: self.stop_move()
+        except Exception as e:
+            print(f'Zaber stop_motion failed: {e}')
+            return False
+        return True
     
     def get_jog(self):
         """

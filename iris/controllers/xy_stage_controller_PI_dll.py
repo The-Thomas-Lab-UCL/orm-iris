@@ -30,6 +30,7 @@ from multiprocessing import Lock, Event
 from multiprocessing.synchronize import Event as Event_class
 
 from iris.controllers import ControllerConfigEnum, ControllerSpecificConfigEnum, ControllerDirectionEnum
+from iris.controllers.stage_motion_stop import homing_guard, is_homing, is_stop_requested
 
 def test():
     TRACE_ID_1 = 1
@@ -607,6 +608,7 @@ class XYController_PI(Class_XYController):
         x,y = self._remap_coordinates_flip((x,y),get=True)
         return (x,y)
     
+    @homing_guard
     def homing_n_coor_calibration(self):
         """
         A function to recalibrate the coordinate system of the device.
@@ -650,11 +652,14 @@ class XYController_PI(Class_XYController):
         
         while not self.device.IsControllerReady(): time.sleep(0.01)
         self._flg_movedone.clear()
+        self._flg_stop_requested = False
         with self._lock: self.device.MOV([self._dict_axes['x'],self._dict_axes['y']], coor_abs)
         
         # Wait until target is reached
-        pitools.waitontarget(self.device, self._allaxes)
-        self._flg_movedone.set()
+        try: pitools.waitontarget(self.device, self._allaxes)
+        except Exception:
+            if not is_stop_requested(self): raise   # Otherwise interrupted by stop_motion(): an expected early return
+        finally: self._flg_movedone.set()
             
         return
     
@@ -686,6 +691,22 @@ class XYController_PI(Class_XYController):
         with self._lock: self.device.HLT(self._allaxes,noraise=True)
         self._flg_movedone.set()
         return
+
+    def stop_motion(self) -> bool:
+        """
+        Stops any ongoing movement as soon as possible (HLT, a smooth halt, keeps the referencing), including a
+        move_direct() running in another thread. See Class_XYController.stop_motion().
+        
+        Returns:
+            bool: True if the stop was sent, False if not possible (homing in progress, or a comms error)
+        """
+        if is_homing(self): return False
+        self._flg_stop_requested = True
+        try: self.stop_move()
+        except Exception as e:
+            print(f'PI stop_motion failed: {e}')
+            return False
+        return True
 
     def get_jog(self):
         """

@@ -42,7 +42,7 @@ class XYController_Dummy(Class_XYController):
         
         self._thread_movecontinuous:threading.Thread|None = None
         self._flg_movecontinuous = threading.Event()
-        self._flg_stop_direct = threading.Event()   # Set by stop_move() to interrupt move_direct()
+        self._flg_stop_direct = threading.Event()   # Set by stop_motion() to interrupt move_direct()
         
         print('\n>>>>> DUMMY XY controller is used <<<<<')
         
@@ -193,9 +193,8 @@ class XYController_Dummy(Class_XYController):
             
     def stop_move(self):
         """
-        Stops the movement of the motors (continuous or direct)
+        Stops the continuous movement of the motors
         """
-        self._flg_stop_direct.set()
         if isinstance(self._thread_movecontinuous, threading.Thread):
             if self._thread_movecontinuous.is_alive():
                 self._flg_movecontinuous.clear()
@@ -204,6 +203,18 @@ class XYController_Dummy(Class_XYController):
                 print(">>>>> Continuous movement stopped <<<<<")
             else:
                 self._thread_movecontinuous = None
+    
+    def stop_motion(self) -> bool:
+        """
+        Stops any ongoing movement, including a move_direct() running in another thread.
+        See Class_XYController.stop_motion().
+        
+        Returns:
+            bool: Always True
+        """
+        self._flg_stop_direct.set()
+        self.stop_move()
+        return True
     
     def get_jog(self):
         """

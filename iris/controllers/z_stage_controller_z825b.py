@@ -12,6 +12,7 @@ if __name__ == '__main__':
     
 from iris.controllers.class_z_stage_controller import Class_ZController
 from iris.controllers import ControllerConfigEnum, ControllerDirectionEnum, ControllerSpecificConfigEnum
+from iris.controllers.stage_motion_stop import homing_guard, is_homing, is_stop_requested
 
 import time
 import clr
@@ -291,6 +292,7 @@ class ZController_Z825B(Class_ZController):
         coor = float(str(self.dev.Position))
         return coor
     
+    @homing_guard
     def homing_n_coor_calibration(self):
         """
         A function to recalibrate the coordinate system of the device.
@@ -344,10 +346,14 @@ class ZController_Z825B(Class_ZController):
             return
         
         self._isrunning_motor = True
+        self._flg_stop_requested = False
         
         timeout_rel = int(self.timeout_move_fast * self._vel_max/self._vel_move)
-        self.dev.MoveTo(coor_abs,timeout_rel)
-        self._isrunning_motor = False
+        try: self.dev.MoveTo(coor_abs,timeout_rel)
+        except Exception:
+            if is_stop_requested(self): return  # Interrupted by stop_motion(): an expected early return
+            raise
+        finally: self._isrunning_motor = False
         time.sleep(0.85)
         
     def move_continuous(self,dir):
@@ -461,6 +467,22 @@ class ZController_Z825B(Class_ZController):
         time.sleep(self.stoptime)   # Wait to allow the motors to stop completely
         self._isrunning_motor = False         # Update the motor state
         
+    def stop_motion(self) -> bool:
+        """
+        Stops any ongoing movement as soon as possible (profiled Kinesis stop, keeps the homing), including a
+        move_direct() running in another thread. See Class_ZController.stop_motion().
+        
+        Returns:
+            bool: True if the stop was sent, False if not possible (homing in progress, or a comms error)
+        """
+        if is_homing(self): return False
+        self._flg_stop_requested = True
+        try: self.stop_move()
+        except Exception as e:
+            print(f'Z825B stop_motion failed: {e}')
+            return False
+        return True
+    
     def MoveTestAbsolute(self):
         """
         Test the motor movement

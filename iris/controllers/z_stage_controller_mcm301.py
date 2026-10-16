@@ -12,6 +12,7 @@ import threading
 from iris.controllers import ControllerConfigEnum, ControllerSpecificConfigEnum
 from iris.controllers.class_z_stage_controller import Class_ZController
 from iris.controllers import ControllerDirectionEnum
+from iris.controllers.stage_motion_stop import homing_guard, is_homing
 
 # Import MCM301 using the wrapper to handle SDK import issues
 from iris.controllers.mcm301_wrapper import get_mcm301_class
@@ -178,6 +179,7 @@ class ZController_MCM301(Class_ZController):
         status = self.status_bit[0]
         return bool(status & 0x400) and not bool(status & 0x200)
     
+    @homing_guard
     def homing_n_coor_calibration(self):
         """
         A function to recalibrate the coordinate system of the device.
@@ -283,6 +285,7 @@ class ZController_MCM301(Class_ZController):
             raise Exception("move_direct: conversion failed")
             
         self._isrunning_motor = True
+        self._flg_stop_requested = False
         ret = self.controller.move_absolute(self.slot, coor_enc[0])
         if ret < 0:
             raise Exception("move_direct: move_absolute failed")
@@ -390,6 +393,28 @@ class ZController_MCM301(Class_ZController):
             raise Exception("stop_move: move_stop failed")
         else:
             self._isrunning_motor = False
+        
+    def stop_motion(self) -> bool:
+        """
+        Stops any ongoing movement as soon as possible, including a move_direct() running in another thread
+        (its status polling then sees the stage stopped and returns). See Class_ZController.stop_motion().
+        Never stops a homing routine, since that leaves the stage not homed (MCM301 APT reference).
+        
+        Returns:
+            bool: True if the stop was sent, False if not possible (homing in progress, or a comms error)
+        """
+        if is_homing(self): return False
+        try:
+            # Also check the controller itself, in case it is homing on behalf of another client
+            encoder, status_bit = [0], [0]  # Local buffers: move_direct() may be polling the shared ones
+            self.controller.get_mot_status(self.slot, encoder, status_bit)
+            if status_bit[0] & 0x200: return False
+            self._flg_stop_requested = True
+            self.stop_move()
+        except Exception as e:
+            print(f'MCM301 stop_motion failed: {e}')
+            return False
+        return True
         
     def _MoveTestAbsolute(self):
         """
