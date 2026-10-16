@@ -12,6 +12,7 @@ from enum import Enum
 import math
 import numpy as np
 import random
+import re
 
 from dataclasses import dataclass
 
@@ -251,6 +252,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     sig_error_during_mea = Signal(str)  # Signal emitted when an error occurs during measurement
     sig_mea_done = Signal() # Signal emitted when measurement is done (no differentiation between success, cancelled, or error)
     sig_mea_done_msg = Signal(str)  # Signal emitted when measurement is done with a message
+    sig_unscanned_coors = Signal(list)  # Emitted just before the done signals with the scan coordinates that were not completed
     
     msg_mea_error = "An error occurred during the mapping measurement: "
     msg_mea_cancelled = "Mapping measurement was cancelled by the user"
@@ -414,6 +416,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         self._event_isacquiring.set()
         if self._pause_gate is not None: self._pause_gate.scan_started()
         msg = self.msg_mea_finished
+        list_failed = []    # The points skipped due to an error
         progress.start()
         for i, coor in enumerate(mapping_coordinates):
             try:
@@ -467,19 +470,24 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 # print(f'Point {i+1}/{total_points} done. Move time: {(time2-time1)*1e3:.0f} ms, Measurement time: {(time3-time2)*1e3:.0f} ms. Total time: {(time3-time1)*1e3:.0f} ms.')
                 
             except queue.Empty:
+                list_failed.append(coor)
                 self.sig_error_during_mea.emit(self.msg_mea_error + 'Measurement acquisition timed out.')
                 print('Error in run_scan_discrete: Measurement acquisition timed out.')
                 
             except Exception as e:
+                list_failed.append(coor)
                 self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
                 print('Error in run_scan_discrete:',e)
                 
             finally:
                 # Update progress
                 self.sig_progress_update_str.emit(progress.update(i + 1).message('points'))
+        else: i = len(mapping_coordinates)  # Not stopped: every point was gone through
         
         self._event_isacquiring.clear()
         if self._pause_gate is not None: self._pause_gate.scan_finished()
+        # On a stop, i is the point that was not measured
+        self.sig_unscanned_coors.emit(list_failed + mapping_coordinates[i:])
         self.emit_finish_signals(msg)
         return
 
@@ -556,6 +564,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             print('Error in _auto_adjust_mapping_speed:',e)
 
         msg = self.msg_mea_finished
+        list_failed = []    # The end coordinates (start, end) of the scan lines lost to an error
         # Start the scan clock only now, so the speed auto-adjustment above is excluded from both the
         # elapsed time and the measured travel rate
         progress.start()
@@ -570,14 +579,17 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 # coordinate history (dropped by the autosaver -> missing left side of the map).
                 if i % 2 == 0: self._pause_checkpoint(progress)
                 if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled; break
-                self._execute_scan_continuous_step(mapping_speed_param, q_mea_out, event_finish_setvel, event_finish_goto, q_trig, i, coor, goto_timeout)
+                if not self._execute_scan_continuous_step(mapping_speed_param, q_mea_out, event_finish_setvel, event_finish_goto, q_trig, i, coor, goto_timeout):
+                    msg = self.msg_mea_cancelled; break # Stopped mid-movement
             except Exception as e:
                 if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled; break   # A side effect of the stop, not an error
+                list_failed.extend(mapping_coordinates_ends[i - i % 2 : i - i % 2 + 2])
                 self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
                 print('Error in run_scan_continuous:',e)
             finally:
                 # Update progress
                 self.sig_progress_update_str.emit(progress.update(i + 1).message('lines'))
+        else: i = len(mapping_coordinates_ends)    # Not stopped: every line was gone through
         if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled   # Also catches a stop during the last line
         
         # Stop raman frame's continuous measurement and store the final measurements. On a cancellation the
@@ -596,6 +608,13 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         self._event_isacquiring.clear()
         self._clear_streamer_storage_request()
         if self._pause_gate is not None: self._pause_gate.scan_finished()
+        # On a stop, i is the coordinate that was not reached. A line is only stored on reaching its
+        # end (odd index), so a stop on its way there loses the whole line, from its start (even index).
+        # A stop may also prevent the last travelled line from being stored, so on a cancellation the
+        # line before a stop at a line start (or after the last line) is counted as unscanned too.
+        idx_unscanned = i - i % 2
+        if msg == self.msg_mea_cancelled and i % 2 == 0: idx_unscanned = max(0, i - 2)
+        self.sig_unscanned_coors.emit(list_failed + mapping_coordinates_ends[idx_unscanned:])
         self.emit_finish_signals(msg)
 
     def _execute_scan_continuous_step(
@@ -608,7 +627,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         coor_idx:int,
         coor:tuple,
         goto_timeout:float,
-        ) -> None:
+        ) -> bool:
         """
         Executes a single step in the continuous mapping measurement.
 
@@ -621,6 +640,9 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             i (int): The index of the current coordinate
             coor (tuple): The target coordinate
             goto_timeout (float): Stall-timeout [s] to use for the movement - see _calculate_goto_stall_timeout
+
+        Returns:
+            bool: True if the target was reached and its trigger sent, False if the movement was stopped on purpose
         """
         # Go to the requested coordinates
         # time1 = time.time()
@@ -640,7 +662,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         flg_stop_requested = self._wait_goto_cancellable(event_finish_goto)
         goto_result_msg = self._get_goto_result(result_goto)
         if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
-            if flg_stop_requested: return   # Stopped on purpose: the caller sees the cancellation and ends the scan
+            if flg_stop_requested: return False # Stopped on purpose: the caller sees the cancellation and ends the scan
             raise TimeoutError(f"Failed to reach the target coordinate: {goto_result_msg or 'unknown error'}")
         # time2 = time.time()
 
@@ -674,6 +696,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         # time4 = time.time()
         
         # print(f'Point {coor_idx+1} done. Move time: {(time2-time1)*1e3:.0f} ms, SetVel time: {(time3-time2)*1e3:.0f} ms, Sync time: {(time4-time3)*1e3:.0f} ms. Total time: {(time4-time1)*1e3:.0f} ms.')
+        return True
         
     def _auto_adjust_mapping_speed(
         self,
@@ -968,7 +991,10 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
     # >>> Mapping widgets and parameters setups <<<
         # Parameters
         self._list_sel_mapCoor = []
-        self._flg_meaCancelled = False # Flag to indicate if the measurement was cancelled
+        self._mapCoor_inProgress:MeaCoor_mm|None = None # The mapping coordinates being scanned
+        self._scanDir_inProgress:str = ''               # The scan direction used for the scan in progress
+        self._list_unscanned_coor:list = []             # The scan coordinates not completed in the last scan (from the worker)
+        self._list_remaining_names:list[str] = []       # Names of the unscanned coordinates added to the hub in this run
         
         # >> Mapping options widgets setup <<
         self._btn_discrete = wdg.btn_discrete
@@ -1110,6 +1136,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.sig_run_scan_continuous.connect(self._worker_hilvlacq.run_scan_continuous)
         self._worker_hilvlacq.sig_error_during_mea.connect(self.handle_error_during_mapping)
         self._worker_hilvlacq.sig_mea_done_msg.connect(self._worker_autoMeaStorer.relay_finished_message)
+        self._worker_hilvlacq.sig_unscanned_coors.connect(self._store_unscanned_coordinates)
         
         # Connection: Thread and worker management
         self._thread_hilvlacq = QThread(self)
@@ -1569,6 +1596,88 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.statbar.showMessage(msg,5000)
         self.statbar.setStyleSheet("QStatusBar { background-color : red; color : white; }")
         
+    @Slot(list)
+    def _store_unscanned_coordinates(self, list_unscanned:list):
+        """
+        Stores the scan coordinates the worker did not complete, used to update the coordinate
+        hub once the measurement is over
+
+        Args:
+            list_unscanned (list): The unscanned scan coordinates (discrete: the points, continuous: the line ends)
+        """
+        self._list_unscanned_coor = list_unscanned
+        
+    def _get_unscanned_coordinates(self, list_coor_mm:list, list_unscanned:list, method:MappingMethods,
+                                   scan_direction:str, precision:int=4) -> list:
+        """
+        Converts the unscanned scan coordinates from the worker back into mapping coordinates.
+        
+        Args:
+            list_coor_mm (list): The original mapping coordinates, [(x1,y1,z1),(x2,y2,z2),...]
+            list_unscanned (list): The unscanned scan coordinates. Discrete: the points,
+                continuous: the end coordinates of the scan lines.
+            method (MappingMethods): The mapping method used for the scan
+            scan_direction (str): The scan direction used for the scan (Enum_ScanDir value)
+            precision (int): The decimal places the line coordinates are rounded to. Must match the
+                one used in _convertCoor_byScanOptions. Defaults to 4.
+            
+        Returns:
+            list: The unscanned mapping coordinates
+        """
+        # Discrete: the scan coordinates are the mapping coordinates themselves
+        if method == MappingMethods.DISCRETE: return [tuple(float(c) for c in coor) for coor in list_unscanned]
+        
+        # Continuous: an unscanned line covers every original point sharing its line coordinate
+        # (y for x-direction scans, x for y-direction scans), see _convertCoor_byScanOptions
+        axis = 1 if scan_direction == Enum_ScanDir.XDIR.value else 0
+        set_lines = {round(float(coor[axis]), precision) for coor in list_unscanned}
+        return [coor for coor in list_coor_mm if round(float(coor[axis]), precision) in set_lines]
+    
+    def _update_coorHub_after_mapping(self, flg_finished:bool) -> None:
+        """
+        Updates the mapping coordinates hub after a scan: removes the scanned mapping coordinates
+        if the scan finished, and adds its unscanned coordinates (if any) as a new entry.
+        A cancelled scan keeps its mapping coordinates.
+
+        Args:
+            flg_finished (bool): True if the scan finished, False if it was cancelled
+        """
+        mapCoor = self._mapCoor_inProgress
+        if mapCoor is None: return
+
+        list_remaining = self._get_unscanned_coordinates(
+            mapCoor.mapping_coordinates, self._list_unscanned_coor,
+            self._last_mappingmethod, self._scanDir_inProgress)
+
+        name = mapCoor.mappingUnit_name
+        if flg_finished and self._coorHub.search_mappingCoor(name) is not None:
+            self._coorHub.remove_mappingCoor(name)
+
+        # Nothing scanned: the kept original already holds every unscanned coordinate
+        if len(list_remaining) == 0 or (not flg_finished and len(list_remaining) == len(mapCoor.mapping_coordinates)):
+            return
+
+        # Named after the original, without a previous '_remaining' suffix so they don't stack up
+        name_base = re.sub(r'_remaining(_\d+)?$', '', name) + '_remaining'
+        name_remaining = name_base
+        i = 2
+        while not self._coorHub.validator_new_name(name_remaining):
+            name_remaining = f'{name_base}_{i}'
+            i += 1
+        self._coorHub.append(MeaCoor_mm(name_remaining, list_remaining))
+        self._list_remaining_names.append(name_remaining)
+
+    def _pop_remaining_names_message(self) -> str:
+        """
+        Returns a message listing the unscanned coordinates added to the hub in this run (empty if
+        there are none), and clears that list
+        """
+        if len(self._list_remaining_names) == 0: return ''
+        msg = '\n\nThe unscanned coordinates have been added to the coordinate list as:\n' + \
+            '\n'.join(f'  • {name}' for name in self._list_remaining_names)
+        self._list_remaining_names.clear()
+        return msg
+
     @Slot(str)
     def handle_mapping_completion(self, msg:str):
         """
@@ -1579,21 +1688,29 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.enable_widgets()
         self.statbar.showMessage('Mapping measurement complete')
         self.statbar.setStyleSheet("") # Reset to default
-        
+
+        msg_finished = self._worker_hilvlacq.msg_mea_finished
+        if self._widget.chk_delFinished.isChecked() and msg in (msg_finished, self._worker_hilvlacq.msg_mea_cancelled):
+            try: self._update_coorHub_after_mapping(flg_finished=msg == msg_finished)
+            except Exception as e: qw.QMessageBox.warning(self,'Coordinate list update failed',f'Failed to update the mapping coordinate list: {e}')
+        self._mapCoor_inProgress = None
+
         if msg == self._worker_hilvlacq.msg_mea_cancelled:
             self._list_sel_mapCoor.clear()
-            qw.QMessageBox.warning(self,'Mapping measurement cancelled','The mapping measurement was cancelled by the user')
+            qw.QMessageBox.warning(self,'Mapping measurement cancelled','The mapping measurement was cancelled by the user'
+                                   + self._pop_remaining_names_message())
             return
         elif msg.startswith(self._worker_hilvlacq.msg_mea_error):
             self._list_sel_mapCoor.clear()
-            qw.QMessageBox.critical(self,'Mapping measurement error',msg)
+            qw.QMessageBox.critical(self,'Mapping measurement error',msg + self._pop_remaining_names_message())
             return
-        
+
         if msg == self._worker_hilvlacq.msg_mea_finished and len(self._list_sel_mapCoor) == 0:
             self._widget.chk_contMap_autoAdjustSpeed.setChecked(True)
             if self._widget.chk_beamdump.isChecked():
                 self.motion_controller.go_to_beamdump()
-            qw.QMessageBox.information(self,'Mapping measurement complete','The mapping measurement is complete and added to the data hub')
+            qw.QMessageBox.information(self,'Mapping measurement complete','The mapping measurement is complete and added to the data hub'
+                                       + self._pop_remaining_names_message())
         elif msg == self._worker_hilvlacq.msg_mea_finished:
             self.initiate_mapping(method=self._last_mappingmethod)
         else: raise ValueError("Invalid mapping completion message")
@@ -1604,6 +1721,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         """
         def reset():
             self._list_sel_mapCoor.clear()
+            self._mapCoor_inProgress = None
             self.raman_controller.reset_enable_widgets()
             self.motion_controller.enable_widgets()
             self.reset_mapping_widgets()
@@ -1641,6 +1759,11 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             reset()
             return
                 
+        # Kept to update the coordinate hub once the scan is over (see handle_mapping_completion)
+        self._mapCoor_inProgress = mapCoor
+        self._scanDir_inProgress = self._get_scan_options()[1]
+        self._list_unscanned_coor = []
+
         try:
             self._widget.chk_contMap_autoAdjustSpeed.setEnabled(False)
             self._btn_stop.setEnabled(True)
@@ -1651,7 +1774,6 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         except Exception as e:
             qw.QMessageBox.critical(self,'Error',f"Failed to perform mapping for '{mappingUnit_name}': {e}")
             reset()
-            if not self._flg_meaCancelled: self._coorHub.remove_mappingCoor(mappingUnit_name)
         
     def _request_Mapping(
         self,
