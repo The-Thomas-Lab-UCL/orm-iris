@@ -63,6 +63,12 @@ GOTO_STALL_TIMEOUT_BASE_SEC = 15.0
 # Wdg_MotionController.set_vel_relative always releases this event promptly on its own otherwise).
 CONTINUOUS_SETVEL_WAIT_TIMEOUT_SEC = 5.0
 
+# Safety factor on the data streamers' storage requested for a continuous scan: the Raman streamer keeps
+# this many times the spectra of the longest scan line, and the stage streamer keeps this many times its
+# duration of coordinates. A line's spectra are only retrieved (and their coordinates looked up) once the
+# line is finished, so the streamers must hold at least one whole line, plus margin for an autosaver backlog.
+STREAMER_STORAGE_SAFETY_FACTOR = 2.0
+
 class Hilvl_Raman_Design(Ui_Hilvl_Raman,qw.QWidget):
     def __init__(self,parent):
         super().__init__(parent)
@@ -247,7 +253,8 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     _sig_acquire_list_coors = Signal(list, threading.Event)
 
     def __init__(self, mapping_hub:MeaRMap_Hub, syncer_raman:Syncer_Raman, event_isacquiring:threading.Event,
-                 pause_gate:MeasurementPauseGate|None=None):
+                 pause_gate:MeasurementPauseGate|None=None, stageHub:DataStreamer_StageCam|None=None,
+                 ramanHub:DataStreamer_Raman|None=None):
         """
         Worker to perform the measurement acquisition for Raman imaging. For the slots details, refer to the
         methods in RamanMeasurement_Worker class in raman.py.
@@ -259,12 +266,47 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             pause_gate (MeasurementPauseGate|None): Gate used to park the scan while the data hub
                 writes a database file, so that the scan cannot append to a unit mid-write.
                 Defaults to None, which runs the scan without ever pausing.
+            stageHub (DataStreamer_StageCam|None): The stage data streamer, asked to keep enough coordinates
+                for a continuous scan. Defaults to None, which leaves it at its config value.
+            ramanHub (DataStreamer_Raman|None): The Raman data streamer, asked to keep enough spectra for a
+                continuous scan. Defaults to None, which leaves it at its config value.
         """
         super().__init__()
         self.mapping_hub = mapping_hub
         self._syncer = syncer_raman
         self._event_isacquiring = event_isacquiring
         self._pause_gate = pause_gate
+        self._stageHub = stageHub
+        self._ramanHub = ramanHub
+
+    def _request_streamer_storage(self, num_points_line:int, line_duration_sec:float) -> None:
+        """
+        Asks the data streamers to hold enough data for the longest scan line (times
+        STREAMER_STORAGE_SAFETY_FACTOR). A request only ever extends the streamers' config values and
+        replaces the previous request. Pair it with _clear_streamer_storage_request().
+
+        Args:
+            num_points_line (int): Number of spectra in the longest scan line
+            line_duration_sec (float): Duration of the longest scan line [s]
+        """
+        num_spectra = int(math.ceil(STREAMER_STORAGE_SAFETY_FACTOR * num_points_line))
+        duration_sec = STREAMER_STORAGE_SAFETY_FACTOR * line_duration_sec
+        try:
+            if self._ramanHub is not None: self._ramanHub.request_storage(num_spectra)
+            if self._stageHub is not None: self._stageHub.request_coordinate_retention(duration_sec)
+            print(f'Data streamer storage requested: at least {num_spectra} spectra and {duration_sec:.0f} s of stage coordinates')
+        except Exception as e:
+            print(f'Error in _request_streamer_storage: {e}')
+
+    def _clear_streamer_storage_request(self) -> None:
+        """
+        Returns the data streamers to their config storage values.
+        """
+        try:
+            if self._ramanHub is not None: self._ramanHub.clear_storage_request()
+            if self._stageHub is not None: self._stageHub.clear_coordinate_retention_request()
+        except Exception as e:
+            print(f'Error in _clear_streamer_storage_request: {e}')
 
     def _pause_checkpoint(self, progress:ScanPathProgress|None=None) -> None:
         """
@@ -448,13 +490,20 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         if self._pause_gate is not None: self._pause_gate.scan_started()
         goto_timeout = self._calculate_goto_stall_timeout(params)
 
+        # Size the data streamers' storage for the longest scan line, whose spectra are only retrieved
+        # once the line is done. First estimated from the integration time, refined after the speed
+        # auto-adjustment below with the measured spectrum rate (which includes the readout overheads).
+        num_points_line = max(1, int(mapping_speed_param.auto_adjust_expected_number_of_points))
+        line_duration_sec = num_points_line * params['accumulation'] * params['int_time_ms'] / 1000.0
+        self._request_streamer_storage(num_points_line, line_duration_sec)
+
         # Prepare the start of the measurement
         self._syncer.set_notready()
         q_trig.put(EnumTrig.START)
         self._syncer.wait_ready()
 
         try:
-            self._auto_adjust_mapping_speed(
+            spectrum_period_sec = self._auto_adjust_mapping_speed(
                 mapping_speed_param=mapping_speed_param,
                 q_test=q_test,
                 event_finish_setvel=event_finish_setvel,
@@ -463,6 +512,8 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 coor_mea=mapping_coordinates_ends[0],
                 goto_timeout=goto_timeout,
             )
+            if spectrum_period_sec is not None and num_points_line * spectrum_period_sec > line_duration_sec:
+                self._request_streamer_storage(num_points_line, num_points_line * spectrum_period_sec)
         except Exception as e:
             # Don't let a failure here (e.g. a stage comms timeout) silently kill the whole scan
             # thread before it even starts the main loop - report it and continue with the
@@ -505,6 +556,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         event_finish_setvel.wait()
 
         self._event_isacquiring.clear()
+        self._clear_streamer_storage_request()
         if self._pause_gate is not None: self._pause_gate.scan_finished()
         self.emit_finish_signals(msg)
 
@@ -592,7 +644,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         q_trig:queue.Queue,
         coor_mea:tuple,
         goto_timeout:float,
-        ):
+        ) -> float|None:
         """
         Auto adjusts the mapping speed based on the given parameters by performing a test measurement between the start and end coordinates and calculating the number of measurements collected.
 
@@ -604,6 +656,9 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             q_trig (queue.Queue): Queue to send the measurement trigger commands
             coor_mea (tuple): The start coordinate of the measurement to return to after the adjustment
             goto_timeout (float): Stall-timeout [s] to use for the movements - see _calculate_goto_stall_timeout
+
+        Returns:
+            float|None: The measured time per spectrum [s] during the test line, or None if no spectra were collected
         """
 
         # Go to the requested coordinates
@@ -640,6 +695,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
 
         # print('Auto adjust mapping speed: Moving to end coordinate for test measurement...')
         # Move to the end coordinate
+        time_test_start = time.time()
         event_finish_goto.clear()
         result_goto = queue.Queue()
         self._sig_gotocor.emit(
@@ -652,6 +708,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         goto_result_msg = self._get_goto_result(result_goto)
         if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
             raise TimeoutError(f"Failed to reach the auto-adjust end coordinate: {goto_result_msg or 'unknown error'}")
+        time_test = time.time() - time_test_start
         
         # print('Auto adjust mapping speed: Collecting measurements for speed adjustment...')
         # Collect the measurements in the queue
@@ -690,6 +747,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
             raise TimeoutError(f"Failed to return to the measurement start coordinate after auto-adjust: {goto_result_msg or 'unknown error'}")
         
+        return time_test / num_mea if num_mea > 0 else None
         
     @Slot(str)
     def emit_finish_signals(self,msg:str):
@@ -943,7 +1001,9 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             self._dataHub_map.get_MappingHub(),
             self.raman_controller.get_syncer_acquisition(),
             self._event_isacquiring,
-            pause_gate=self._pause_gate)
+            pause_gate=self._pause_gate,
+            stageHub=self._stageHub,
+            ramanHub=self._ramanHub)
         
         # Try to get the goto worker, but be defensive about timing
         try:
@@ -1536,14 +1596,10 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         
         # Initialise the mapping measurement data class
         mea_unit = MeaRMap_Unit(unit_name, extra_metadata=extra_metadata)
-<<<<<<< Updated upstream
         if not self._dataHub_map.append_MappingUnit(mea_unit): return False
-=======
-        self._dataHub_map.append_MappingUnit(mea_unit)
         # Tell the data hub this unit is live, so its autosave leaves it out and its offload
         # never drops it from memory while the scan is still writing into it
         self._dataHub_map.mark_unit_in_progress(mea_unit.get_unit_id())
->>>>>>> Stashed changes
 
         # Scramble the mapping coordinates if requested
         mapping_coordinates = self._scramble_mapping_coordinates(mapping_coordinates, method)

@@ -30,6 +30,30 @@ Techinical notes (for myself):
     - Note on the order of the initialisation:
         1. The manager has to be registered with the classes and the dictionary before the proxies are created and only after the proxy creations can the manager be started.
         2. The hub has to be started after the proxies are created.
+
+Future improvement (not implemented): protect un-retrieved measurements from eviction
+    Currently the oldest measurements are evicted once the storage limit is reached
+    (max("ramanhub_maxstorage", request_storage())), whether or not they have been retrieved. A continuous
+    mapping scan only retrieves a line's spectra at the end of the line, so an unexpected delay (e.g. an
+    autosaver backlog, a GUI freeze, a long data hub save) can evict the start of a line before it is
+    retrieved -> missing data on one side of the map. request_storage() (sized by the scan at 2x the longest
+    line) covers the predictable part; this would be a safety net for the unpredictable part.
+
+    Idea: when over the limit, evict only measurements already retrieved (flg_retrieved True), and keep
+    un-retrieved ones up to a hard cap (e.g. a "ramanhub_hardcap" config value) to bound the memory use.
+
+    Must be addressed before implementing:
+        - The IGNORE trigger of the continuous measurement (raman.py, RamanMeasurement_Worker) calls
+          get_measurement() and discards the result. get_measurement() currently flags the whole range as
+          retrieved, so the retrace spectra between scan lines stay evictable - keep it that way, otherwise
+          they would never be evicted.
+        - The idle live-preview loop (raman.py) calls get_measurement(..., getNewOnly=False). Check how it
+          sets flg_retrieved so it neither protects nor un-protects measurements by mistake.
+        - Memory: each measurement is a calibrated spectrum (DataFrame) behind manager list proxies, roughly
+          tens of kB each, so e.g. a cap of 20 000 measurements is ~0.5-1 GB.
+        - Eviction would no longer be a simple slice from the front: un-retrieved measurements can sit
+          between retrieved ones, so the parallel lists (timestamps, measurements, integration times,
+          flags) must be pruned consistently, ideally in as few proxy calls as possible.
 """
 
 import os
@@ -99,7 +123,8 @@ class DataStreamer_Raman(mp.Process):
         self._lbl_flg_retrieved = 'flg_retrieved'
         
         # Measurement parameters
-        self._max_measurement = MPMeaHubEnum.RAMANHUB_MAXSTORAGE.value     # Maximum number of measurements stored
+        self._max_measurement = MPMeaHubEnum.RAMANHUB_MAXSTORAGE.value     # Maximum number of measurements stored by default
+        self._max_measurement_request = mp.Value('i', 0)    # Temporary storage requested by a measurement, 0 = none (see request_storage)
         self._list_measurements_updater = []            # A list to store the measuremets
         self._q_SelfUpdate:mp.Queue = mp.Queue()        # A queue to update self
         
@@ -340,12 +365,35 @@ class DataStreamer_Raman(mp.Process):
         self._list_integrationtime.append(integration_time_ms)
         self._list_flg_retrieved.append(False)
         
-        # Removes the oldest measurement if the maximum number of measurements is reached
-        if len(self._list_timestamps) > self._max_measurement:
-            self._list_timestamps.pop(0)
-            self._list_measurements.pop(0)
-            self._list_integrationtime.pop(0)
-            self._list_flg_retrieved.pop(0)
+        # Removes the oldest measurements beyond the maximum number of measurements. Removed as a slice
+        # (one call per list) since it can be many at once after a storage request is cleared.
+        max_measurement = max(self._max_measurement, self._max_measurement_request.value)
+        num_excess = len(self._list_timestamps) - max_measurement
+        if num_excess > 0:
+            del self._list_timestamps[:num_excess]
+            del self._list_measurements[:num_excess]
+            del self._list_integrationtime[:num_excess]
+            del self._list_flg_retrieved[:num_excess]
+    
+    def request_storage(self, num_measurements:int) -> None:
+        """
+        Requests at least the given number of measurements to be kept, e.g. for the duration of a
+        measurement that retrieves its spectra in large batches. The request can only extend the storage
+        beyond the "ramanhub_maxstorage" config value, never shrink it, and replaces any previous request.
+        Always pair it with clear_storage_request().
+        
+        Args:
+            num_measurements (int): The requested number of measurements to keep
+        """
+        assert isinstance(num_measurements,int) and num_measurements >= 0, 'Number of measurements must be a non-negative integer'
+        self._max_measurement_request.value = num_measurements
+        
+    def clear_storage_request(self) -> None:
+        """
+        Clears the storage request, returning to the "ramanhub_maxstorage" config value. The excess
+        measurements are dropped on the next stored measurement.
+        """
+        self._max_measurement_request.value = 0
     
     def terminate_process(self):
         """
