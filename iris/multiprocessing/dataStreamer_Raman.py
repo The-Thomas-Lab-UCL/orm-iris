@@ -63,6 +63,7 @@ import multiprocessing.managers as mpm
 import multiprocessing.connection as mpc
 
 import threading
+import bisect
 import time
 
 import pandas as pd
@@ -374,6 +375,21 @@ class DataStreamer_Raman(mp.Process):
             del self._list_measurements[:num_excess]
             del self._list_integrationtime[:num_excess]
             del self._list_flg_retrieved[:num_excess]
+    
+    def get_timestamps(self, timestamp_start:int) -> list[int]:
+        """
+        Returns the timestamps of the stored measurements after the given timestamp, without retrieving
+        the measurements themselves (they are neither transferred nor flagged as retrieved). Cheap enough
+        to poll, e.g. to monitor the acquisition rate.
+        
+        Args:
+            timestamp_start (int): Only timestamps after this one are returned [us]
+        
+        Returns:
+            list[int]: The timestamps [us] in ascending order
+        """
+        list_ts = self._list_timestamps[:]  # A single snapshot of the proxy list
+        return list_ts[bisect.bisect_right(list_ts, timestamp_start):]
     
     def request_storage(self, num_measurements:int) -> None:
         """

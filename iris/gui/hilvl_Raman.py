@@ -23,7 +23,7 @@ if __name__ == '__main__':
 
 import threading
 import time
-from iris.utils.general import messagebox_request_input, get_all_widgets
+from iris.utils.general import messagebox_request_input, get_all_widgets, get_timestamp_us_int
 from iris.utils.scan_progress import ScanPathProgress, continuous_group_labels
 from iris.utils.mea_pause import MeasurementPauseGate
 
@@ -68,6 +68,13 @@ CONTINUOUS_SETVEL_WAIT_TIMEOUT_SEC = 5.0
 # duration of coordinates. A line's spectra are only retrieved (and their coordinates looked up) once the
 # line is finished, so the streamers must hold at least one whole line, plus margin for an autosaver backlog.
 STREAMER_STORAGE_SAFETY_FACTOR = 2.0
+
+# Mapping speed auto-adjustment (continuous mapping): the longest scan line is scanned while the speed factor
+# is re-estimated from every new spectrum, and the test line is stopped as soon as the estimate converges.
+AUTO_ADJUST_POLL_INTERVAL_SEC = 0.1         # How often the new spectra are checked [s]
+AUTO_ADJUST_MIN_SPECTRA = 10                # Minimum number of spectra before an estimate is made
+AUTO_ADJUST_CONVERGENCE_WINDOW = 5          # Number of consecutive estimates that must agree
+AUTO_ADJUST_CONVERGENCE_TOLERANCE = 0.01    # Relative spread (max-min)/mean allowed within the window to count as converged
 
 class Hilvl_Raman_Design(Ui_Hilvl_Raman,qw.QWidget):
     def __init__(self,parent):
@@ -248,6 +255,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     _sig_stop_autosaver = Signal()
     _sig_gotocor = Signal(tuple, threading.Event, float, queue.Queue)
     _sig_setvelrel = Signal(float, float, threading.Event)
+    _sig_stop_xy = Signal(threading.Event)
     _sig_acquire_discrete_mea = Signal(AcquisitionParams, queue.Queue)
     _sig_acquire_continuous_mea = Signal(AcquisitionParams, queue.Queue, queue.Queue, queue.Queue)
     _sig_acquire_list_coors = Signal(list, threading.Event)
@@ -505,11 +513,9 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         try:
             spectrum_period_sec = self._auto_adjust_mapping_speed(
                 mapping_speed_param=mapping_speed_param,
-                q_test=q_test,
                 event_finish_setvel=event_finish_setvel,
                 event_finish_goto=event_finish_goto,
                 q_trig=q_trig,
-                coor_mea=mapping_coordinates_ends[0],
                 goto_timeout=goto_timeout,
             )
             if spectrum_period_sec is not None and num_points_line * spectrum_period_sec > line_duration_sec:
@@ -638,37 +644,41 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     def _auto_adjust_mapping_speed(
         self,
         mapping_speed_param:MappingSpeedParam,
-        q_test:queue.Queue,
         event_finish_setvel:threading.Event,
         event_finish_goto:threading.Event,
         q_trig:queue.Queue,
-        coor_mea:tuple,
         goto_timeout:float,
         ) -> float|None:
         """
-        Auto adjusts the mapping speed based on the given parameters by performing a test measurement between the start and end coordinates and calculating the number of measurements collected.
+        Auto adjusts the mapping speed by scanning the longest line and monitoring the spectra while the
+        stage moves. The speed factor is re-estimated with every new spectrum from the actual spacing between
+        the spectra (stage displacement between their timestamps), and the test stops as soon as the estimate
+        converges (see AUTO_ADJUST_* constants), instead of always scanning the whole line. The stage is then
+        left at full speed, ready for the mapping to move to its first line.
+        
+        If the estimate never converges, the latest estimate at the end of the line is used.
 
         Args:
             mapping_speed_param (MappingSpeedParam): The mapping speed parameters for the measurement
-            q_test (queue.Queue): The queue to store the measurement data
             event_finish_setvel (threading.Event): Event to signal the completion of setting velocity
             event_finish_goto (threading.Event): Event to signal the completion of going to coordinates
             q_trig (queue.Queue): Queue to send the measurement trigger commands
-            coor_mea (tuple): The start coordinate of the measurement to return to after the adjustment
             goto_timeout (float): Stall-timeout [s] to use for the movements - see _calculate_goto_stall_timeout
 
         Returns:
-            float|None: The measured time per spectrum [s] during the test line, or None if no spectra were collected
+            float|None: The measured time per spectrum [s] during the test, or None if no estimate was made
         """
-
-        # Go to the requested coordinates
-        # time1 = time.time()
-        # print(f'\nMoving to coordinates: {coor} (Index {coor_idx}), distance from last: {math.dist(self._last_coor, coor) if hasattr(self, "_last_coor") else "N/A"}')
+        if self._stageHub is None or self._ramanHub is None:
+            raise RuntimeError('The stage and Raman data streamers are required for the mapping speed auto-adjustment')
+        
         coor_start = mapping_speed_param.auto_adjust_coor_start
         coor_end = mapping_speed_param.auto_adjust_coor_end
+        num_points = mapping_speed_param.auto_adjust_expected_number_of_points
+        if num_points < 2 or math.dist(coor_start, coor_end) <= 0:
+            raise ValueError('The auto-adjustment line must have at least 2 points and a non-zero length')
+        spacing_target_mm = math.dist(coor_start, coor_end) / (num_points - 1)  # The grid pitch along the line
 
-        # print(f'Auto adjusting mapping speed: Coor start: {coor_start}, Coor end: {coor_end}, Distance: {math.dist(coor_start, coor_end):.3f} mm')
-
+        # Go to the start of the test line
         event_finish_goto.clear()
         result_goto:queue.Queue = queue.Queue()
         self._sig_gotocor.emit(
@@ -682,20 +692,18 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
             raise TimeoutError(f"Failed to reach the auto-adjust start coordinate: {goto_result_msg or 'unknown error'}")
 
-        # Adjust the mapping speed to the initial speed
+        # Set the initial mapping speed
         event_finish_setvel.clear()
         self._sig_setvelrel.emit(mapping_speed_param.mapping_speed_rel_percent, -1.0, event_finish_setvel)
         if not event_finish_setvel.wait(CONTINUOUS_SETVEL_WAIT_TIMEOUT_SEC):
             raise TimeoutError('Failed to set the stage velocity for auto-adjust. Setting velocity timed out.')
 
-        # Start the measurement trigger
+        # Discard the spectra so far, so the acquisition worker's next retrieval stays small
         self._syncer.set_notready()
-        q_trig.put(EnumTrig.IGNORE) # Ignore all the measurements so far
+        q_trig.put(EnumTrig.IGNORE)
         self._syncer.wait_ready()
 
-        # print('Auto adjust mapping speed: Moving to end coordinate for test measurement...')
-        # Move to the end coordinate
-        time_test_start = time.time()
+        # Start the test line and monitor it while the stage moves
         event_finish_goto.clear()
         result_goto = queue.Queue()
         self._sig_gotocor.emit(
@@ -704,50 +712,82 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                     goto_timeout,
                     result_goto,
                 )
+        
+        ts_monitor_start:int|None = None    # Spectra are only used after the stage has started moving (skips the start-up/acceleration)
+        num_spectra_last = 0
+        list_factors:list[float] = []       # Speed factor estimates, one per new spectrum
+        spectrum_period_sec:float|None = None
+        flg_converged = False
+        flg_stopped = False
+        while not event_finish_goto.wait(AUTO_ADJUST_POLL_INTERVAL_SEC):
+            if not self._event_isacquiring.is_set(): break  # Cancelled: stop the stage below
+            
+            if ts_monitor_start is None:
+                ts_now = get_timestamp_us_int()
+                coor_now = self._stageHub.get_coordinates_closest(ts_now)
+                if coor_now is not None and math.dist(coor_now, coor_start) >= spacing_target_mm: ts_monitor_start = ts_now
+                continue
+            
+            list_ts = self._ramanHub.get_timestamps(ts_monitor_start)
+            if len(list_ts) <= num_spectra_last or len(list_ts) < AUTO_ADJUST_MIN_SPECTRA: continue
+            num_spectra_last = len(list_ts)
+            
+            # Actual spacing between the spectra: stage displacement between the first and last spectrum
+            coor_first = self._stageHub.get_coordinates_interpolate(list_ts[0])
+            coor_last = self._stageHub.get_coordinates_interpolate(list_ts[-1])
+            if coor_first is None or coor_last is None: continue
+            spacing_actual_mm = math.dist(coor_first, coor_last) / (len(list_ts) - 1)
+            if spacing_actual_mm <= 0: continue
+            
+            list_factors.append(spacing_target_mm / spacing_actual_mm)  # More spectra than wanted (smaller spacing) -> speed up
+            spectrum_period_sec = (list_ts[-1] - list_ts[0]) / 1e6 / (len(list_ts) - 1)
+            
+            # Converged once the latest estimates agree within the tolerance
+            window = list_factors[-AUTO_ADJUST_CONVERGENCE_WINDOW:]
+            if len(window) == AUTO_ADJUST_CONVERGENCE_WINDOW:
+                mean = sum(window) / len(window)
+                if (max(window) - min(window)) / mean <= AUTO_ADJUST_CONVERGENCE_TOLERANCE:
+                    flg_converged = True
+                    break
+        
+        # Stop the test line early (converged or cancelled), then wait for the movement to wind down so the
+        # stage is free for the next command. A stopped move is expected to report not reaching its target.
+        if not event_finish_goto.is_set():
+            flg_stopped = True
+            event_finish_stop = threading.Event()
+            self._sig_stop_xy.emit(event_finish_stop)
+            event_finish_stop.wait(CONTINUOUS_SETVEL_WAIT_TIMEOUT_SEC)
         event_finish_goto.wait()
         goto_result_msg = self._get_goto_result(result_goto)
-        if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
+        if not flg_stopped and goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
             raise TimeoutError(f"Failed to reach the auto-adjust end coordinate: {goto_result_msg or 'unknown error'}")
-        time_test = time.time() - time_test_start
         
-        # print('Auto adjust mapping speed: Collecting measurements for speed adjustment...')
-        # Collect the measurements in the queue
-        self._syncer.set_notready()
-        q_trig.put(EnumTrig.STORE_TEST)
-        self._syncer.wait_ready()        
+        # Leave the stage at full speed so the mapping moves to its first line straight away
+        event_finish_setvel.clear()
+        self._sig_setvelrel.emit(100.0, -1.0, event_finish_setvel)
+        if not event_finish_setvel.wait(CONTINUOUS_SETVEL_WAIT_TIMEOUT_SEC):
+            raise TimeoutError('Failed to set the stage velocity after auto-adjust. Setting velocity timed out.')
         
-        # print('Auto adjust mapping speed: Finishing test measurement...')
-        # print(f'Number of measurements collected in test queue: {q_test.qsize()}')
-        # Measure the number of measurements collected
-        num_mea = 0
-        while not q_test.empty():
-            _ = q_test.get()
-            num_mea += 1
+        if not self._event_isacquiring.is_set(): return None
+        if len(list_factors) == 0:
+            print('Auto adjust mapping speed: Not enough measurements collected, cannot adjust speed.')
+            self.sig_autoAdjSpeed_newMultiplier.emit(mapping_speed_param.mapping_speed_multiplier)
+            return None
         
-        # Calculate the new mapping speed
-        expected_num_mea = mapping_speed_param.auto_adjust_expected_number_of_points
-        if num_mea == 0:
-            print('Auto adjust mapping speed: No measurements collected, cannot adjust speed.')
-        else:
-            speed_adjust_factor = num_mea / expected_num_mea
-            new_modifier = mapping_speed_param.mapping_speed_multiplier * speed_adjust_factor
-            new_speed_percent = mapping_speed_param.mapping_speed_rel_percent * speed_adjust_factor
-            new_speed_percent = max(MINIMUM_RELATIVE_SPEED_PERCENT, min(new_speed_percent, 100.0))   # Clamp between a minimum and 100%
-            print(f'Auto adjust mapping speed: Collected {num_mea} measurements, expected {expected_num_mea}. Adjusting stage-speed from {mapping_speed_param.mapping_speed_rel_percent:.2f}% to {new_speed_percent:.2f}%.')
-            mapping_speed_param.mapping_speed_rel_percent = new_speed_percent
-            mapping_speed_param.mapping_speed_multiplier = new_modifier
+        # Apply the latest estimate
+        speed_adjust_factor = list_factors[-1]
+        new_modifier = mapping_speed_param.mapping_speed_multiplier * speed_adjust_factor
+        new_speed_percent = mapping_speed_param.mapping_speed_rel_percent * speed_adjust_factor
+        new_speed_percent = max(MINIMUM_RELATIVE_SPEED_PERCENT, min(new_speed_percent, 100.0))   # Clamp between a minimum and 100%
+        status = f'converged after {num_spectra_last} measurements' if flg_converged else \
+            f'did not converge within the line ({num_spectra_last} measurements), using the latest estimate'
+        print(f'Auto adjust mapping speed: {status}. Speed factor {speed_adjust_factor:.3f}. '
+              f'Adjusting stage-speed from {mapping_speed_param.mapping_speed_rel_percent:.2f}% to {new_speed_percent:.2f}%.')
+        mapping_speed_param.mapping_speed_rel_percent = new_speed_percent
+        mapping_speed_param.mapping_speed_multiplier = new_modifier
         self.sig_autoAdjSpeed_newMultiplier.emit(mapping_speed_param.mapping_speed_multiplier)
         
-        # Return to the measurement start coordinate
-        event_finish_goto.clear()
-        result_goto = queue.Queue()
-        self._sig_gotocor.emit((float(coor_mea[0]),float(coor_mea[1]),float(coor_mea[2])),event_finish_goto,goto_timeout,result_goto)
-        event_finish_goto.wait()
-        goto_result_msg = self._get_goto_result(result_goto)
-        if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
-            raise TimeoutError(f"Failed to return to the measurement start coordinate after auto-adjust: {goto_result_msg or 'unknown error'}")
-        
-        return time_test / num_mea if num_mea > 0 else None
+        return spectrum_period_sec
         
     @Slot(str)
     def emit_finish_signals(self,msg:str):
@@ -790,6 +830,10 @@ class WorkerPipelineManager(QObject):
         )
         hilvlacq_worker._sig_setvelrel.connect(
             motion_controller.set_vel_relative,
+            qc.Qt.ConnectionType.QueuedConnection
+        )
+        hilvlacq_worker._sig_stop_xy.connect(
+            motion_controller.stop_xy,
             qc.Qt.ConnectionType.QueuedConnection
         )
         hilvlacq_worker._sig_acquire_discrete_mea.connect(raman_worker.acquire_single_measurement)

@@ -1675,6 +1675,19 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         """
         return self.ctrl_xy.calculate_vel_relative(vel_xy_mmPerSec)
     
+    @Slot(threading.Event)
+    def stop_xy(self, event_finish:threading.Event|None=None) -> None:
+        """
+        Stops the xy-stage, including an ongoing "go to coordinate" movement
+        
+        Args:
+            event_finish (threading.Event|None): Set once the stop command has been sent (also on an error)
+        """
+        try: self.ctrl_xy.stop_move()
+        except Exception as e: print(f'Error in stop_xy: {e}')
+        finally:
+            if isinstance(event_finish,threading.Event): event_finish.set()
+    
     @Slot(float,float,threading.Event)
     def set_vel_relative(self,vel_xy:float=-1.0,vel_z:float=-1.0,event_finish:threading.Event|None=None):
         """
