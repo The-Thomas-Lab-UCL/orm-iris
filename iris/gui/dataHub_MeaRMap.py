@@ -38,8 +38,15 @@ from iris.gui.submodules.dialog_metadata import Dlg_MetadataViewer
 from iris.utils.mea_pause import MeasurementPauseGate
 
 DATAHUBPLUS_MAX_FREQ_HZ = 1.0 # Maximum update frequency for the DataHubPlus treeview in Hertz
-DATAHUB_OFFLOADCHECK_INTERVAL_SEC = 10.0  # Minimum interval between offload checks in seconds
-DATAHUB_OFFLOAD_MINMEMORY_GB = 1.0  # Minimum available memory in GB, under which offloading is triggered
+DATAHUB_MEMORYCHECK_INTERVAL_SEC = 5.0  # How often the available system memory is checked [s]
+# Below this much available memory [GB] the data hub offloads. A running measurement is stopped first so that
+# its unit can be offloaded too, and is then resumed on the remaining coordinates (see Wdg_HighLvlController_Raman).
+DATAHUB_OFFLOAD_MINMEMORY_GB = 1.5
+# Below this much available memory [GB] a running measurement is stopped for good, whatever the reason (another
+# application, an offload that has not finished yet, ...), as the system is about to run out of memory.
+DATAHUB_MEMORY_CRITICAL_GB = 1.0
+# How long [s] a requested measurement stop may take before the request is written off and may be made again
+DATAHUB_MEASTOP_TIMEOUT_SEC = 300.0
 # A database job that never reports back would wedge the queue for the rest of the session, so
 # one is given this long to finish before it is written off and the queue moves on. Generous on
 # purpose: a large hub legitimately takes minutes to write.
@@ -132,6 +139,7 @@ class DataHub_Worker(QObject):
     
     sig_delete_done = Signal(int, list)   # (number deleted, list of per-unit error messages)
     sig_delete_error = Signal(str)
+    sig_merge_done = Signal(str, str)     # (merged unit's ID, error message: empty on success)
 
     # How long a save waits for a running scan to park itself before going ahead anyway.
     # An autosave that never runs is worse than one taken while the scan is mid-point.
@@ -402,6 +410,26 @@ class DataHub_Worker(QObject):
             except Exception as e: list_errors.append(f"{unit_name}: {e}")
             
         self.sig_delete_done.emit(len(list_names) - len(list_errors), list_errors)
+
+    @Slot(list, str)
+    def merge_units(self, list_unit_ids:list[str], new_name:str):
+        """
+        Merges the given units into the first one, in the given order (see MeaRMap_Hub.merge_mapping_units).
+
+        Args:
+            list_unit_ids (list[str]): The IDs of the units to merge, in merge order
+            new_name (str): The name of the merged unit
+
+        Note:
+            Runs in the worker thread, after any database write already running there, so a merge can never
+            remove a unit from under a save, autosave or offload.
+        """
+        try:
+            self._mappinghub.merge_mapping_units(list_unit_ids, new_name)
+            self._flg_issaved = False
+            self.sig_merge_done.emit(list_unit_ids[0], '')
+        except Exception as e:
+            self.sig_merge_done.emit(list_unit_ids[0] if list_unit_ids else '', str(e))
             
 class Wdg_DataHub_Mapping_Ui(qw.QWidget, Ui_DataHub_mapping):
     def __init__(self, parent: Any) -> None:
@@ -413,7 +441,7 @@ class Wdg_DataHub_Mapping(qw.QWidget):
     
     _sig_req_update_tree = Signal()     # Emitted when the treeview needs to be updated (internal)
     _sig_req_delte_unit = Signal(list)  # Emitted to request deletion of units (internal)
-    _sig_check_system_memory = Signal()  # Emitted to check system memory (internal)
+    _sig_req_merge_units = Signal(list, str)    # Emitted to request a merge of units: (unit IDs in merge order, new name) (internal)
     sig_tree_changed = Signal()         # Emitted when the treeview is changed
     sig_tree_selection = Signal()       # Emitted when the treeview selection is changed
     sig_tree_selection_str = Signal(str)    # Emitted when the treeview selection is changed, with the selected unit name as argument
@@ -426,6 +454,11 @@ class Wdg_DataHub_Mapping(qw.QWidget):
     sig_load_db_partial = Signal(str, list)  # Emitted to partially load the MappingMeasurement_Hub from the database
     
     sig_autosave_db_delete = Signal(str, threading.Event)  # Emitted to delete the autosaved database file
+
+    # Low memory handling, answered by the measurement controller
+    sig_req_stop_for_offload = Signal() # Memory is low: stop the running measurement, then call request_offload(notify=True) and resume
+    sig_memory_critical = Signal(float) # Memory is critically low (available GB): stop the running measurement for good
+    sig_offload_finished = Signal(bool, str)    # (success, message) of an offload requested with request_offload(notify=True)
 
     # Treeview column indices
     _COL_INDEX = 0      # Order in which the unit was added to the hub (1-based)
@@ -467,8 +500,16 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         # it, so a request made while another is in flight is queued rather than dropped.
         self._queue_dbjobs:deque = deque()
         self._active_dbjob:str|None = None
-        self._last_autoOffloadCheck_time = 0.0
-        
+
+        # Low memory handling (see _check_system_memory). An offload process runs from the moment it is
+        # decided (including the measurement stop it may wait for) until the offload reports back; while
+        # it runs, no other offload process can start.
+        self._flg_offload_in_progress = False
+        self._flg_awaiting_mea_stop = False # The process is waiting for the measurement to stop
+        self._time_mea_stop_requested = 0.0
+        self._flg_offload_notify = False    # Report the process' outcome through sig_offload_finished
+        self._msgbox_notice:qw.QMessageBox|None = None  # Non-blocking notice, reused so notices never pile up
+
         # Backstop: releases the queue if a job never reports back (see _handle_dbjob_timeout)
         self._timer_dbjob_watchdog = QTimer(self)
         self._timer_dbjob_watchdog.setSingleShot(True)
@@ -511,6 +552,9 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
         # Other connection setups
         self._tree.itemSelectionChanged.connect(self._emit_signal_selection)
+        # The order the units were selected in (unit IDs), which sets the merge order
+        self._list_selection_order:list[str] = []
+        self._tree.itemSelectionChanged.connect(self._track_selection_order)
         
         # Right-click context menu on the treeview
         self._dlg_metadata = None   # Keeps the modeless metadata dialog alive
@@ -549,6 +593,10 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._sig_req_delte_unit.connect(self._worker.delete_unit)
         self._worker.sig_delete_done.connect(self._handle_delete_result)
         self._worker.sig_delete_error.connect(lambda msg: qw.QMessageBox.warning(self, "Delete error", msg))
+
+        # Merge units connection setup
+        self._sig_req_merge_units.connect(self._worker.merge_units)
+        self._worker.sig_merge_done.connect(self._handle_merge_result)
 
         # Other connection setup
         self._worker.sig_saveload_done.connect(self._handle_saveload_result)
@@ -590,41 +638,148 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
     def _init_autoOffload_signals(self):
         """
-        Arms the automatic low-memory offload check. The offload signals themselves are wired in
+        Arms the automatic low-memory check. The offload signals themselves are wired in
         __init__ regardless, so an offload requested by other means still runs.
         """
-        # Trigger a check of system memory whenever the MappingHub is updated
-        self._MappingHub.add_observer(self._sig_check_system_memory.emit)
-        self._sig_check_system_memory.connect(self._check_system_memory)
-        
-        # Test
-        # btn_offload = qw.QPushButton("Test AutoOffload", self)
-        # btn_offload.clicked.connect(lambda: self.sig_autoOffload_db.emit(self._autosave_dirpath, f"{self._sessionid}.db"))
-        # self._widget.main_layout.addWidget(btn_offload)
-        
+        # Polled on a timer rather than on hub updates: memory can also run out while the hub is idle
+        # (e.g. another application), and a parked or stopped scan no longer updates the hub at all.
+        self._timer_memorycheck = QTimer(self)
+        self._timer_memorycheck.setInterval(int(DATAHUB_MEMORYCHECK_INTERVAL_SEC * 1000))
+        self._timer_memorycheck.timeout.connect(self._check_system_memory)
+        self._timer_memorycheck.start()
+
+    @staticmethod
+    def get_available_memory_gb() -> float:
+        """
+        Returns:
+            float: The available system memory [GB]
+        """
+        return psutil.virtual_memory().available / (1024**3)
+
+    def is_memory_critical(self) -> bool:
+        """
+        Returns:
+            bool: True if the available system memory is below DATAHUB_MEMORY_CRITICAL_GB
+        """
+        return self.get_available_memory_gb() < DATAHUB_MEMORY_CRITICAL_GB
+
     @Slot()
     def _check_system_memory(self):
         """
-        Check the system memory and offload data if necessary
+        Checks the available system memory:
+            - Below DATAHUB_MEMORY_CRITICAL_GB with a measurement running: asks for it to be stopped for good
+                (sig_memory_critical). Re-emitted on every check until the measurement is over.
+            - Below DATAHUB_OFFLOAD_MINMEMORY_GB with a measurement running: asks for it to be stopped
+                (sig_req_stop_for_offload), so that its unit can be offloaded too before it is resumed.
+            - Below DATAHUB_OFFLOAD_MINMEMORY_GB with no measurement running: offloads the finished units.
+
+        Note:
+            Deliberately free of modal dialogs: a dialog runs its own event loop, so the timer would keep
+            firing behind it, and nothing would happen until someone clicked it away.
         """
-        if time.time() - self._last_autoOffloadCheck_time < DATAHUB_OFFLOADCHECK_INTERVAL_SEC: return
+        try: avail_gb = self.get_available_memory_gb()
+        except Exception as e:
+            print(f'{get_timestamp_sec()}: _check_system_memory: could not read the system memory: {e}')
+            return
+
+        flg_live = len(self._set_units_in_progress) > 0
+        if avail_gb < DATAHUB_MEMORY_CRITICAL_GB and flg_live:
+            # The measurement is stopped for good; its unit is offloaded on a later check, once it is finished
+            self.sig_memory_critical.emit(avail_gb)
+            return
+
+        if avail_gb >= DATAHUB_OFFLOAD_MINMEMORY_GB: return
         if not self._widget.chk_autoOffload.isChecked(): return
+
+        # One offload process at a time
+        if self._flg_offload_in_progress:
+            # Backstop: a stop that never comes back would otherwise block every later offload
+            if not self._flg_awaiting_mea_stop: return
+            if time.time() - self._time_mea_stop_requested < DATAHUB_MEASTOP_TIMEOUT_SEC: return
+            print(f'{get_timestamp_sec()}: the measurement stop requested for an offload never came back; '
+                  'ending that offload process.')
+            self._end_offload_process()
+
+        if flg_live:
+            print(f'{get_timestamp_sec()}: low system memory ({avail_gb:.2f} GB available): '
+                  'requesting a measurement stop to offload the data hub.')
+            self._flg_offload_in_progress = True
+            self._flg_awaiting_mea_stop = True
+            self._time_mea_stop_requested = time.time()
+            self.sig_req_stop_for_offload.emit()
+            return
+
         if self._flg_issaved_db: return
-        # An offload already running or queued is enough; no need to pile up another
-        if self._is_dbjob_pending('offload'): return
-        
-        memory = psutil.virtual_memory()
-        self._last_autoOffloadCheck_time = time.time()
-        # print(f'{get_timestamp_sec()}: Available memory: {memory.available / (1024**3):.2f} GB of {memory.total / (1024**3):.2f} GB')
-        # Check if the memory available is below 1GB
-        if memory.available / (1024**3) < DATAHUB_OFFLOAD_MINMEMORY_GB:
-            qw.QMessageBox.warning(
-                self,
-                "Low system memory",
-                "System memory is low (<1GB available). Autosaving and offloading data to free up memory."
-            )
-            self._request_dbjob('offload', self._autooffload_dirpath, f"{self._sessionid}.db")
-        
+        print(f'{get_timestamp_sec()}: low system memory ({avail_gb:.2f} GB available): offloading the data hub.')
+        self.request_offload(notify=False)
+
+    def is_offload_in_progress(self) -> bool:
+        """
+        Returns:
+            bool: True while an offload process (a measurement stop for it, or the offload itself) is under way
+        """
+        return self._flg_offload_in_progress
+
+    def request_offload(self, notify:bool=False) -> bool:
+        """
+        Starts an offload of every unit no measurement is writing into: they are saved to the offload
+        database and dropped from memory. Only one offload process runs at a time.
+
+        Args:
+            notify (bool): If True, the outcome is reported through sig_offload_finished. Used by the
+                measurement controller to resume a measurement stopped for this offload.
+
+        Returns:
+            bool: True if the offload was started. False if another offload is already writing; with
+                notify, that one's outcome is reported instead, as it frees the memory all the same.
+
+        Note:
+            A process waiting for a measurement stop (sig_req_stop_for_offload) is carried on by this
+            call, not refused: this is how the controller answers that stop request.
+        """
+        if self._flg_offload_in_progress and not self._flg_awaiting_mea_stop:
+            print(f'{get_timestamp_sec()}: an offload is already in progress; not starting another.')
+            if notify: self._flg_offload_notify = True
+            return False
+
+        self._flg_offload_in_progress = True
+        self._flg_awaiting_mea_stop = False
+        self._flg_offload_notify = notify
+        self._request_dbjob('offload', self._autooffload_dirpath, f"{self._sessionid}.db")
+        return True
+
+    def _end_offload_process(self) -> bool:
+        """
+        Ends the offload process, so that another may start.
+
+        Returns:
+            bool: Whether the process' outcome is to be reported through sig_offload_finished
+        """
+        flg_notify = self._flg_offload_notify
+        self._flg_offload_in_progress = False
+        self._flg_awaiting_mea_stop = False
+        self._flg_offload_notify = False
+        return flg_notify
+
+    def _show_notice(self, title:str, message:str) -> None:
+        """
+        Shows a non-blocking notice. A single box is reused, so repeated notices replace each other
+        instead of piling up, and nothing waits for it to be clicked away.
+
+        Args:
+            title (str): The window title
+            message (str): The message to show
+        """
+        if self._msgbox_notice is None:
+            self._msgbox_notice = qw.QMessageBox(self)
+            self._msgbox_notice.setIcon(qw.QMessageBox.Icon.Information)
+            self._msgbox_notice.setStandardButtons(qw.QMessageBox.StandardButton.Ok)
+            self._msgbox_notice.setWindowModality(Qt.WindowModality.NonModal)
+        self._msgbox_notice.setWindowTitle(title)
+        self._msgbox_notice.setText(f'{message}\n({time.strftime("%Y-%m-%d %H:%M:%S")})')
+        self._msgbox_notice.show()
+        self._msgbox_notice.raise_()
+
     @Slot()
     def _emit_signal_selection(self):
         """
@@ -657,7 +812,109 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         act_metadata.setEnabled(item is not None)
         act_metadata.triggered.connect(self.show_metadata_table)
 
+        act_merge = menu.addAction("Merge these units")
+        act_merge.setEnabled(len(self._tree.selectedItems()) >= 2)
+        act_merge.triggered.connect(self.merge_selected_units)
+
         menu.exec(self._tree.viewport().mapToGlobal(pos))
+
+    @Slot()
+    def _track_selection_order(self):
+        """
+        Keeps the selected units in the order they were selected in: units still selected keep their
+        place, newly selected ones are added at the end.
+        """
+        dict_nameToID = self._MappingHub.get_dict_nameToID()
+        list_selected_ids = [dict_nameToID[item.text(self._COL_NAME)] for item in self._tree.selectedItems()
+                             if item.text(self._COL_NAME) in dict_nameToID]
+        set_selected = set(list_selected_ids)
+        list_order = [unit_id for unit_id in self._list_selection_order if unit_id in set_selected]
+        list_order += [unit_id for unit_id in list_selected_ids if unit_id not in list_order]
+        self._list_selection_order = list_order
+
+    def get_selected_unit_ids_in_order(self) -> list[str]:
+        """
+        Returns:
+            list[str]: The IDs of the selected units, in the order they were selected in
+        """
+        self._track_selection_order()   # Also picks up a selection set with the signals blocked
+        return list(self._list_selection_order)
+
+    @Slot()
+    def merge_selected_units(self):
+        """
+        Merges the selected units into the first selected one, in the order they were selected in: with
+        a, c, b selected in that order, c is appended to a, then b to a. Each unit is deleted as soon as it
+        has been appended, to free its memory. The units must share their Raman measurement metadata and
+        instruments (see MeaRMap_Hub.check_units_mergeable).
+        """
+        list_ids = self.get_selected_unit_ids_in_order()
+        if len(list_ids) < 2:
+            qw.QMessageBox.information(self, "Merge units", "Select at least two units to merge.")
+            return
+
+        list_names = [self._MappingHub.get_MappingUnit(unit_id=unit_id).get_unit_name() for unit_id in list_ids]
+
+        # A unit still being measured into would lose every spectrum stored after the merge
+        list_live = [name for unit_id, name in zip(list_ids, list_names) if unit_id in self._set_units_in_progress]
+        if list_live:
+            qw.QMessageBox.warning(self, "Merge units",
+                "These units are still being measured into and cannot be merged until the measurement is over:\n"
+                + "\n".join(f"  • {name}" for name in list_live))
+            return
+
+        list_problems = self._MappingHub.check_units_mergeable(list_ids)
+        if list_problems:
+            qw.QMessageBox.warning(self, "Merge units",
+                "The selected units cannot be merged:\n\n" + "\n".join(f"  • {msg}" for msg in list_problems))
+            return
+
+        msg_order = f"  1. {list_names[0]}  (merged into)\n" + \
+            "\n".join(f"  {i}. {name}" for i, name in enumerate(list_names[1:], start=2))
+        flg_merge = qw.QMessageBox.question(
+            self, "Merge units",
+            f"Merge these {len(list_names)} units into one?\n\nThey are appended in this order:\n{msg_order}\n\n"
+            "Every unit but the first is deleted once appended.\n!!! This action cannot be undone !!!",
+            qw.QMessageBox.Yes | qw.QMessageBox.No, qw.QMessageBox.No) # type: ignore
+        if flg_merge != qw.QMessageBox.Yes: return  # type: ignore
+
+        # The name may be that of any merged unit, as those are gone (or renamed) once merged
+        set_names_merged = set(list_names)
+        def validator(name:str) -> bool:
+            return name.strip() != '' and (name in set_names_merged or self._MappingHub.validate_new_unit_name(name))
+        new_name = messagebox_request_input(
+            parent=self,
+            title='Merge units',
+            message='Enter the name of the merged unit:',
+            default=list_names[0],
+            validator=validator,
+            invalid_msg="Invalid name. The name cannot be empty or be used by another unit. Please try again.",
+            loop_until_valid=True
+        )
+        if new_name is None: return     # User cancelled
+
+        self._disable_buttons_deletion(busy_text="Merging...")
+        self._sig_req_merge_units.emit(list_ids, new_name)
+
+    @Slot(str, str)
+    def _handle_merge_result(self, unit_id:str, error:str):
+        """
+        Re-enables the buttons, refreshes the treeview and selects the merged unit once a merge has finished.
+
+        Args:
+            unit_id (str): The ID of the merged unit
+            error (str): The error message, empty if the merge succeeded
+        """
+        self._reset_buttons_deletion()
+        if error:
+            self._sig_req_update_tree.emit()
+            qw.QMessageBox.critical(self, "Merge units", f"The units could not be merged:\n{error}")
+            return
+
+        self._flg_issaved_db = False
+        self.update_tree(keep_selection=False)
+        try: self.set_selection_unitID(unit_id)
+        except Exception as e: print(f'_handle_merge_result: could not select the merged unit: {e}')
 
     @Slot()
     def show_metadata_table(self):
@@ -741,8 +998,9 @@ class Wdg_DataHub_Mapping(qw.QWidget):
     
     @Slot()
     def update_tree(self, keep_selection:bool=True):
-        # Store the current selections
+        # Store the current selections, and the order they were made in (clearing the tree below wipes it)
         list_unitID = [unit.get_unit_id() for unit in self.get_selected_MappingUnit()]
+        list_selection_order = list(self._list_selection_order)
         list_matched_ids = self._filter_by_search()
         
         self._tree.clearSelection()
@@ -764,7 +1022,10 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         if not flg_searching: self._tree.setSortingEnabled(True)
 
         # Set the selection back to the previous selection
-        if keep_selection: self.set_selection_unitID(list_unitID)
+        if keep_selection:
+            self.set_selection_unitID(list_unitID)
+            self._list_selection_order = list_selection_order
+            self._track_selection_order()
         
         self.sig_tree_changed.emit()
         
@@ -916,12 +1177,15 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._disable_buttons_deletion()
         self._sig_req_delte_unit.emit(list_names)
         
-    def _disable_buttons_deletion(self):
+    def _disable_buttons_deletion(self, busy_text:str="Deleting..."):
         """
-        Disables every button that touches the hub while a deletion runs in the worker thread.
+        Disables every button that touches the hub while a deletion (or a merge) runs in the worker thread.
+
+        Args:
+            busy_text (str): The text shown on the delete button meanwhile. Defaults to "Deleting...".
         """
         self._btn_delete.setEnabled(False)
-        self._btn_delete.setText("Deleting...")
+        self._btn_delete.setText(busy_text)
         self._btn_rename.setEnabled(False)
         self._btn_save_ext.setEnabled(False)
         self._btn_save_db.setEnabled(False)
@@ -1013,13 +1277,13 @@ class Wdg_DataHub_Mapping(qw.QWidget):
             bool: True if such a job is in flight or waiting its turn
         """
         if self._active_dbjob == kind: return True
-        return any(job_kind == kind for job_kind, _ in self._queue_dbjobs)
+        return any(job[0] == kind for job in self._queue_dbjobs)
 
     def _request_dbjob(self, kind:str, savedirpath:str, savename:str) -> None:
         """
         Requests a database write, running it now if nothing else is writing, or queueing it
         behind the job in flight. Requests are never silently dropped.
-        
+
         Args:
             kind (str): The job kind ('save', 'autosave' or 'offload')
             savedirpath (str): The directory path to save the database to
@@ -1092,6 +1356,9 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         self._flg_issaving_db = False
         self._reset_reenable_saveload_buttons()
         self._dispatch_next_dbjob()
+        # A written-off offload ends its process too, or no offload could ever start again
+        if kind == 'offload' and self._end_offload_process():
+            self.sig_offload_finished.emit(False, f'The offload did not finish within {DATAHUB_DBJOB_TIMEOUT_SEC/60:.0f} min.')
 
     # >>> Measurement coordination <<<
 
@@ -1226,19 +1493,28 @@ class Wdg_DataHub_Mapping(qw.QWidget):
         
         Args:
             message (str): The message to display
+
+        Note:
+            The queue and the requester are told before any dialog is shown: a modal dialog would
+            otherwise hold up the next job (and a measurement waiting to resume) until clicked away.
         """
-        if message.startswith(DataHub_Worker.offload_error):
-            qw.QMessageBox.critical(None, "Autosave and offload operation", message)
-        elif message == DataHub_Worker.offload_success:
-            qw.QMessageBox.warning(None, "Autosave and offload operation", message)
-            self._flg_issaved_db = True
-        elif message == DataHub_Worker.offload_nothing:
-            # Everything still in memory belongs to a running measurement: nothing to free yet.
-            # Not worth a dialog, as this is checked automatically on every hub change.
-            print(f'{get_timestamp_sec()}: {message}')
-        
+        flg_success = not message.startswith(DataHub_Worker.offload_error)
+        flg_notify = self._end_offload_process()
+        if message == DataHub_Worker.offload_success: self._flg_issaved_db = True
+        # Nothing finished to offload and nothing running: the hub is empty, so there is nothing to save either
+        elif message == DataHub_Worker.offload_nothing and len(self._set_units_in_progress) == 0: self._flg_issaved_db = True
+
         self._finish_dbjob()
         self._sig_req_update_tree.emit()
+        if flg_notify: self.sig_offload_finished.emit(flg_success, message)
+
+        if not flg_success:
+            qw.QMessageBox.critical(self, "Autosave and offload operation", message)
+        elif message == DataHub_Worker.offload_success:
+            self._show_notice("Autosave and offload operation",
+                f"System memory was low.\n{message}\nSaved to: {self._autooffload_dirpath}")
+        else:
+            print(f'{get_timestamp_sec()}: {message}')
         
     @Slot(str)
     def _handle_saveload_result(self, message:str):
@@ -1631,6 +1907,9 @@ class Wdg_DataHub_Mapping_Plus(qw.QWidget):
         # Set the selection in the treeview
         self._tree_unit.clearSelection()
         idx_selection = bisect.bisect_left(list_measurementIds, int(measurement_id))
+        # A merged unit is not necessarily in timestamp order: check the binary search, fall back to a linear one
+        if idx_selection >= len(list_measurementIds) or list_measurementIds[idx_selection] != int(measurement_id):
+            idx_selection = list_measurementIds.index(int(measurement_id))
         item = self._tree_unit.topLevelItem(idx_selection)
         if item is None:
             qw.QMessageBox.warning(None, "Selection error", f"Could not find the RamanMeasurement with ID {measurement_id} in the treeview.")

@@ -30,7 +30,7 @@ from iris.utils.mea_pause import MeasurementPauseGate
 
 from iris.gui.motion_video import Wdg_MotionController, Motion_GoToCoor_Worker
 from iris.gui.raman import Wdg_SpectrometerController, RamanMeasurement_Worker, AcquisitionParams, Enum_ContinuousMeasurementTrigger as EnumTrig, Syncer_Raman
-from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
+from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping, DATAHUB_MEMORY_CRITICAL_GB, DATAHUB_OFFLOAD_MINMEMORY_GB, DATAHUB_MEMORYCHECK_INTERVAL_SEC
 from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
 from iris.gui.hilvl_coorGen import Wdg_Hilvl_CoorGenerator
 from iris.gui.submodules.mappingCoordinatesTreeview import Wdg_Treeview_MappingCoordinates
@@ -995,14 +995,26 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self._scanDir_inProgress:str = ''               # The scan direction used for the scan in progress
         self._list_unscanned_coor:list = []             # The scan coordinates not completed in the last scan (from the worker)
         self._list_remaining_names:list[str] = []       # Names of the unscanned coordinates added to the hub in this run
-        
+
+        # Low memory handling (requested by the data hub, see Wdg_DataHub_Mapping._check_system_memory)
+        self._flg_stop_for_offload = False      # The scan is being stopped to offload the data hub, then resumed
+        self._flg_stop_for_memory = False       # The scan is being stopped for good: memory is critically low
+        self._flg_awaiting_offload = False      # Stopped, waiting for the offload to finish to resume
+        self._flg_awaiting_memory = False       # Offloaded, waiting for enough free memory to resume
+        self._flg_resume_cancelled = False      # The user pressed stop while waiting for the offload
+        self._mapCoor_resume:MeaCoor_mm|None = None     # The remaining coordinates to resume on after the offload
+        self._avail_memory_gb_critical = 0.0    # The available memory that triggered a critical stop [GB]
+        self._timer_resume_memory = QTimer(self)    # Re-checks the memory while waiting to resume
+        self._timer_resume_memory.setInterval(int(DATAHUB_MEMORYCHECK_INTERVAL_SEC * 1000))
+        self._timer_resume_memory.timeout.connect(self._check_memory_for_resume)
+
         # >> Mapping options widgets setup <<
         self._btn_discrete = wdg.btn_discrete
         self._btn_discrete.clicked.connect(lambda: self.initiate_mapping(MappingMethods.DISCRETE))
         self._btn_continuous = wdg.btn_continuous
         self._btn_continuous.clicked.connect(lambda: self.initiate_mapping(MappingMethods.CONTINUOUS))
         self._btn_stop = wdg.btn_stop
-        self._btn_stop.clicked.connect(lambda: self.sig_stop_measurement.emit())
+        self._btn_stop.clicked.connect(self._handle_stop_clicked)
         
     # >>> Mapping scrambler options setup <<<
         self._rb_snake = wdg.rb_snake
@@ -1157,10 +1169,14 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         # Signal to stop the autosaver
         self._worker_hilvlacq.sig_mea_done.connect(self._worker_autoMeaStorer.stop_autosaver)
         
-        # The measurement is over (finished, cancelled or failed alike), so its unit may now be
-        # autosaved and offloaded by the data hub
-        self._worker_hilvlacq.sig_mea_done.connect(self._dataHub_map.clear_unit_in_progress)
-        
+        # The unit is released to the data hub's autosave/offload in handle_mapping_completion, not on
+        # sig_mea_done: the autosaver is still storing the last spectra into it at that point.
+
+        # Low memory handling: the data hub asks for the scan to be stopped (and resumed after an offload)
+        self._dataHub_map.sig_req_stop_for_offload.connect(self._handle_offload_stop_request)
+        self._dataHub_map.sig_memory_critical.connect(self._handle_memory_critical)
+        self._dataHub_map.sig_offload_finished.connect(self._handle_offload_finished)
+
         # Signal to start and set the autosaver
         self.sig_start_autosaver.connect(self._worker_autoMeaStorer.start_autosaver)
         self.sig_set_autosaver.connect(self._worker_autoMeaStorer.set_save_params)
@@ -1657,15 +1673,218 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         if len(list_remaining) == 0 or (not flg_finished and len(list_remaining) == len(mapCoor.mapping_coordinates)):
             return
 
+        name_remaining = self._get_remaining_name(name)
+        self._coorHub.append(MeaCoor_mm(name_remaining, list_remaining))
+        self._list_remaining_names.append(name_remaining)
+
+    def _get_remaining_name(self, name:str) -> str:
+        """
+        Returns a free name for the unscanned remainder of a mapping, unused in both the coordinate hub
+        and the mapping hub (so a resumed scan never stops to ask for a new unit name).
+
+        Args:
+            name (str): The name of the original mapping coordinates
+
+        Returns:
+            str: The name for the remainder
+        """
+        mappingHub = self._dataHub_map.get_MappingHub()
         # Named after the original, without a previous '_remaining' suffix so they don't stack up
         name_base = re.sub(r'_remaining(_\d+)?$', '', name) + '_remaining'
         name_remaining = name_base
         i = 2
-        while not self._coorHub.validator_new_name(name_remaining):
+        while not self._coorHub.validator_new_name(name_remaining) or not mappingHub.validate_new_unit_name(name_remaining):
             name_remaining = f'{name_base}_{i}'
             i += 1
-        self._coorHub.append(MeaCoor_mm(name_remaining, list_remaining))
-        self._list_remaining_names.append(name_remaining)
+        return name_remaining
+
+    # >>> Low memory handling <<<
+
+    @Slot()
+    def _handle_stop_clicked(self):
+        """
+        Stops the running scan. While a scan is stopped for an offload, cancels its resume instead.
+        """
+        if self._flg_awaiting_memory:
+            # Nothing is running or writing: give up straight away
+            self._end_offload_pause('Mapping measurement cancelled', 'The mapping measurement was cancelled by the user', flg_error=False)
+            return
+        if self._flg_awaiting_offload or self._flg_stop_for_offload: self._flg_resume_cancelled = True
+        self.sig_stop_measurement.emit()
+
+    @Slot()
+    def _handle_offload_stop_request(self):
+        """
+        Memory is low: stops the running scan so that the data hub can offload it, after which the scan
+        is resumed on the remaining coordinates (see _pause_for_offload and _handle_offload_finished).
+        """
+        if self._flg_stop_for_memory or self._flg_stop_for_offload or self._flg_awaiting_offload or self._flg_awaiting_memory: return
+        if self._mapCoor_inProgress is None:
+            # The scan has just ended on its own: nothing to stop, offload straight away
+            self._dataHub_map.request_offload(notify=False)
+            return
+
+        self._flg_stop_for_offload = True
+        self._flg_resume_cancelled = False
+        print(f'{time.strftime("%H:%M:%S")}: low system memory, stopping the scan to offload the data hub')
+        self.statbar.showMessage('Low system memory: stopping the scan to offload the data hub. It will resume automatically.')
+        self.statbar.setStyleSheet("QStatusBar { background-color : orange; color : black; }")
+        self.sig_stop_measurement.emit()
+
+    @Slot(float)
+    def _handle_memory_critical(self, avail_gb:float):
+        """
+        Memory is critically low: stops the running scan for good (no resume, the queued ROIs are dropped).
+        The error is shown once the scan is over, in handle_mapping_completion.
+
+        Args:
+            avail_gb (float): The available system memory [GB]
+        """
+        if self._flg_stop_for_memory: return
+        if self._mapCoor_inProgress is None: return
+
+        self._flg_stop_for_memory = True
+        self._flg_stop_for_offload = False  # Overrides a stop for an offload: no resume
+        self._avail_memory_gb_critical = avail_gb
+        print(f'{time.strftime("%H:%M:%S")}: critically low system memory ({avail_gb:.2f} GB), stopping the scan')
+        self.statbar.showMessage(f'Critically low system memory ({avail_gb:.2f} GB available): stopping the scan.')
+        self.statbar.setStyleSheet("QStatusBar { background-color : red; color : white; }")
+        self.sig_stop_measurement.emit()
+
+    def _msg_memory_critical(self, avail_gb:float) -> str:
+        """
+        Returns:
+            str: The error message for a scan stopped on critically low memory
+        """
+        return (f'The mapping measurement was stopped because the system memory is critically low '
+                f'({avail_gb:.2f} GB available, minimum {DATAHUB_MEMORY_CRITICAL_GB:.1f} GB).\n\n'
+                'It will not be resumed automatically. The measured data is kept in the data hub and is '
+                'offloaded to the autosave folder as soon as possible. Free up memory (e.g. close other '
+                'applications) before restarting the measurement.')
+
+    def _pause_for_offload(self) -> None:
+        """
+        Called once a scan stopped for an offload is over and every spectrum is stored in its unit.
+        Prepares the remaining coordinates to resume on and asks the data hub for the offload.
+
+        Note:
+            With 'delete finished coordinates' checked, the original coordinates are replaced in the
+            coordinate hub by the remainder right away, so the list stays correct however the resumed
+            scan ends.
+        """
+        mapCoor = self._mapCoor_inProgress
+        self._mapCoor_inProgress = None
+        self._mapCoor_resume = None
+
+        if mapCoor is not None:
+            list_remaining = self._get_unscanned_coordinates(
+                mapCoor.mapping_coordinates, self._list_unscanned_coor,
+                self._last_mappingmethod, self._scanDir_inProgress)
+            if len(list_remaining) > 0:
+                self._mapCoor_resume = MeaCoor_mm(self._get_remaining_name(mapCoor.mappingUnit_name), list_remaining)
+            if self._widget.chk_delFinished.isChecked():
+                try:
+                    if self._coorHub.search_mappingCoor(mapCoor.mappingUnit_name) is not None:
+                        self._coorHub.remove_mappingCoor(mapCoor.mappingUnit_name)
+                    if self._mapCoor_resume is not None: self._coorHub.append(self._mapCoor_resume)
+                except Exception as e: print(f'_pause_for_offload: could not update the coordinate list: {e}')
+
+        self._flg_awaiting_offload = True
+        self._btn_stop.setEnabled(True)     # Lets the user cancel the resume
+        self.statbar.showMessage('Low system memory: offloading the data hub. The scan will resume automatically once done.')
+        self.statbar.setStyleSheet("QStatusBar { background-color : orange; color : black; }")
+        self._dataHub_map.request_offload(notify=True)
+
+    @Slot(bool, str)
+    def _handle_offload_finished(self, flg_success:bool, message:str):
+        """
+        Once the offload for a stopped scan is done, waits for enough free memory to resume it (see
+        _check_memory_for_resume), unless the offload failed or the user cancelled in the meantime.
+
+        Args:
+            flg_success (bool): Whether the offload succeeded
+            message (str): The offload's outcome message
+        """
+        if not self._flg_awaiting_offload: return
+        self._flg_awaiting_offload = False
+
+        if self._flg_resume_cancelled:
+            self._end_offload_pause('Mapping measurement cancelled', 'The mapping measurement was cancelled by the user', flg_error=False)
+            return
+        if not flg_success:
+            self._end_offload_pause('Mapping measurement stopped',
+                f'The mapping measurement was stopped to offload the data hub, but the offload failed, so it was not resumed:\n{message}')
+            return
+
+        self._flg_awaiting_memory = True
+        self._check_memory_for_resume()
+        if self._flg_awaiting_memory: self._timer_resume_memory.start()
+
+    @Slot()
+    def _check_memory_for_resume(self):
+        """
+        Resumes the scan stopped for an offload once the available memory is back above the offload
+        threshold. Resuming any lower would only get the scan stopped again on the data hub's next check,
+        chopping it into tiny units, as the offload evidently did not free enough memory (e.g. another
+        application is holding it). Keeps waiting until then, unless memory falls critically low (the
+        scan is then stopped for good) or the user presses stop.
+        """
+        if not self._flg_awaiting_memory: return
+        try: avail_gb = self._dataHub_map.get_available_memory_gb()
+        except Exception as e:
+            print(f'_check_memory_for_resume: could not read the system memory: {e}')
+            return
+
+        if avail_gb < DATAHUB_MEMORY_CRITICAL_GB:
+            self._end_offload_pause('Mapping stopped: low memory', self._msg_memory_critical(avail_gb))
+            return
+        if avail_gb < DATAHUB_OFFLOAD_MINMEMORY_GB:
+            self.statbar.showMessage(f'Low system memory: waiting for {DATAHUB_OFFLOAD_MINMEMORY_GB:.1f} GB to be available '
+                                     f'to resume the scan ({avail_gb:.2f} GB now). Press stop to cancel.')
+            self.statbar.setStyleSheet("QStatusBar { background-color : orange; color : black; }")
+            return
+
+        self._timer_resume_memory.stop()
+        self._flg_awaiting_memory = False
+        mapCoor_resume = self._mapCoor_resume
+        self._mapCoor_resume = None
+        self.statbar.setStyleSheet("")
+        if mapCoor_resume is not None:
+            print(f'{time.strftime("%H:%M:%S")}: offload done ({avail_gb:.2f} GB available), resuming the scan as {mapCoor_resume.mappingUnit_name}')
+            self._list_sel_mapCoor.insert(0, mapCoor_resume)
+            self.initiate_mapping(method=self._last_mappingmethod)
+        else:
+            # The scan was stopped right at its end: carry on as if it had finished
+            self.handle_mapping_completion(self._worker_hilvlacq.msg_mea_finished)
+
+    def _end_offload_pause(self, title:str, msg:str, flg_error:bool=True) -> None:
+        """
+        Gives up on resuming a scan stopped for an offload: drops the queued ROIs, releases the widgets
+        and tells the user.
+
+        Args:
+            title (str): The dialog title
+            msg (str): The dialog message
+            flg_error (bool): Shows an error dialog if True, a warning otherwise. Defaults to True.
+        """
+        self._timer_resume_memory.stop()
+        self._flg_awaiting_offload = False
+        self._flg_awaiting_memory = False
+        self._flg_resume_cancelled = False
+        mapCoor_resume = self._mapCoor_resume
+        self._mapCoor_resume = None
+
+        self._list_sel_mapCoor.clear()
+        self.raman_controller.reset_enable_widgets()
+        self.motion_controller.enable_widgets()
+        self.enable_widgets()
+        self.statbar.showMessage(title)
+        self.statbar.setStyleSheet("")
+        if mapCoor_resume is not None and self._widget.chk_delFinished.isChecked():
+            msg += f'\n\nThe unscanned coordinates are in the coordinate list as:\n  • {mapCoor_resume.mappingUnit_name}'
+        msg += self._pop_remaining_names_message()
+        if flg_error: qw.QMessageBox.critical(self, title, msg)
+        else: qw.QMessageBox.warning(self, title, msg)
 
     def _pop_remaining_names_message(self) -> str:
         """
@@ -1683,6 +1902,21 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         """
         Handles the completion of a mapping measurement
         """
+        # Only now is every spectrum stored in the unit (the autosaver relays this message once it is
+        # done), so only now may the data hub autosave or offload it
+        self._dataHub_map.clear_unit_in_progress()
+
+        flg_stop_for_memory, self._flg_stop_for_memory = self._flg_stop_for_memory, False
+        flg_stop_for_offload, self._flg_stop_for_offload = self._flg_stop_for_offload, False
+        if flg_stop_for_offload and msg == self._worker_hilvlacq.msg_mea_cancelled:
+            self._pause_for_offload()
+            return
+        # Answer an offload process still waiting on this scan's stop: the scan ended on its own before the
+        # stop took effect, or a critical memory stop took over. Otherwise that process would block every
+        # other offload until it timed out.
+        if flg_stop_for_offload or self._dataHub_map.is_offload_in_progress():
+            self._dataHub_map.request_offload(notify=False)
+
         self.raman_controller.reset_enable_widgets()
         self.motion_controller.enable_widgets()
         self.enable_widgets()
@@ -1695,7 +1929,15 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             except Exception as e: qw.QMessageBox.warning(self,'Coordinate list update failed',f'Failed to update the mapping coordinate list: {e}')
         self._mapCoor_inProgress = None
 
-        if msg == self._worker_hilvlacq.msg_mea_cancelled:
+        if flg_stop_for_memory:
+            # Stopped for good, whatever the scan itself reported: the queued ROIs are dropped too
+            self._list_sel_mapCoor.clear()
+            self.statbar.showMessage('Mapping stopped: critically low system memory')
+            self.statbar.setStyleSheet("QStatusBar { background-color : red; color : white; }")
+            qw.QMessageBox.critical(self,'Mapping stopped: low memory',
+                                    self._msg_memory_critical(self._avail_memory_gb_critical) + self._pop_remaining_names_message())
+            return
+        elif msg == self._worker_hilvlacq.msg_mea_cancelled:
             self._list_sel_mapCoor.clear()
             qw.QMessageBox.warning(self,'Mapping measurement cancelled','The mapping measurement was cancelled by the user'
                                    + self._pop_remaining_names_message())
