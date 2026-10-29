@@ -24,7 +24,7 @@ def validate_power_experiment(powers_text, integration_text, bleach_power_text,
 
 def run_power_experiment(coordinates, powers_mw, bleach_power_mw, bleach_ms,
                          settle_ms, scan_direction, cancel, move, set_power,
-                         read_status, acquire, store, progress, checkpoint):
+                         read_status, acquire, store, progress, checkpoint, power_ready=None):
     """Bleach once per point, then acquire each power at one fixed integration time.
 
     Set channel 1 to zero before moving, between points, and on completion/Stop.
@@ -52,7 +52,11 @@ def run_power_experiment(coordinates, powers_mw, bleach_power_mw, bleach_ms,
             if bleach_ms:
                 progress(f'Photobleaching point {point_index + 1}: {bleach_power_mw:g} mW, {bleach_ms:g} ms')
                 set_power(bleach_power_mw)
-                if cancel.wait(settle_ms / 1000) or cancel.wait(bleach_ms / 1000):
+                if cancel.wait(settle_ms / 1000):
+                    break
+                if power_ready is not None:
+                    power_ready(bleach_power_mw)
+                if cancel.wait(bleach_ms / 1000):
                     break
             for power_index, power in enumerate(powers_mw):
                 if cancel.is_set():
@@ -62,6 +66,8 @@ def run_power_experiment(coordinates, powers_mw, bleach_power_mw, bleach_ms,
                 set_power(power)
                 if cancel.wait(settle_ms / 1000):
                     break
+                if power_ready is not None:
+                    power_ready(power)
                 status = read_status()
                 if (not status.enabled or not status.channel_setpoints_mw or
                         not math.isclose(status.channel_setpoints_mw[0], power, rel_tol=0, abs_tol=0.00051)):

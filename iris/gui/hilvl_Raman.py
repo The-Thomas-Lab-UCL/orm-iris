@@ -32,6 +32,7 @@ from iris.utils.general import *
 from iris.utils.experiment_naming import build_integration_map_names, build_power_map_names
 from iris.utils.integration_experiment import validate_experiment_settings, run_pointwise_experiment
 from iris.utils.power_experiment import validate_power_experiment, run_power_experiment
+from iris.utils.laser_monitor import BackgroundLaserMonitor
 from iris.data import SaveParamsEnum
 
 from iris.gui.motion_video import Frm_MotionController
@@ -541,6 +542,10 @@ class Frm_HighLvlController_Raman(tk.Frame):
                         coordinates=coordinates, integration_times_ms=times,
                         photobleach_delay_ms=delay, scan_method=scan_method,
                         scan_direction=scan_direction, map_names=names)
+            laser_panel = getattr(self, '_laser_panel', None)
+            monitoring = laser_panel is not None and laser_panel.controller.connected
+            plan.update(laser_monitoring='background' if monitoring else 'no_laser_connection',
+                        laser_monitor_interval_ms=500)
             if experiment_kind == 'laser_power':
                 plan.update(power_settings)
                 plan.update(laser_serial=self._laser_panel.controller.profile.expected_serial,
@@ -565,8 +570,8 @@ class Frm_HighLvlController_Raman(tk.Frame):
         self._power_laser_reserved = False
         units = [MeaRMap_Unit(name) for name in names]
         try:
-            if experiment_kind == 'laser_power':
-                self._laser_panel.reserve_for_experiment()
+            if monitoring:
+                self._laser_panel.reserve_for_experiment(require_power_control=experiment_kind == 'laser_power')
                 self._power_laser_reserved = True
             # All names were checked as a group; never allow automatic renaming.
             hub = self._dataHub_map.get_MappingHub()
@@ -635,6 +640,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
         """Worker: no Tk calls. Results are acknowledged by the Tk polling loop."""
         error = None
         completed = 0
+        monitor = None
 
         def store(index, coordinate, result):
             reply = queue.Queue(maxsize=1)
@@ -656,6 +662,14 @@ class Frm_HighLvlController_Raman(tk.Frame):
 
         try:
             self.raman_controller.pause_auto_measurement()
+            if plan.get('laser_monitoring') == 'background':
+                panel = self._laser_panel
+                monitor = BackgroundLaserMonitor(
+                    panel.submit_status_for_monitor, panel.controller.last_status,
+                    self._experiment_cancel, self._experiment_recovery_dir,
+                    power_sweep=plan.get('experiment_kind') == 'laser_power',
+                    interval_s=plan.get('laser_monitor_interval_ms', 500) / 1000)
+                monitor.start()
             if plan.get('experiment_kind') == 'laser_power':
                 panel = self._laser_panel
                 laser = panel.controller
@@ -663,12 +677,18 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 execute(laser.prepare_power_experiment)
 
                 def set_power(value):
-                    return execute(lambda: laser.set_power_mw(value))
+                    if monitor is not None:
+                        monitor.transition()
+                    status = execute(lambda: laser.set_power_mw(value))
+                    if monitor is not None and value == 0:
+                        monitor.stable_at(0)
+                    return status
 
                 def acquire_at_power(value):
-                    return self.raman_controller.acquire_experiment_spectrum(
+                    operation = lambda: self.raman_controller.acquire_experiment_spectrum(
                         plan['integration_time_ms'], laser_power_mw=value,
                         laser_wavelength_nm=plan['laser_wavelength_nm'])
+                    return monitor.acquire(operation) if monitor is not None else operation()
 
                 def store_at_power(index, coordinate, result, status):
                     store(index, coordinate, result)
@@ -688,16 +708,29 @@ class Frm_HighLvlController_Raman(tk.Frame):
                     plan['photobleach_duration_ms'], plan['power_settle_ms'], plan['scan_direction'],
                     self._experiment_cancel, self.motion_controller.move_for_experiment,
                     set_power, lambda: execute(laser.prepare_power_experiment), acquire_at_power, store_at_power,
-                    lambda text: self._experiment_events.put(('progress', text)), checkpoint)
+                    lambda text: self._experiment_events.put(('progress', text)), checkpoint,
+                    power_ready=monitor.stable_at if monitor is not None else None)
             else:
+                def acquire_at_time(value):
+                    operation = lambda: self.raman_controller.acquire_experiment_spectrum(value)
+                    return monitor.acquire(operation) if monitor is not None else operation()
                 completed = run_pointwise_experiment(
                     plan['coordinates'], plan['integration_times_ms'], plan['photobleach_delay_ms'],
                     plan['scan_direction'], self._experiment_cancel, self.motion_controller.move_for_experiment,
-                    self.raman_controller.acquire_experiment_spectrum, store,
+                    acquire_at_time, store,
                     lambda text: self._experiment_events.put(('progress', text)), checkpoint)
         except Exception as failure:
             error = str(failure)
         finally:
+            if monitor is not None:
+                try:
+                    monitor.stop()
+                    if monitor.fault:
+                        error = (error + '\n' if error else '') + (
+                            f'Background laser monitor: {monitor.fault} '
+                            'Check laser_quality.json for suspect or unobserved spectra.')
+                except Exception as failure:
+                    error = (error + '\n' if error else '') + f'Laser monitoring log failed: {failure}'
             completed = min(unit.get_numMeasurements() for unit in units)
             try:
                 self.raman_controller._controller.set_integration_time_us(original_us)
@@ -758,6 +791,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
                    'Use Data Hubs to save/export the named maps.')
         if getattr(self, '_active_experiment_kind', None) == 'laser_power' and not error:
             details += '\nChannel 1 setpoint is 0 mW; the emission switch is unchanged.'
+        details += '\nIf a laser was connected, background status and coverage are saved in laser_quality.json.'
         title = getattr(self, '_active_experiment_title', 'Integration time experiment')
         if error:
             messagebox.showerror(title, f'{error}\n\n{details}')

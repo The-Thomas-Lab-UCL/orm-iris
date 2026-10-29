@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import tempfile
+import threading
 import time
 from types import SimpleNamespace
 import unittest
@@ -166,7 +167,8 @@ class PowerUIFlowTests(unittest.TestCase):
                                 _status=SimpleNamespace(set=lambda value: None),
                                 _readback=SimpleNamespace(set=lambda value: None),
                                 _update_controls=Mock(), refresh=Mock())
-        for method in ('reserve_for_experiment', 'execute_for_experiment', 'release_from_experiment'):
+        for method in ('reserve_for_experiment', 'execute_for_experiment', 'release_from_experiment',
+                       'submit_status_for_monitor'):
             setattr(panel, method, getattr(Frm_IBeamStatus, method).__get__(panel))
         frame._laser_panel = panel
         self.addCleanup(panel._executor.shutdown, wait=True)
@@ -182,11 +184,11 @@ class PowerUIFlowTests(unittest.TestCase):
         frame._power_settings = Frm_HighLvlController_Raman._power_settings.__get__(frame)
         return frame, hub, device, callbacks
 
-    def execute_frame(self, frame, callbacks, autosave):
+    def execute_frame(self, frame, callbacks, autosave, kind='laser_power'):
         with patch.object(raman_gui, 'SaveParamsEnum', SimpleNamespace(AUTOSAVE_PATH=SimpleNamespace(value=autosave))), \
                 patch.object(raman_gui.messagebox, 'showinfo') as showinfo, \
                 patch.object(raman_gui.messagebox, 'showerror') as showerror:
-            frame.start_integration_experiment('laser_power')
+            frame.start_integration_experiment(kind)
             deadline = time.monotonic() + 15
             while frame._experiment_thread is not None and time.monotonic() < deadline:
                 pending, callbacks[:] = callbacks[:], []
@@ -221,9 +223,49 @@ class PowerUIFlowTests(unittest.TestCase):
             settings = json.loads((folder / 'settings.json').read_text())
             self.assertEqual(settings['photobleach_power_mw'], 15.)
             self.assertEqual(settings['photobleach_duration_ms'], 250.)
+            quality = json.loads((folder / 'laser_quality.json').read_text())
+            self.assertEqual(len(quality['spectra']), 8)
+            self.assertIsNone(quality['fault'])
         self.assertEqual(device.commands, [0., 15., 20., 40., 0.] * 4 + [0.])
         self.assertFalse(frame._laser_panel._experiment_reserved)
         self.assertEqual(frame.raman_controller.display_experiment_spectrum.call_count, 8)
+
+    def test_integration_run_monitors_without_power_commands(self):
+        frame, _, device, callbacks = self.make_frame()
+        with tempfile.TemporaryDirectory() as autosave:
+            _, showerror = self.execute_frame(frame, callbacks, autosave, kind='integration')
+            showerror.assert_not_called()
+            folder = Path(frame._experiment_recovery_dir)
+            settings = json.loads((folder / 'settings.json').read_text())
+            self.assertEqual(settings['laser_monitoring'], 'background')
+            quality = json.loads((folder / 'laser_quality.json').read_text())
+            self.assertEqual(len(quality['spectra']), 8)
+            self.assertIsNone(quality['fault'])
+            self.assertTrue((folder / 'laser_monitor.jsonl').exists())
+        self.assertEqual(device.commands, [])
+        self.assertTrue(device.enabled)
+        self.assertFalse(frame._laser_panel._experiment_reserved)
+
+    def test_laser_loss_during_exposure_is_retained_and_flagged(self):
+        frame, hub, device, callbacks = self.make_frame()
+        frame._experiment_cancel = threading.Event()
+        original = frame.raman_controller.acquire_experiment_spectrum
+        def acquire(value, **kwargs):
+            if value == 500:
+                device.enabled = False
+                self.assertTrue(frame._experiment_cancel.wait(2))
+            return original(value, **kwargs)
+        frame.raman_controller.acquire_experiment_spectrum = acquire
+        with tempfile.TemporaryDirectory() as autosave:
+            _, showerror = self.execute_frame(frame, callbacks, autosave, kind='integration')
+            showerror.assert_called_once()
+            self.assertIn('Background laser monitor', showerror.call_args.args[1])
+            quality = json.loads((Path(frame._experiment_recovery_dir) / 'laser_quality.json').read_text())
+            self.assertEqual(len(quality['spectra']), 2)
+            self.assertEqual(quality['spectra'][1]['laser_quality'], 'suspect_laser_fault')
+            self.assertEqual(hub.get_MappingUnit(unit_name='region_500ms').get_numMeasurements(), 1)
+        self.assertFalse(device.enabled)
+        self.assertEqual(device.commands, [])
 
     def test_communication_failure_preserves_partial_map(self):
         frame, _, device, callbacks = self.make_frame()

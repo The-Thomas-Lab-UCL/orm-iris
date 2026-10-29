@@ -126,14 +126,16 @@ class Frm_IBeamStatus(tk.Frame):
         profile = replace(self._profiles[self._profile_name.get()], port=self._port.get().strip())
         self._submit(lambda: self.controller.connect(profile, self._baudrate), 'Connecting...', 'connect')
 
-    def reserve_for_experiment(self):
+    def reserve_for_experiment(self, require_power_control=True):
         """Called on Tk thread; reserve the serial executor for acquisition."""
         if self._closing or self._future is not None or self._experiment_reserved:
             raise ValueError('Wait for the current laser operation to finish.')
-        if not self.controller.power_control_available:
+        if not self.controller.connected:
+            raise ValueError('Connect the laser in the Laser tab first.')
+        if require_power_control and not self.controller.power_control_available:
             raise ValueError('Connect a serial-verified laser in the Laser tab first.')
         self._experiment_reserved = True
-        self._status.set('Laser reserved for power experiment.')
+        self._status.set('Laser connection reserved for mapping experiment.')
         self._update_controls()
 
     def execute_for_experiment(self, operation):
@@ -141,6 +143,12 @@ class Frm_IBeamStatus(tk.Frame):
         if not self._experiment_reserved or self._closing:
             raise RuntimeError('The laser is not reserved for this experiment.')
         return self._executor.submit(operation).result()
+
+    def submit_status_for_monitor(self):
+        """Submit one asynchronous read without waiting in the acquisition loop."""
+        if not self._experiment_reserved or self._closing:
+            raise RuntimeError('Laser connection unavailable for monitoring.')
+        return self._executor.submit(self.controller.read_monitor_status)
 
     def release_from_experiment(self):
         """Called on Tk thread after the acquisition worker has finished."""

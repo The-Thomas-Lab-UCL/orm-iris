@@ -42,6 +42,15 @@ class ReadOnlyLaserTests(unittest.TestCase):
         self.controller.close()
         self.device.close.assert_not_called()
 
+    def test_background_read_reuses_identity_without_power_commands(self):
+        self.controller.connect(self.profile)
+        self.device.get_device_info.reset_mock()
+        status = self.controller.read_monitor_status()
+        self.assertEqual(status.serial, '12345')
+        self.assertEqual(status.channel_enabled, (True, False))
+        self.device.get_device_info.assert_not_called()
+        self.device.set_channel_power.assert_not_called()
+
     def test_connection_reads_without_output_commands(self):
         status = self.controller.connect(self.profile)
         self.factory.assert_called_once_with(('COM4', 115200))

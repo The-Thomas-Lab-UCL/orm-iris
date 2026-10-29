@@ -141,21 +141,37 @@ class IBeamController:
             info = self._device.get_device_info()
             if self.profile.expected_serial and str(info.serial) != self.profile.expected_serial:
                 raise ValueError('The laser serial number does not match the selected profile.')
-            powers = tuple(self._mw(value) for value in self._device.get_channel_power(channel='all'))
-            channel_enabled = tuple(self._device.is_channel_enabled(channel='all'))
-            if (not powers or len(powers) != len(channel_enabled) or
-                    not all(isinstance(value, bool) for value in channel_enabled)):
-                raise ValueError('The laser returned incomplete channel enable states.')
-            status = IBeamStatus(
-                serial=str(info.serial), firmware=str(info.version),
-                enabled=bool(self._device.is_enabled()),
-                output_mw=self._mw(self._device.get_output_power()),
-                channel_setpoints_mw=powers, channel_enabled=channel_enabled)
-            self._last_status = status
-            return status
+            return self._read_operating_status(str(info.serial), str(info.version))
         except Exception:
             self.close()
             raise
+
+    def read_monitor_status(self):
+        """Read operating state using cached identity to reduce serial traffic.
+
+        Run on the same serial executor as power commands. Power changes still
+        use read_status() to verify device identity immediately before writing.
+        """
+        if not self.connected or self._last_status is None:
+            raise RuntimeError('Laser connection unavailable for background monitoring.')
+        try:
+            return self._read_operating_status(self._last_status.serial, self._last_status.firmware)
+        except Exception:
+            self.close()
+            raise
+
+    def _read_operating_status(self, serial, firmware):
+        powers = tuple(self._mw(value) for value in self._device.get_channel_power(channel='all'))
+        channel_enabled = tuple(self._device.is_channel_enabled(channel='all'))
+        if (not powers or len(powers) != len(channel_enabled) or
+                not all(isinstance(value, bool) for value in channel_enabled)):
+            raise ValueError('The laser returned incomplete channel enable states.')
+        status = IBeamStatus(serial=serial, firmware=firmware,
+                            enabled=bool(self._device.is_enabled()),
+                            output_mw=self._mw(self._device.get_output_power()),
+                            channel_setpoints_mw=powers, channel_enabled=channel_enabled)
+        self._last_status = status
+        return status
 
     def close(self):
         device, self._device = self._device, None
