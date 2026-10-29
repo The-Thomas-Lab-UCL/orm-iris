@@ -408,7 +408,7 @@ class Frm_RamanSpectrometerController(tk.Frame):
         Returns:
             bool: True if any of the scanning operations are running
         """
-        return self._flg_isrunning.is_set()
+        return self._flg_isrunning.is_set() or getattr(self, '_laser_power_busy', False)
     
     def _get_plot_limits(self) -> tuple[float|None,float|None,float|None,float|None]:
         """
@@ -892,6 +892,90 @@ class Frm_RamanSpectrometerController(tk.Frame):
         """
         return self._ramanHub.get_measurement
     
+    def display_experiment_spectrum(self, measurement):
+        """Request a live plot from the Tk thread without waiting for rendering.
+
+        Keep the latest pending spectrum if acquisition outruns plotting. This
+        bounds display work while every acquired spectrum is still stored.
+        """
+        self._sgl_measurement = measurement
+        self._pending_experiment_spectrum = measurement
+        if getattr(self, '_experiment_plot_results', None) is None:
+            self._start_experiment_spectrum_plot()
+
+    def _start_experiment_spectrum_plot(self):
+        measurement = self._pending_experiment_spectrum
+        self._pending_experiment_spectrum = None
+        try:
+            raw_only = self._bool_PlotRawOnly.get()
+            plot_options = {'flg_plot_ramanshift': self._bool_PlotRamanShift.get()}
+            self._last_plotter_input = dict(
+                measurement=measurement, plot_add_kwargs=plot_options, type='raw' if raw_only else 'avg')
+            if not raw_only:
+                self._last_plotter_input.update(raw_list=measurement.get_raw_list(), idx=0)
+            integration_time = measurement.get_metadata()['integration_time_ms']
+            laser_power = measurement.get_metadata()['laser_power_milliwatt']
+            description = f'{integration_time:g} ms, {laser_power:g} mW'
+            height = self._img_size[1] if raw_only else int(self._img_size[1] / 2)
+            parameters = dict(measurement=measurement, limits=self._get_plot_limits(),
+                              plt_size=(self._img_size[0], height), **plot_options)
+            results = [self._processor.apply_async(
+                self._plotter.plot_RamanMeasurement,
+                kwds=dict(parameters, plot_raw=True, title=f'Raw spectrum ({description})'))]
+            if not raw_only:
+                results.append(self._processor.apply_async(
+                    self._plotter.plot_RamanMeasurement,
+                    kwds=dict(parameters, plot_raw=False, title=f'Spectrum ({description})')))
+            self._experiment_plot_results = results
+            self.after(25, self._poll_experiment_spectrum_plot)
+        except Exception as error:
+            self._experiment_plot_results = None
+            print(f'Experiment spectrum display failed: {error}')
+
+    def _poll_experiment_spectrum_plot(self):
+        results = self._experiment_plot_results
+        if not all(result.ready() for result in results):
+            self.after(25, self._poll_experiment_spectrum_plot)
+            return
+        try:
+            plots = [result.get() for result in results]
+            self._queue_plot_display.put(plots[0] if len(plots) == 1 else np.concatenate(plots, axis=0))
+        except Exception as error:
+            print(f'Experiment spectrum display failed: {error}')
+        finally:
+            self._experiment_plot_results = None
+        if self._pending_experiment_spectrum is not None:
+            self._start_experiment_spectrum_plot()
+
+    def get_experiment_integration_limits_us(self):
+        """Return device limits without changing its current integration time."""
+        return self._controller.get_integration_time_limits_us()
+
+    def acquire_experiment_spectrum(self, integration_time_ms, laser_power_mw=None, laser_wavelength_nm=None):
+        """Acquire exactly one spectrum synchronously, without touching Tk widgets.
+
+        The caller owns the spectrometer for the experiment and pauses automatic
+        measurements first. Exceptions propagate to the experiment worker.
+        """
+        requested_us = round(integration_time_ms * 1000)
+        actual_us = self._controller.set_integration_time_us(requested_us)
+        if not np.isclose(actual_us, requested_us, rtol=0, atol=0.5):
+            raise ValueError(f'Spectrometer selected {actual_us / 1000:g} ms '
+                             f'instead of {integration_time_ms:g} ms.')
+        result = self._ramanHub.get_single_measurement()
+        if result is None:
+            raise RuntimeError('The spectrometer returned no calibrated spectrum.')
+        timestamp, spectrum, actual_ms = result
+        if not np.isclose(actual_ms * 1000, requested_us, rtol=0, atol=0.5):
+            raise ValueError('The spectrum integration time differs from the requested time.')
+        measurement = MeaRaman(
+            timestamp=int(timestamp), int_time_ms=integration_time_ms,
+            laserPower_mW=self._laserpower_mW if laser_power_mw is None else laser_power_mw,
+            laserWavelength_nm=self._laserwavelength_nm if laser_wavelength_nm is None else laser_wavelength_nm)
+        measurement.set_raw_list(df_mea=spectrum, timestamp_int=int(timestamp))
+        measurement.check_uptodate(autoupdate=True)
+        return int(timestamp), measurement
+
     def pause_auto_measurement(self):
         """
         Pauses the auto-measurement in the RamanHub

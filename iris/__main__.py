@@ -14,6 +14,7 @@ from tkinter import messagebox
 
 from iris.gui.motion_video import Frm_MotionController
 from iris.gui.raman import Frm_RamanSpectrometerController
+from iris.gui.laser_status import Frm_IBeamStatus
 from iris.gui.hilvl_Raman import Frm_HighLvlController_Raman
 from iris.gui.dataHub_MeaRMap import Frm_DataHub_Mapping
 from iris.gui.dataHub_MeaImg import Frm_DataHub_Image, Frm_DataHub_ImgCal
@@ -164,6 +165,11 @@ class controller_app(tk.Tk):
             stageHub=self._stageHub,
             coorHub=self._coorHub)
         
+        self._laser = Frm_IBeamStatus(
+            notebook, acquisition_busy=self._laser_acquisition_busy,
+            power_busy_changed=lambda busy: setattr(self._raman, '_laser_power_busy', busy))
+        self._hilvl_raman._laser_panel = self._laser
+
         ## Pack the subframes
         self._motion.grid(row=0,column=0,sticky='nsew')
         self._raman.grid(row=0,column=0,sticky='nsew')
@@ -171,6 +177,7 @@ class controller_app(tk.Tk):
         notebook.add(self._hilvl_coorGen,text='Coordinate generator')
         notebook.add(self._hilvl_raman,text='Raman imaging')
         notebook.add(self._hilvl_brightfield,text='Brightfield imaging')
+        notebook.add(self._laser,text='Laser')
         notebook.add(sfrm_dataHub,text='Data Hubs')
         
         # Grid configurations
@@ -264,6 +271,13 @@ class controller_app(tk.Tk):
         self._shortcutHandler = ShortcutHandler()
         self._set_keybindings()
         
+    def _laser_acquisition_busy(self):
+        mapping = self._hilvl_raman
+        buttons = mapping._list_shortcut_widgets + [
+            mapping._btn_perform_discreetMapping_multi, mapping._btn_perform_continuousMapping_multi]
+        return (self._raman.get_running_status() or mapping._experiment_thread is not None
+                or any(button.cget('text') == 'STOP' for button in buttons))
+
     def _set_keybindings(self):
         """
         Set up the keybindings for the main controller
@@ -365,6 +379,10 @@ class controller_app(tk.Tk):
     @thread_assign
     def terminate(self):
         print('\n>>>>>>>>>> Terminating the program <<<<<<<<<<')
+        try: self._hilvl_raman.terminate()
+        except Exception as e: print('Error in closing the high level controller:\n{}'.format(e))
+        try: self._laser.terminate()
+        except Exception as e: print('Error in closing the laser connection:\n{}'.format(e))
         try: self._dataHub_map.terminate()
         except Exception as e: print('Error in closing the data hub:\n{}'.format(e))
         
@@ -373,9 +391,6 @@ class controller_app(tk.Tk):
         
         try: self._hilvl_coorGen.terminate()
         except Exception as e: print('Error in closing the coordinate hub:\n{}'.format(e))
-        
-        try: self._hilvl_raman.terminate()
-        except Exception as e: print('Error in closing the high level controller:\n{}'.format(e))
         
         try: [toplevel_extension.withdraw() for toplevel_extension in self._list_extensions_toplevel if isinstance(toplevel_extension,tk.Toplevel)]
         except Exception as e: print('Error in closing the extensions:\n{}'.format(e))

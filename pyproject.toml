@@ -25,6 +25,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+toptica = [
+    "pylablib>=1.4.5",
+]
 zaber = [
     "zaber_motion~=6.5.0",
 ]

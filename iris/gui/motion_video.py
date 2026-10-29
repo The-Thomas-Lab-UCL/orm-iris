@@ -10,6 +10,7 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox,filedialog
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import queue
 
 from PIL import Image, ImageTk, ImageDraw, ImageFont
@@ -724,6 +725,18 @@ class Frm_MotionController(tk.Frame):
         self.ent_coor_y.delete(0,tk.END)
         self.ent_coor_z.delete(0,tk.END)
     
+    def move_for_experiment(self, coordinate):
+        """Move both stages and propagate driver failures without accessing Tk.
+
+        Both move_direct calls block until their motion completes. Wait for both
+        before propagating a failure, so cleanup never overlaps another move.
+        """
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            xy_move = executor.submit(self.ctrl_xy.move_direct, tuple(coordinate[:2]))
+            z_move = executor.submit(self.ctrl_z.move_direct, coordinate[2])
+            xy_move.result()
+            z_move.result()
+
     def isontarget_gotocoor(self) -> bool:
         """
         Returns the status of the target reached for the go to coordinates
@@ -856,6 +869,8 @@ class Frm_MotionController(tk.Frame):
             'xyhome' and 'zhome' are for calibrating and homing the xy and z stage respectively.
             Note that 'xstop' and 'ystop' will stop both x and y motors.
         """
+        if getattr(self, '_integration_experiment_running', False):
+            return
         if self._bool_jog_enabled.get(): self.move_jog(dir); return
         
         if dir in ['yfwd','xfwd','yrev','xrev']:
