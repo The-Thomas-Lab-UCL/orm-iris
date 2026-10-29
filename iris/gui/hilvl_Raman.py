@@ -800,6 +800,13 @@ class Frm_HighLvlController_Raman(tk.Frame):
         retry_flag = False
         self._flg_meaCancelled = False
         i=0
+        
+        # HENRY BRISEBOIS EDIT
+        pixel_settle_s = 0.2
+        row_settle_s = 0.75
+        previous_y = None
+        
+        
         while i < len(mapping_coordinates):
             coor = mapping_coordinates[i]
             try:
@@ -846,6 +853,18 @@ class Frm_HighLvlController_Raman(tk.Frame):
                     print('Target coordinate not reached, retrying once')
                     continue
                 retry_flag = False
+                
+                # HENRY BRISEBOIS - Extra settling delay after stage reports target reached
+                current_y = float(coor[1])
+                if previous_y is None:
+                    time.sleep(row_settle_s)
+                elif not np.isclose(current_y, previous_y):
+                    time.sleep(row_settle_s)
+                else:
+                    time.sleep(pixel_settle_s)
+                
+                previous_y = current_y
+                #time.sleep(0.25)
                 
                 timestamp = get_timestamp_us_int()
                 

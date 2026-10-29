@@ -362,6 +362,7 @@ class XYController_Zaber(Class_XYController):
         
         print("\n!!!!! Coordinate calibration/Homing starting !!!!!")
         # Home the device, use multithreading to operate both motors at once
+       
         with self._lock:
             self.motorx_state = 1
             self.motory_state = 1
@@ -374,6 +375,7 @@ class XYController_Zaber(Class_XYController):
             self.motorx_state = 0
             self.motory_state = 0
         print(">>>>> Coordinate calibration/Homing finished <<<<<")
+      
 
     
     def move_direct(self,coor_abs:tuple[float,float]):
