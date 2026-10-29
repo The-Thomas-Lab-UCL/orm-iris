@@ -256,6 +256,7 @@ class StorageAndWorkerTests(unittest.TestCase):
         motion = SimpleNamespace(ctrl_xy=SimpleNamespace(move_direct=fail),
                                  ctrl_z=SimpleNamespace(move_direct=lambda coordinate: None))
         with self.assertRaisesRegex(RuntimeError, 'stage disconnected'):
+            motion._check_mapping_motion_idle = lambda: Frm_MotionController._check_mapping_motion_idle(motion)
             Frm_MotionController.move_for_experiment(motion, (0., 0., 0.))
 
 

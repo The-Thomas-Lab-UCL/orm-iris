@@ -33,6 +33,7 @@ from iris.utils.experiment_naming import build_integration_map_names, build_powe
 from iris.utils.integration_experiment import validate_experiment_settings, run_pointwise_experiment
 from iris.utils.power_experiment import validate_power_experiment, run_power_experiment
 from iris.utils.laser_monitor import BackgroundLaserMonitor
+from iris.utils.mapping_waits import wait_for_buffer
 from iris.data import SaveParamsEnum
 
 from iris.gui.motion_video import Frm_MotionController
@@ -501,6 +502,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
         if self._experiment_thread is not None:
             return
         try:
+            Frm_HighLvlController_Raman._check_standard_mapping_idle(self)
             mapping_buttons = self._list_shortcut_widgets + [
                 self._btn_perform_discreetMapping_multi, self._btn_perform_continuousMapping_multi]
             if self.raman_controller.get_running_status() or any(
@@ -967,6 +969,12 @@ class Frm_HighLvlController_Raman(tk.Frame):
         NOTE:
             Assumes that the mapping coordinate will be followed as a pathway
         """
+        try:
+            self._check_standard_mapping_idle()
+            self.motion_controller._check_mapping_motion_idle()
+        except RuntimeError as failure:
+            messagebox.showwarning('Previous mapping still running', str(failure))
+            return False
         # Running status check
         if self.raman_controller.get_running_status():
             messagebox.showwarning('Raman controller is running',
@@ -1046,7 +1054,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
         self.flg_isrunning_mapping = False
         self.status_update(message='Aborting run',bg_colour='red')
         
-        self.after(10,btn.configure(state='active',text=text,command=command,bg=self.bg_colour))
+        self.after(10, lambda: btn.configure(state='disabled', text='Stopping...'))
     
     def reset_mapping_widgets(self,btn:tk.Button,text:str,command:Callable):
         """
@@ -1059,7 +1067,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
         """
         self._enable_mapping_widgets()
         self.motion_controller.video_initialise()
-        btn.configure(text=text,command=command,bg=self.bg_colour)
+        btn.configure(state='normal',text=text,command=command,bg=self.bg_colour)
         self.status_update()
     
     def _scramble_mapping_coordinates(self, list_mappingCoor:list, mode:Literal['discreet','continuous']) -> list:
@@ -1174,9 +1182,10 @@ class Frm_HighLvlController_Raman(tk.Frame):
             messagebox.showerror('Error',f"Failed to perform mapping: {e}")
             self.status_update('Error in mapping measurement',bg_colour='red')
             self._dataHub_map.update_tree()
+            reset()
             return
         
-        messagebox.showinfo('Mapping measurement complete','The mapping measurement is complete and added to the data hub')
+        messagebox.showinfo('Mapping measurement', 'Scan stopped; collected spectra are retained in the data hub.' if self._flg_meaCancelled else 'The mapping measurement is complete and added to the data hub')
         reset()
         
     @thread_assign
@@ -1224,13 +1233,14 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 messagebox.showerror('Error',f"Failed to perform mapping: {e}")
                 self.status_update('Error in mapping measurement',bg_colour='red')
                 self._dataHub_map.update_tree()
-                break
+                reset()
+                return
             
             if not self._flg_meaCancelled: self._coorHub.remove_mappingCoor(mappingUnit_name)
             
             self.status_update('Mapping measurement complete')
             
-        messagebox.showinfo('Mapping measurement complete','The mapping measurement is complete and added to the data hub')
+        messagebox.showinfo('Mapping measurement', 'Scan stopped; collected spectra are retained in the data hub.' if self._flg_meaCancelled else 'The mapping measurement is complete and added to the data hub')
         reset()
         
     def _perform_discreetMapping(self, mapping_hub:MeaRMap_Hub,mapping_coordinates:list, unit_name:str):
@@ -1305,8 +1315,64 @@ class Frm_HighLvlController_Raman(tk.Frame):
                     measurement=measurement
                 )
             except Exception as e:
-                print('Error in autosaver:',e)
-                self.status_update('Error in autosaver',bg_colour='red')
+                self._mapping_pending_results.append(result)
+                self._mapping_save_errors.put(e)
+                return
+
+    def _check_standard_mapping_idle(self):
+        if getattr(self, '_standard_mapping_active', False):
+            raise RuntimeError('Mapping cleanup is still running. Wait before starting another scan.')
+        if any(worker.is_alive() for worker in getattr(self, '_standard_mapping_workers', ())):
+            raise RuntimeError('Previous mapping acquisition or saving is still running. '
+                               'Wait for cleanup or recover the device connection before another scan.')
+
+    def _check_mapping_saver(self):
+        for failures, label in ((self._mapping_save_errors, 'data saver'),
+                                (self._mapping_producer_errors, 'spectrometer worker')):
+            try:
+                failure = failures.get_nowait()
+            except queue.Empty:
+                continue
+            failures.put(failure)
+            raise RuntimeError(f'Mapping {label} failed: {failure}') from failure
+
+    def _finish_standard_mapping(self, coordinates, index, unit_name, saver):
+        self._flg_meaCancelled = (index < len(coordinates) or
+                                 not self._mapping_save_errors.empty() or
+                                 not self._mapping_producer_errors.empty())
+        self.motion_controller.enable_controls()
+        self._dataHub_map.update_tree()
+        if saver.is_alive():
+            self._flg_meaCancelled = True
+            raise RuntimeError('Mapping data saver has not stopped; partial data and coordinate offload retained.')
+        # Partial continuous lines must be repeated from their start endpoint.
+        remaining_index = min(index, max(0, len(coordinates) - 1))
+        if getattr(self, '_standard_mapping_continuous', False) and remaining_index % 2:
+            remaining_index -= 1
+        remaining = coordinates[remaining_index:] if self._flg_meaCancelled else []
+        if remaining:
+            name = unit_name + '_remaining_' + get_timestamp_us_str()
+            self._coorHub.append(MeaCoor_mm(name, remaining))
+        # Snapshot data without copying Tk observers, using the experiment format.
+        autosave_dir = os.path.abspath(SaveParamsEnum.AUTOSAVE_PATH.value)
+        os.makedirs(autosave_dir, exist_ok=True)
+        recovery = tempfile.mkdtemp(prefix='mapping_recovery_', dir=autosave_dir)
+        self._mapping_recovery_dir = recovery
+        snapshot = MeaRMap_Hub()
+        if self.measurement_data_2D_unit.get_numMeasurements():
+            snapshot.append_mapping_unit(self.measurement_data_2D_unit.copy(flg_newID=False))
+        with open(os.path.join(recovery, 'maps.pkl'), 'xb') as output:
+            dill.dump(snapshot, output)
+        with open(os.path.join(recovery, 'remaining_coordinates.json'), 'x', encoding='utf-8') as output:
+            json.dump([list(map(float, coordinate)) for coordinate in remaining], output)
+        # Preserve raw results that a failed saver could not append.
+        pending = self._mapping_pending_results + list(self._mapping_result_queue.queue)
+        if pending:
+            with open(os.path.join(recovery, 'pending_results.pkl'), 'xb') as output:
+                dill.dump(pending, output)
+        print(f'Mapping recovery saved to: {recovery}')
+        self._check_mapping_saver()
+        self._frm_coorHub_treeview.delete_offload_mappingCoor(unit_name)
     
     def _scan_discreet(self, mapping_coordinates:list):
         total_coordinates = len(mapping_coordinates)  # Total number of coordinates
@@ -1324,141 +1390,127 @@ class Frm_HighLvlController_Raman(tk.Frame):
             'flg_isrunning':flg_isrunning_autosaver,
             'queue_measurement':queue_measurement
         })
+        self._mapping_save_errors = queue.Queue()
+        self._mapping_producer_errors = queue.Queue()
+        self._mapping_pending_results = []
+        self._standard_mapping_continuous = False
+        self._mapping_result_queue = queue_measurement
+        self._standard_mapping_workers = [thread_autosaver]
+        self._standard_mapping_active = True
         thread_autosaver.start()
-        
         unit_name = self.measurement_data_2D_unit.get_unit_name()
-        thread_offload = self._frm_coorHub_treeview.offload_mappingCoor(unit_name,mapping_coordinates,0)
+        i = 0
+        try:
         
-        # Go through all the coordinates
-        self.status_update('Performing mapping: 1 of {}'.format(total_coordinates),bg_colour='yellow')
-        self.motion_controller.disable_controls()
-        retry_flag = False
-        self._flg_meaCancelled = False
-        i=0
+            thread_offload = self._frm_coorHub_treeview.offload_mappingCoor(unit_name,mapping_coordinates,0)
         
-        # HENRY BRISEBOIS EDIT
-        pixel_settle_s = 0.2
-        row_settle_s = 0.75
-        previous_y = None
+            # Go through all the coordinates
+            self.status_update('Performing mapping: 1 of {}'.format(total_coordinates),bg_colour='yellow')
+            self.motion_controller.disable_controls()
+            self._flg_meaCancelled = False
         
-        
-        while i < len(mapping_coordinates):
-            coor = mapping_coordinates[i]
-            try:
-                # Wait for the previous batch processing to finish
-                q_size = queue_measurement.qsize()
-                if q_size > AppRamanEnum.CONTINUOUS_MEASUREMENT_BUFFER_SIZE.value:
-                    while not queue_measurement.empty():
-                        print(f'Measurement buffer full:\nAdjust [APP - RAMAN MEASUREMENT CONTROLLER] "continuous_measurement_buffer_size"\nin the config.ini file to adjust the buffer size')
-                        self.status_update(f'Measurement buffer full: Processing previous measurements {q_size} remaining',bg_colour='yellow')
-                        time.sleep(0.1)
-                        if queue_measurement.qsize() < q_size: q_size = queue_measurement.qsize(); continue
+            # HENRY BRISEBOIS EDIT
+            pixel_settle_s = 0.2
+            row_settle_s = 0.75
+            previous_y = None
+            while i < len(mapping_coordinates):
+                coor = mapping_coordinates[i]
+                try:
+                    if queue_measurement.qsize() > AppRamanEnum.CONTINUOUS_MEASUREMENT_BUFFER_SIZE.value:
+                        if not wait_for_buffer(queue_measurement, thread_autosaver,
+                                               lambda: self.flg_isrunning_mapping):
+                            break
+                    self._check_mapping_saver()
+
+                    # Starts a timer
+                    time_0start = time.time()
+
+                    if not self.flg_isrunning_mapping: break   # Stops the measurement immediately when required.
+                    if i%AppRamanEnum.AUTOSAVE_FREQ_DISCREET.value == 0 and i > 0 and not thread_offload.is_alive():
+                        thread_offload = self._frm_coorHub_treeview.offload_mappingCoor(unit_name,mapping_coordinates,i)
                             
-                        queue_measurement_new = queue.Queue()
-                        self.init_measurement_autosaver(
-                            mapping_unit=self.measurement_data_2D_unit,
-                            flg_isrunning=flg_isrunning_autosaver,
-                            q_measurement_old=queue_measurement,
-                            q_measurement_new=queue_measurement_new,
-                            mode='discreet',
-                            thread_autosaver=thread_autosaver,
-                        )
-                        queue_measurement = queue_measurement_new                    
+                    # Go to the requested coordinates
+                    self.motion_controller.go_to_coordinates(
+                        float(coor[0]), float(coor[1]), float(coor[2]), override_controls=True,
+                        timeout=15.0 + self.raman_controller.get_integration_time_ms() / 1000)
+                    if not self.flg_isrunning_mapping:
+                        break
                 
-                # Starts a timer
-                time_0start = time.time()
+                    if not self.motion_controller.isontarget_gotocoor():
+                        raise RuntimeError('Stage did not confirm the target coordinate; scan stopped.')
                 
-                if not self.flg_isrunning_mapping: break   # Stops the measurement immediately when required.
-                if i%AppRamanEnum.AUTOSAVE_FREQ_DISCREET.value == 0 and i > 0 and not thread_offload.is_alive():
-                    thread_offload = self._frm_coorHub_treeview.offload_mappingCoor(unit_name,mapping_coordinates,i+1)
+                    # HENRY BRISEBOIS - Extra settling delay after stage reports target reached
+                    current_y = float(coor[1])
+                    if previous_y is None:
+                        time.sleep(row_settle_s)
+                    elif not np.isclose(current_y, previous_y):
+                        time.sleep(row_settle_s)
+                    else:
+                        time.sleep(pixel_settle_s)
                 
-                # Go to the requested coordinates
-                thread_movement = threading.Thread(target=self.motion_controller.go_to_coordinates,kwargs=({
-                    'coor_x_mm': float(coor[0]),
-                    'coor_y_mm': float(coor[1]),
-                    'coor_z_mm': float(coor[2]),
-                    'override_controls': True,
-                    }))
-                thread_movement.start()
-                thread_movement.join()
+                    if not self.flg_isrunning_mapping:
+                        break
+                    previous_y = current_y
+                    #time.sleep(0.25)
                 
-                # Check if the target is reached and retry the coordinate if not
-                if not self.motion_controller.isontarget_gotocoor() and not retry_flag:
-                    retry_flag = True
-                    print('Target coordinate not reached, retrying once')
-                    continue
-                retry_flag = False
+                    timestamp = get_timestamp_us_int()
                 
-                # HENRY BRISEBOIS - Extra settling delay after stage reports target reached
-                current_y = float(coor[1])
-                if previous_y is None:
-                    time.sleep(row_settle_s)
-                elif not np.isclose(current_y, previous_y):
-                    time.sleep(row_settle_s)
-                else:
-                    time.sleep(pixel_settle_s)
+                    time_1motion = time.time()
                 
-                previous_y = current_y
-                #time.sleep(0.25)
+                    # Performs the multi-acquisition measurement
+                    response = queue.Queue(maxsize=1)
+                    thread_measurement:threading.Thread=\
+                        self.raman_controller.perform_single_measurement_manual(
+                            widget_override=True, accum='single', queue_response=response)
+                    # Wait for the measurement to be done and obtain the values form the queue
+                    thread_measurement.join()
                 
-                timestamp = get_timestamp_us_int()
+                    # Retrieves the measurement results
+                    try:
+                        _, measurement_multi = response.get_nowait()
+                    except queue.Empty:
+                        raise RuntimeError('Spectrometer worker did not return a completed spectrum; scan stopped.') from None
                 
-                time_1motion = time.time()
+                    # Send the measurement data to the autosaver
+                    queue_measurement.put((timestamp,coor,measurement_multi))
                 
-                # Performs the multi-acquisition measurement
-                thread_measurement:threading.Thread=\
-                    self.raman_controller.perform_single_measurement_manual(widget_override=True,accum='single')
-                # Wait for the measurement to be done and obtain the values form the queue
-                thread_measurement.join()
+                    time_2raman = time.time()
+                    time_total = time_2raman-time_0start
+                    time_raman = time_2raman-time_1motion
+                    time_motion = time_1motion-time_0start
+                    print('Total time: {}s = {}s Motion + {}s Raman\n'.format(time_total,time_motion,time_raman))
                 
-                # Retrieves the measurement results
-                measurement_multi = self.raman_controller.get_single_measurement()
+                    # Estimate the time remaining
+                    list_time_estimation.append(time_total)
+                    num_points = 100
+                    if i < num_points:
+                        time_permea = np.mean(list_time_estimation)
+                    else:
+                        time_permea = np.mean(list_time_estimation[i-num_points:i])
                 
-                # Send the measurement data to the autosaver
-                queue_measurement.put((timestamp,coor,measurement_multi))
+                    time_remaining = (total_coordinates-i-1)*time_permea
+                    tim_rem_hour = math.floor(time_remaining/3600)
+                    time_rem_min = math.floor((time_remaining-tim_rem_hour*3600)/60)
+                    time_rem_sec = math.floor(time_remaining%60)
                 
-                time_2raman = time.time()
-                time_total = time_2raman-time_0start
-                time_raman = time_2raman-time_1motion
-                time_motion = time_1motion-time_0start
-                print('Total time: {}s = {}s Motion + {}s Raman\n'.format(time_total,time_motion,time_raman))
+                    # Updates the data hub and status bar
+                    self._dataHub_map.update_tree()
+                    self.status_update('Performing mapping: {} of {}. Est. time rem.: {}h {}m {}s'\
+                        .format(i+2,total_coordinates,tim_rem_hour,time_rem_min,time_rem_sec),bg_colour='yellow')
+                except Exception as e:
+                    print('Error in mapping measurement:',e)
+                    self.status_update('Error in mapping measurement',bg_colour='red')
+                    raise
                 
-                # Estimate the time remaining
-                list_time_estimation.append(time_total)
-                num_points = 100
-                if i < num_points:
-                    time_permea = np.mean(list_time_estimation)
-                else:
-                    time_permea = np.mean(list_time_estimation[i-num_points:i])
-                
-                time_remaining = (total_coordinates-i-1)*time_permea
-                tim_rem_hour = math.floor(time_remaining/3600)
-                time_rem_min = math.floor((time_remaining-tim_rem_hour*3600)/60)
-                time_rem_sec = math.floor(time_remaining%60)
-                
-                # Updates the data hub and status bar
-                self._dataHub_map.update_tree()
-                self.status_update('Performing mapping: {} of {}. Est. time rem.: {}h {}m {}s'\
-                    .format(i+2,total_coordinates,tim_rem_hour,time_rem_min,time_rem_sec),bg_colour='yellow')
-            except Exception as e:
-                print('Error in mapping measurement:',e)
-                self.status_update('Error in mapping measurement',bg_colour='red')
-                
-            i+=1
-        
-        self.motion_controller.enable_controls()
-        flg_isrunning_autosaver.clear()   # Stops the autosaver thread
-        thread_autosaver.join(timeout=1)
-        
-        self._frm_coorHub_treeview.delete_offload_mappingCoor(unit_name)  # Deletes the offloaded mapping coordinates
-        if i != len(mapping_coordinates):
-            ans = messagebox.askyesno('Save mapping coordinates','The measurement was stopped abruptly.\nDo you want to save the mapping coordinates?')
-            if ans:
-                if self._coorHub.search_mappingCoor(unit_name) != None: unit_name += '_remaining_{}'.format(get_timestamp_us_str())
-                self._coorHub.append(MeaCoor_mm(unit_name,mapping_coordinates[i+1:]))
-        
-        self._flg_meaCancelled = True if i < len(mapping_coordinates) else False
-        
+                i+=1
+        finally:
+            try:
+                flg_isrunning_autosaver.clear()
+                thread_autosaver.join(timeout=15)
+                self._finish_standard_mapping(mapping_coordinates, i, unit_name, thread_autosaver)
+            finally:
+                self._standard_mapping_active = False
+
         return thread_plot
         
         
@@ -1507,8 +1559,9 @@ class Frm_HighLvlController_Raman(tk.Frame):
                     measurement=measurement
                 )
             except Exception as e:
-                print('Error in autosaver:',e)
-                self.status_update('Error in autosaver',bg_colour='red')
+                self._mapping_pending_results.append(result)
+                self._mapping_save_errors.put(e)
+                return
         
     def init_measurement_autosaver(self,mapping_unit:MeaRMap_Unit,flg_isrunning:threading.Event,q_measurement_old:queue.Queue,
         q_measurement_new:queue.Queue,mode:Literal['discreet','continuous'],thread_autosaver:threading.Thread|None=None)\
@@ -1600,9 +1653,10 @@ class Frm_HighLvlController_Raman(tk.Frame):
             messagebox.showerror('Error',f"Failed to perform mapping: {e}")
             self.status_update('Error in mapping measurement',bg_colour='red')
             self._dataHub_map.update_tree()
+            reset()
             return
         
-        messagebox.showinfo('Mapping measurement complete','The mapping measurement is complete and added to the data hub')
+        messagebox.showinfo('Mapping measurement', 'Scan stopped; collected spectra are retained in the data hub.' if self._flg_meaCancelled else 'The mapping measurement is complete and added to the data hub')
         reset()
     
     @thread_assign
@@ -1650,11 +1704,12 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 messagebox.showerror('Error',f"Failed to perform mapping: {e}")
                 self.status_update('Error in mapping measurement',bg_colour='red')
                 self._dataHub_map.update_tree()
-                break
+                reset()
+                return
             
             if not self._flg_meaCancelled: self._coorHub.remove_mappingCoor(mappingUnit_name)
             
-        messagebox.showinfo('Mapping measurement complete','The mapping measurement is complete and added to the data hub')
+        messagebox.showinfo('Mapping measurement', 'Scan stopped; collected spectra are retained in the data hub.' if self._flg_meaCancelled else 'The mapping measurement is complete and added to the data hub')
         reset()
     
     def _perform_continuousMapping(self, mapping_hub:MeaRMap_Hub,mapping_coordinates:list,
@@ -1697,15 +1752,17 @@ class Frm_HighLvlController_Raman(tk.Frame):
         initial_speed_xy,initial_speed_z = self.motion_controller.get_VelocityParameters()
         
     # >>> Perform the mapping measurement <<<
-        thread_plot = self._scan_continuous(mapping_coordinates_ends,mapping_speed_rel)
-        
-    # >>> Finalisations <<<
-        self.status_update('Saving the measurement data',bg_colour='yellow')
-        # Update the data hub tree view and request to save the data
-        self._dataHub_map.update_tree()
-        
-        # Reset the speed
-        self.motion_controller.set_vel_relative(vel_xy=initial_speed_xy,vel_z=initial_speed_z)
+        try:
+            self._scan_continuous(mapping_coordinates_ends, mapping_speed_rel)
+        finally:
+            self._dataHub_map.update_tree()
+            # Never issue a speed command over an outstanding driver call.
+            try:
+                self.motion_controller._check_mapping_motion_idle()
+            except RuntimeError:
+                print('Stage command still running: velocity was not restored. Recover the stage before another scan.')
+            else:
+                self.motion_controller.set_vel_relative(vel_xy=initial_speed_xy, vel_z=initial_speed_z)
         
     def _scan_continuous(self, mapping_coordinates_ends:list,mapping_speed_rel:int):
         """
@@ -1717,8 +1774,10 @@ class Frm_HighLvlController_Raman(tk.Frame):
         """
         # >> Prep the continuous measurement <<
         # Prep the raman controller
+        self._mapping_producer_errors = queue.Queue()
         thread_continuous,queue_measurement,func_start_Raman,func_store_Raman,func_ignore_Raman,\
-            func_stop_Raman = self.raman_controller.perform_ContinuousMeasurement_trigger()
+            func_stop_Raman = self.raman_controller.perform_ContinuousMeasurement_trigger(
+                failure_queue=self._mapping_producer_errors)
         
         # Prep the threads for movement and measurement
         flg_isrunning_autosaver = threading.Event()    # clear to stop the continuous measurement
@@ -1730,7 +1789,6 @@ class Frm_HighLvlController_Raman(tk.Frame):
         self.status_update('Performing mapping line: 1 of {}'.format(total_lines),bg_colour='yellow')
         
     # > Start the auto-measurement retrieval <
-        thread_movement = threading.Thread()
         thread_plot = threading.Thread()
         
         thread_autosaver = threading.Thread(target=self.measurement_autosaver_continuous,kwargs=({
@@ -1738,113 +1796,93 @@ class Frm_HighLvlController_Raman(tk.Frame):
             'flg_isrunning': flg_isrunning_autosaver,
             'q_measurement': queue_measurement
             }))
+        self._mapping_save_errors = queue.Queue()
+        self._mapping_pending_results = []
+        self._standard_mapping_continuous = True
+        self._mapping_result_queue = queue_measurement
+        self._standard_mapping_workers = [thread_continuous, thread_autosaver]
+        self._standard_mapping_active = True
         thread_autosaver.start()
         unit_name = self.measurement_data_2D_unit.get_unit_name()
-        thread_offload = self._frm_coorHub_treeview.offload_mappingCoor(unit_name,mapping_coordinates_ends,0)
+        i = 0
+        try:
+            thread_offload = self._frm_coorHub_treeview.offload_mappingCoor(unit_name,mapping_coordinates_ends,0)
         
-        self.motion_controller.video_terminate()
+            self.motion_controller.video_terminate()
         
-    # >>> Perform the mapping measurement <<<
-        # self.raman_controller.resume_auto_measurement()
-        self.flg_isrunning_mapping = True
-        time_start = time.time()
-        self.motion_controller.disable_controls()
-        retry_flag = False
-        self._flg_meaCancelled = False
-        i=0
-        while i < len(mapping_coordinates_ends):
-            coor = mapping_coordinates_ends[i]
-            if not self.flg_isrunning_mapping: break   # Stops the measurement immediately when required.
-            if i%AppRamanEnum.AUTOSAVE_FREQ_CONTINUOUS.value == 0 and i > 0 and not thread_offload.is_alive():
-                thread_offload = self._frm_coorHub_treeview.offload_mappingCoor(unit_name,mapping_coordinates_ends,i+1)
+        # >>> Perform the mapping measurement <<<
+            # self.raman_controller.resume_auto_measurement()
+            time_start = time.time()
+            self.motion_controller.disable_controls()
+            self._flg_meaCancelled = False
+            while i < len(mapping_coordinates_ends):
+                coor = mapping_coordinates_ends[i]
+                if not self.flg_isrunning_mapping: break   # Stops the measurement immediately when required.
+                if i%AppRamanEnum.AUTOSAVE_FREQ_CONTINUOUS.value == 0 and i > 0 and not thread_offload.is_alive():
+                    thread_offload = self._frm_coorHub_treeview.offload_mappingCoor(unit_name,mapping_coordinates_ends,i)
             
-            # >> Only perform the continuous measurement for x-rows <<
-            # (i.e., skipped whenever moving between 1 y-coor to another)
-            if i == 0: func_start_Raman()
-            elif i%2 == 1:
-                func_ignore_Raman()
-                self.motion_controller.set_vel_relative(vel_xy=mapping_speed_rel)   # Set actual speed to move between x-coordinates
-            else:
-                func_store_Raman()
-                self.motion_controller.set_vel_relative(vel_xy=100) # Set actual speed to move between x-coordinates
-            
-            # Wait for the previous batch processing to finish
-            q_size = queue_measurement.qsize()
-            flg_restart_Raman = False
-            if q_size > AppRamanEnum.CONTINUOUS_MEASUREMENT_BUFFER_SIZE.value:
-                while not queue_measurement.empty():
-                    print(f'Measurement buffer full:\nAdjust [APP - RAMAN MEASUREMENT CONTROLLER] "continuous_measurement_buffer_size"\nin the config.ini file to adjust the buffer size')
-                    self.status_update(f'Measurement buffer full: Processing previous measurements {q_size} remaining',bg_colour='yellow')
-                    time.sleep(0.1)
-                    if queue_measurement.qsize() < q_size: q_size = queue_measurement.qsize(); continue
-                    
-                    # Restart the continuous measurement
+                # >> Only perform the continuous measurement for x-rows <<
+                # (i.e., skipped whenever moving between 1 y-coor to another)
+                if i == 0: func_start_Raman()
+                elif i%2 == 1:
+                    func_ignore_Raman()
+                    self.motion_controller.set_vel_relative(vel_xy=mapping_speed_rel)   # Set actual speed to move between x-coordinates
+                else:
                     func_store_Raman()
-                    func_stop_Raman()
-                    thread_continuous.join()
-                    flg_restart_Raman = True
-                    
-                    thread_continuous,queue_measurement_new,func_start_Raman,func_store_Raman,func_ignore_Raman,\
-                        func_stop_Raman = self.raman_controller.perform_ContinuousMeasurement_trigger()
-                        
-                    self.init_measurement_autosaver(
-                        mapping_unit=self.measurement_data_2D_unit,
-                        flg_isrunning=flg_isrunning_autosaver,
-                        q_measurement_old=queue_measurement,
-                        q_measurement_new=queue_measurement_new,
-                        mode='continuous',
-                        thread_autosaver=thread_autosaver,
-                    )
-                    queue_measurement = queue_measurement_new
-                if flg_restart_Raman: func_start_Raman()
-                func_ignore_Raman()
-                
-                
-            # Go to the requested coordinates
-            thread_movement = threading.Thread(target=self.motion_controller.go_to_coordinates,kwargs=({
-                'coor_x_mm': float(coor[0]),
-                'coor_y_mm': float(coor[1]),
-                'coor_z_mm': float(coor[2]),
-                'override_controls': True,
-                }))
-            thread_movement.start()
-            thread_movement.join()
+                    self.motion_controller.set_vel_relative(vel_xy=100) # Set actual speed to move between x-coordinates
             
-            # Check if the target is reached and retry the coordinate if not
-            if not self.motion_controller.isontarget_gotocoor() and not retry_flag:
-                retry_flag = True
-                print('Target coordinate not reached, retrying once')
-                continue
-            retry_flag = False
-            
-            # Status update
-            self._dataHub_map.update_tree()
-            time_elapsed = time.time()-time_start
-            self.status_update('Performing mapping line: {} of {}. Elapsed time: {} min {} sec. Queue size: {}'\
-                .format(int((i+1)/2),total_lines,math.floor(time_elapsed/60),math.floor(time_elapsed%60),
-                        queue_measurement.qsize()),bg_colour='yellow')
-            
-            i+=1
-        
-        # Stop raman frame's continuous measurement
-        func_store_Raman()
-        func_stop_Raman()
-        thread_continuous.join(timeout=1)
-        
-        # Stop the measurement autosaver and wait for it to finish
-        self.motion_controller.enable_controls()
-        flg_isrunning_autosaver.clear()   # Stops the continuous measurement
-        thread_autosaver.join(timeout=1)     # Wait for the autosaver to finish
-        
-        self._frm_coorHub_treeview.delete_offload_mappingCoor(unit_name)  # Deletes the offloaded mapping coordinates
-        if i != len(mapping_coordinates_ends):
-            ans = messagebox.askyesno('Save mapping coordinates','The measurement was stopped abruptly.\nDo you want to save the mapping coordinates?')
-            if ans:
-                if self._coorHub.search_mappingCoor(unit_name) != None: unit_name += '_remaining_{}'.format(get_timestamp_us_str())
-                self._coorHub.append(MeaCoor_mm(unit_name,mapping_coordinates_ends[i+1:]))
-        
-        self._flg_meaCancelled = True if i < len(mapping_coordinates_ends) else False
-        
+                if not thread_continuous.is_alive():
+                    raise RuntimeError('Continuous spectrometer worker stopped unexpectedly.')
+                if queue_measurement.qsize() > AppRamanEnum.CONTINUOUS_MEASUREMENT_BUFFER_SIZE.value:
+                    if not wait_for_buffer(queue_measurement, thread_autosaver,
+                                           lambda: self.flg_isrunning_mapping):
+                        break
+                self._check_mapping_saver()
+
+                # Go to the requested coordinates
+                self.motion_controller.go_to_coordinates(
+                    float(coor[0]), float(coor[1]), float(coor[2]), override_controls=True,
+                    timeout=15.0 + self.raman_controller.get_integration_time_ms() / 1000)
+                if not self.flg_isrunning_mapping:
+                    break
+
+                if not self.motion_controller.isontarget_gotocoor():
+                    raise RuntimeError('Stage did not confirm the target coordinate; scan stopped.')
+
+                # Status update
+                self._dataHub_map.update_tree()
+                time_elapsed = time.time()-time_start
+                self.status_update('Performing mapping line: {} of {}. Elapsed time: {} min {} sec. Queue size: {}'\
+                    .format(int((i+1)/2),total_lines,math.floor(time_elapsed/60),math.floor(time_elapsed%60),
+                            queue_measurement.qsize()),bg_colour='yellow')
+
+                i+=1
+        finally:
+            try:
+                func_store_Raman()
+                func_stop_Raman()
+                thread_continuous.join(timeout=15.0 + self.raman_controller.get_integration_time_ms() / 1000)
+                if thread_continuous.is_alive():
+                    # Let the consumer drain late results, then terminate. Guard both
+                    # workers against a new scan while either is still alive.
+                    def finish_late():
+                        thread_continuous.join()
+                        flg_isrunning_autosaver.clear()
+                        thread_autosaver.join(timeout=15)
+                        try:
+                            self._finish_standard_mapping(mapping_coordinates_ends, i, unit_name, thread_autosaver)
+                        except Exception as failure:
+                            print(f'Late mapping recovery failed: {failure}')
+                    threading.Thread(target=finish_late, daemon=True).start()
+                    self._flg_meaCancelled = True
+                    self.flg_isrunning_mapping = False
+                    raise RuntimeError('Spectrometer worker did not stop. Partial data remains in the data hub; recover the connection before another scan.')
+                flg_isrunning_autosaver.clear()
+                thread_autosaver.join(timeout=15)
+                self._finish_standard_mapping(mapping_coordinates_ends, i, unit_name, thread_autosaver)
+            finally:
+                self._standard_mapping_active = False
+
         return thread_plot
         
         

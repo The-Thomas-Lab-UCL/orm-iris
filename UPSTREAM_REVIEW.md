@@ -1,7 +1,9 @@
 # Upstream IRIS review
 
-Reviewed October 29, 2026. No upstream changes have been merged into the
-operational `albro-lab` branch. A first backport is prepared separately below.
+Initial upstream review: October 29, 2026. The baseline comparison below
+records the repository before backports. The first Zaber backport has since
+passed the lab hardware check and was merged into `albro-lab` as `1885c01`.
+A second candidate is being prepared separately below.
 
 The current lab baseline is `albro-lab` at `0c06f42`. The working branch is
 `albro-lab-updates` at the same commit. Latest fetched upstream `main` is
@@ -100,7 +102,78 @@ lock/flag cleanup, subsequent requests and exception serialization. All device
 calls in those tests were mocked; no serial port was opened, no stage was moved,
 and neither laser was operated.
 
-Next validation is an ordinary small move/jog/stop and a short existing map using
-the lab's usual hardware procedure. Error recovery has been tested with simulated
-failures. Keep `albro-lab` at its current checkpoint until hardware validation is
-complete.
+The lab subsequently reported that the hardware check was working. This
+backport was then merged and pushed to both `albro-lab` and
+`albro-lab-updates` at `1885c01`.
+
+
+## Second update candidate: legacy mapping reliability
+
+Prepared on `albro-mapping-reliability`, based on `albro-lab-updates` at
+`1885c01`. This adapts the behavior from upstream `26a8fa4` and PR #110
+(`9abfd7e`) to the existing Tkinter UI. PR #110's Qt queue-marshalling repair
+is specific to PySide and is not needed in this application.
+
+The mapping movement call now propagates XY/Z driver errors to the scan thread
+and sets the target flag only after both drivers return successfully. A
+monotonic stall timer resets when reported position progresses by over 1 um;
+slow movement has no fixed total-duration limit. Ordinary scans use a base
+15-second stall window plus the integration time. Python cannot interrupt a
+blocked SDK call: outstanding movement workers remain registered, controls
+stay disabled, and further mapping/experiment moves are rejected until the
+command returns. Velocity restoration is skipped, with a console message, if
+it would overlap an outstanding movement command.
+
+Discrete and continuous scans stop on unconfirmed motion instead of blindly
+retrying or skipping the point. Discrete acquisition requires a completed
+response from the spectrometer worker, preventing a previous or partial result
+from being treated as success. An exposure already underway is allowed to
+finish before Stop takes effect. The underlying blocking spectrometer SDK call
+still relies on its driver's timeout; this backport does not forcibly interrupt
+an exposure or change Andor acquisition settings.
+
+A full saver buffer waits for progress, checks Stop, and fails after 15 seconds
+without progress. The old automatic restarts are removed, keeping one consumer
+and one queue instead of possibly overlapping savers. Saver errors propagate;
+unprocessed results remain available rather than being silently dropped. The
+continuous spectrometer worker also reports exceptions through a queue and
+clears its running flag and resets controls in a finally block, so a failure
+at the last endpoint cannot be mistaken for successful completion.
+Cleanup stops the continuous producer before draining its consumer, restores
+stage speed when possible, and resets the UI on scan errors. A producer that
+does not stop within its integration time plus 15 seconds remains guarded
+against another scan; a background cleanup waits for its eventual exit.
+
+After cleanup, normal and interrupted scans write a unique
+`mapping_recovery_*` folder under the configured autosave path, containing
+`maps.pkl` and `remaining_coordinates.json`. A saver failure also writes
+`pending_results.pkl` for manual recovery of unprocessed records. The console
+prints the folder path. Snapshot copying excludes Tk observers. An incomplete
+scan adds a separate remaining-coordinate list without deleting the original;
+a failed discrete point is included, and a partial continuous line restarts
+from its start endpoint. Resuming a partial line can repeat some spectra.
+If a saver itself remains blocked, live data, its queue and the existing
+coordinate offload remain retained, and the next scan is blocked until cleanup.
+These are end-of-scan recovery snapshots, not continuous crash-proof storage.
+
+The Stop button remains disabled until cleanup completes, and stopped or failed
+scans no longer report successful completion. The integration-time and power
+experiment schedules, laser commands, and bleaching waits are unchanged. No
+new fixed per-point delay is introduced; recovery serialization occurs at the
+end of a scan.
+
+Validation: 103 hardware-free tests passed, including 21 mapping tests for
+slow progress, stationary stalls, driver exceptions, outstanding-move guards,
+backlog stalls, Stop during exposure, continuous cleanup, speed restoration,
+saver failure, unfinished coordinates and recovery-file round trips. One new
+scan test uses the repository's actual dummy spectrum generator. Existing
+integration-time, laser-power, background-monitor and Zaber tests also passed.
+No hardware controller was instantiated or operated by these tests.
+
+Before merging this candidate into `albro-lab`, run a small ordinary discrete
+map and a small continuous map using the usual polystyrene setup. Press Stop
+partway through each and check that completed spectra remain in the data hub,
+remaining coordinates include the interrupted point/line, recovery files exist,
+and controls and stage speeds return normally. Then run a small integration-
+time or power experiment to check the existing workflow. Real communication
+faults have been simulated in tests; unplugging hardware is not required.

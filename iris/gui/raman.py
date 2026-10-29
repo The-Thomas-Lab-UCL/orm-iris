@@ -743,7 +743,7 @@ class Frm_RamanSpectrometerController(tk.Frame):
         self.pause_auto_measurement()
         self.status_update() # Reset the statusbar
     
-    def perform_ContinuousMeasurement_trigger(self) -> tuple[threading.Thread,queue.Queue,Callable,Callable,Callable,Callable]:
+    def perform_ContinuousMeasurement_trigger(self, failure_queue=None) -> tuple[threading.Thread,queue.Queue,Callable,Callable,Callable,Callable]:
         """
         Wraps the _perform_ContinuousMeasurement_trigger function to be used in a separate process,
         and return the thread, queues, and functions to trigger and stop the measurement.
@@ -754,7 +754,7 @@ class Frm_RamanSpectrometerController(tk.Frame):
         """
         q_trigger = queue.Queue()
         q_return = queue.Queue()
-        thread = self._perform_ContinuousMeasurement_trigger(q_trigger,q_return)
+        thread = self._perform_ContinuousMeasurement_trigger(q_trigger,q_return, failure_queue)
         
         def start_measurement(): q_trigger.put(None)
         def store_prev_measurements(): q_trigger.put(None)
@@ -764,7 +764,7 @@ class Frm_RamanSpectrometerController(tk.Frame):
         return thread,q_return,start_measurement,store_prev_measurements,ignore_prev_measurements,stop_measurement
     
     @thread_assign
-    def _perform_ContinuousMeasurement_trigger(self,q_trigger:queue.Queue,q_return:queue.Queue) -> threading.Thread:
+    def _perform_ContinuousMeasurement_trigger(self,q_trigger:queue.Queue,q_return:queue.Queue, failure_queue=None) -> threading.Thread:
         """
         Perform continuous measurement until stopped.
         
@@ -783,106 +783,110 @@ class Frm_RamanSpectrometerController(tk.Frame):
                 between this trigger and the previous timestamp (e.g., when the stage is moving
                 and the measurement is not needed)
         """
-        if not self._ramanHub.isrunning_auto_measurement(): self.resume_auto_measurement()
-        else: print('!!!!! Auto-measurement is already running, a part of the program did NOT TERMINATE it properly !!!!!')
-        
-        # Disable the widgets to prevent command overlaps
-        self.disable_widgets()
-        
-        # Flag for the running operation status and turn off the plot auto updater
-        self.status_update("Continuous measurement in progress",bg_colour='yellow')
-        
-        # Turn the continuous measurement button into a stop button
-        self.btn_continuous_mea.configure(state='active',text='STOP',
-                                                  command=self._flg_isrunning.clear,bg='red')
-        
-        int_time_ms = self._controller.set_integration_time_us(int(self.integration_time_ms*1000))/1000
-        self.update_label_device_parameters(self.contMea_accumulation)
-        
-        # Initialise the analyser and plotter
-        measurement = MeaRaman(timestamp=get_timestamp_us_int(),
-            int_time_ms=int_time_ms,laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm)
-        
-        # Initialise the worker thread
-        thread_plot = threading.Thread()
-        
-        # Initializes the measurement
-        self._ramanHub.wait_MeasurementUpdate()
-        self.perform_continuous_measurement(widget_override=True) # Turn on continuous acquisition for real-time plotting
-        trigger = q_trigger.get()
-        list_timestamp_trigger = [get_timestamp_us_int()]
-        self._flg_isrunning.set()
-        while self._flg_isrunning.is_set(): # Run till stopped
-            # Wait for the trigger to start the next measurement or to stop
+        try:
+            if not self._ramanHub.isrunning_auto_measurement(): self.resume_auto_measurement()
+            else: print('!!!!! Auto-measurement is already running, a part of the program did NOT TERMINATE it properly !!!!!')
+            
+            # Disable the widgets to prevent command overlaps
+            self.disable_widgets()
+            
+            # Flag for the running operation status and turn off the plot auto updater
+            self.status_update("Continuous measurement in progress",bg_colour='yellow')
+            
+            # Turn the continuous measurement button into a stop button
+            self.btn_continuous_mea.configure(state='active',text='STOP',
+                                                      command=self._flg_isrunning.clear,bg='red')
+            
+            int_time_ms = self._controller.set_integration_time_us(int(self.integration_time_ms*1000))/1000
+            self.update_label_device_parameters(self.contMea_accumulation)
+            
+            # Initialise the analyser and plotter
+            measurement = MeaRaman(timestamp=get_timestamp_us_int(),
+                int_time_ms=int_time_ms,laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm)
+            
+            # Initialise the worker thread
+            thread_plot = threading.Thread()
+            
+            # Initializes the measurement
+            self._ramanHub.wait_MeasurementUpdate()
+            self.perform_continuous_measurement(widget_override=True) # Turn on continuous acquisition for real-time plotting
             trigger = q_trigger.get()
-            if trigger == 0:
-                self._flg_isrunning.clear()
-                break
-            
-            # Retrieve the measurements
-            list_timestamp_trigger.append(get_timestamp_us_int())
-            list_timestamp_mea_int,list_spectrum,list_integration_time_ms=\
-                self._ramanHub.get_measurement(
-                    timestamp_start=list_timestamp_trigger[-2],
-                    timestamp_end=list_timestamp_trigger[-1])
-            list_timestamp_trigger.pop(0) # Remove the first element (not needed anymore)
-            
-            # >>> Skips the measurement if the trigger is 1. <<<
-            # This REMOVES the measurement between the trigger timestamp
-            # and the previous timestamp
-            if trigger == 1:
-                continue
-            
-            list_measurement = []
-            list_thread = []
-            for ts_int,spectrum_raw,int_time_ms in zip(list_timestamp_mea_int,list_spectrum,list_integration_time_ms):
-                # print(ts)
-                # ts = convert_timestamp_us_int_to_str(ts)
-                
-                measurement = MeaRaman(timestamp=ts_int,int_time_ms=int_time_ms,
-                    laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm)
-                measurement.set_raw_list(df_mea=spectrum_raw)
-                
-                list_measurement.append(measurement)
-                thread = threading.Thread(target=self.Analyse,kwargs={
-                    'measurement':measurement,
-                    'raw_list':[spectrum_raw]
-                })
-                thread.start()
-                list_thread.append(thread)
-            
-            for thread in list_thread:
-                thread:threading.Thread
-                thread.join()
-            
-            # Return the measurement result
-            for i in range(len(list_measurement)):
-                q_return.put((list_timestamp_mea_int[i],list_measurement[i]))
-            
-            # Try to plot the data
-            plot_add_kwargs = {'flg_plot_ramanshift':self._bool_PlotRamanShift.get()}
-            
-            if not thread_plot.is_alive():
-                if self._bool_PlotRawOnly.get():
-                    thread_plot = threading.Thread(target=self.Plot_rawlist_RM,kwargs={
-                        'measurement':measurement,'plot_add_kwargs':plot_add_kwargs})
-                    # thread_plot = threading.Thread(target=self.Plot_rawlist,kwargs={
-                    #     'raw_spectrum':spectrum_raw,'plot_add_kwargs':plot_add_kwargs})
-                    thread_plot.start()
-                else:
-                    thread_plot = threading.Thread(target=self.AnalyseAndPlot_rawlist,kwargs={
+            list_timestamp_trigger = [get_timestamp_us_int()]
+            self._flg_isrunning.set()
+            while self._flg_isrunning.is_set(): # Run till stopped
+                # Wait for the trigger to start the next measurement or to stop
+                trigger = q_trigger.get()
+                if trigger == 0:
+                    self._flg_isrunning.clear()
+                    break
+
+                # Retrieve the measurements
+                list_timestamp_trigger.append(get_timestamp_us_int())
+                list_timestamp_mea_int,list_spectrum,list_integration_time_ms=\
+                    self._ramanHub.get_measurement(
+                        timestamp_start=list_timestamp_trigger[-2],
+                        timestamp_end=list_timestamp_trigger[-1])
+                list_timestamp_trigger.pop(0) # Remove the first element (not needed anymore)
+
+                # >>> Skips the measurement if the trigger is 1. <<<
+                # This REMOVES the measurement between the trigger timestamp
+                # and the previous timestamp
+                if trigger == 1:
+                    continue
+
+                list_measurement = []
+                list_thread = []
+                for ts_int,spectrum_raw,int_time_ms in zip(list_timestamp_mea_int,list_spectrum,list_integration_time_ms):
+                    # print(ts)
+                    # ts = convert_timestamp_us_int_to_str(ts)
+
+                    measurement = MeaRaman(timestamp=ts_int,int_time_ms=int_time_ms,
+                        laserPower_mW=self._laserpower_mW,laserWavelength_nm=self._laserwavelength_nm)
+                    measurement.set_raw_list(df_mea=spectrum_raw)
+
+                    list_measurement.append(measurement)
+                    thread = threading.Thread(target=self.Analyse,kwargs={
                         'measurement':measurement,
-                        'raw_list':[spectrum_raw],
-                        'idx':0,
-                        'plot_add_kwargs':plot_add_kwargs
-                        })
-        
-        # Enable the widgets again once done
-        self.reset_n_enable_widgets()
-            
-        self.pause_auto_measurement()
-        self.status_update() # Reset the statusbar
-    
+                        'raw_list':[spectrum_raw]
+                    })
+                    thread.start()
+                    list_thread.append(thread)
+
+                for thread in list_thread:
+                    thread:threading.Thread
+                    thread.join()
+
+                # Return the measurement result
+                for i in range(len(list_measurement)):
+                    q_return.put((list_timestamp_mea_int[i],list_measurement[i]))
+
+                # Try to plot the data
+                plot_add_kwargs = {'flg_plot_ramanshift':self._bool_PlotRamanShift.get()}
+
+                if not thread_plot.is_alive():
+                    if self._bool_PlotRawOnly.get():
+                        thread_plot = threading.Thread(target=self.Plot_rawlist_RM,kwargs={
+                            'measurement':measurement,'plot_add_kwargs':plot_add_kwargs})
+                        # thread_plot = threading.Thread(target=self.Plot_rawlist,kwargs={
+                        #     'raw_spectrum':spectrum_raw,'plot_add_kwargs':plot_add_kwargs})
+                        thread_plot.start()
+                    else:
+                        thread_plot = threading.Thread(target=self.AnalyseAndPlot_rawlist,kwargs={
+                            'measurement':measurement,
+                            'raw_list':[spectrum_raw],
+                            'idx':0,
+                            'plot_add_kwargs':plot_add_kwargs
+                            })
+        except Exception as failure:
+            if failure_queue is None:
+                raise
+            failure_queue.put(failure)
+        finally:
+            self._flg_isrunning.clear()
+            self.pause_auto_measurement()
+            self.reset_n_enable_widgets()
+            self.status_update()
+
     def _check_RamanHub_automeasurement(self) -> bool:
         """
         Checks if the RamanHub is in auto-measurement mode.

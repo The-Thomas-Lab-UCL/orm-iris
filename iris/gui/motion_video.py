@@ -29,6 +29,7 @@ if __name__ == '__main__':
 
 
 from iris.utils.general import *
+from iris.utils.mapping_waits import wait_for_motion
 
 from iris.data.calibration_objective import ImgMea_Cal
 
@@ -731,6 +732,7 @@ class Frm_MotionController(tk.Frame):
         Both move_direct calls block until their motion completes. Wait for both
         before propagating a failure, so cleanup never overlaps another move.
         """
+        self._check_mapping_motion_idle()
         with ThreadPoolExecutor(max_workers=2) as executor:
             xy_move = executor.submit(self.ctrl_xy.move_direct, tuple(coordinate[:2]))
             z_move = executor.submit(self.ctrl_z.move_direct, coordinate[2])
@@ -774,33 +776,6 @@ class Frm_MotionController(tk.Frame):
         Raises:
             TimeoutError: If the stage does not move within the timeout
         """
-        def wait_for_target():
-            """
-            Waits for the target to be reached, the coordinate doesn't update within the timeout, raises a TimeoutError
-                
-            Raises:
-                TimeoutError: If the target is not reached within the timeout
-            """
-            nonlocal self,thread_xy_move,thread_z_move,timeout
-            
-            start_time = time.time()
-            coor = self._current_coor.copy()
-            while True:
-                if thread_xy_move.is_alive() or thread_z_move.is_alive():
-                    thread_xy_move.join(timeout=0.1)
-                    thread_z_move.join(timeout=0.1)
-                else:
-                    self._flg_ontarget_gotocoor.set()
-                    break
-                
-                if time.time() - start_time > timeout:
-                    raise TimeoutError('Timeout waiting for the target to be reached')
-                
-                coor_new = self._current_coor.copy()
-                # Resets the timer if the coordinates are not the same
-                if np.allclose(coor,coor_new,atol=0.001): start_time = time.time()
-                coor = coor_new
-        
         if not override_controls: self.disable_controls()
         
         # If None is provided, assign the current coordinates (i.e., do not move)
@@ -820,20 +795,37 @@ class Frm_MotionController(tk.Frame):
         # Add a check
         self._flg_ontarget_gotocoor.clear()
         
-        # Operate both stages at once
-        thread_xy_move = threading.Thread(target=self.ctrl_xy.move_direct,args=((coor_x_mm,coor_y_mm),))
-        thread_z_move = threading.Thread(target=self.ctrl_z.move_direct,args=(coor_z_mm,))
-        
-        thread_xy_move.start()
-        thread_z_move.start()
-        
-        wait_for_target()
-        
-        if not override_controls: self.enable_controls()
-        
-        # Resets the statusbar, let the user know that it's done moving
-        self.status_update()
-        
+        self._check_mapping_motion_idle()
+        failures = queue.Queue()
+
+        def move(controller, target):
+            try:
+                controller.move_direct(target)
+            except Exception as failure:
+                failures.put(failure)
+
+        # Retain handles after a timeout. A Python timeout cannot interrupt an
+        # in-progress SDK call, so subsequent moves must not overlap that call.
+        self._mapping_move_threads = [
+            threading.Thread(target=move, args=(self.ctrl_xy, (coor_x_mm, coor_y_mm)), daemon=True),
+            threading.Thread(target=move, args=(self.ctrl_z, coor_z_mm), daemon=True),
+        ]
+        try:
+            for worker in self._mapping_move_threads:
+                worker.start()
+            wait_for_motion(self._mapping_move_threads, failures,
+                            lambda: self._current_coor.copy(), timeout)
+            self._flg_ontarget_gotocoor.set()
+            self.status_update()
+        finally:
+            if not override_controls:
+                self.enable_controls()
+
+    def _check_mapping_motion_idle(self):
+        if any(worker.is_alive() for worker in getattr(self, '_mapping_move_threads', ())):
+            raise RuntimeError('A previous stage command is still running. Wait for it to finish '
+                               'or recover the stage connection before starting another move.')
+
     def get_coordinates_closest_mm(self) -> tuple[float,float,float]:
         """
         Returns the current coordinate of both channels x, y, and z of the stages.
@@ -908,6 +900,9 @@ class Frm_MotionController(tk.Frame):
     def enable_controls(self):
         """
         Enables all stage controls"""
+        if any(worker.is_alive() for worker in getattr(self, '_mapping_move_threads', ())):
+            self.status_update('Stage command still running; controls remain disabled', bg_colour='red')
+            return
         all_widgets = get_all_widgets(self._frm_mctrl)
         all_widgets.extend(get_all_widgets(self._frm_GoToCoord))
         for widget in all_widgets:
