@@ -41,9 +41,9 @@ class SpectrometerController_Dummy(Class_SpectrometerController):
         
         # Aquisition related parameters
         self.integration_time_us = 500e3        # int: Stores the spectrometer's integration time [microsec]
-        self.integration_time_min = 10        # int: Stores the spectrometer's minimum allowable integration time [millisec]
-        self.integration_time_max = 10000        # int: Stores the spectrometer's maximum allowable integration time [millisec]
-        self.integration_time_inc = 25        # int: Stores the spectrometer's allowable integration time increment [millisec]
+        self.integration_time_min = 10 * 1000       # Minimum integration time [microsec]
+        self.integration_time_max = 10000 * 1000   # Maximum integration time [microsec]
+        self.integration_time_inc = 25 * 1000      # Spinbox increment [microsec]
         
         # Calibration related parameters
         self.bg_acq_num = 10    # Number of aquisition for the background removal
@@ -266,4 +266,3 @@ if __name__ == '__main__':
     # Plotting using the DataFrame
     plt.plot(spectra['Wavelength [nm]'], spectra['Intensity [a.u.]'])
     plt.show()
-    

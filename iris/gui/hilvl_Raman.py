@@ -1,4 +1,8 @@
 import os
+import json
+import tempfile
+import threading
+import dill
 from glob import glob
 
 import multiprocessing as mp
@@ -25,6 +29,11 @@ if __name__ == '__main__':
     sys.path.append(os.path.dirname(libdir))
 
 from iris.utils.general import *
+from iris.utils.experiment_naming import build_integration_map_names, build_power_map_names
+from iris.utils.integration_experiment import validate_experiment_settings, run_pointwise_experiment
+from iris.utils.power_experiment import validate_power_experiment, run_power_experiment
+from iris.utils.laser_monitor import BackgroundLaserMonitor
+from iris.data import SaveParamsEnum
 
 from iris.gui.motion_video import Frm_MotionController
 from iris.gui.raman import Frm_RamanSpectrometerController
@@ -178,9 +187,13 @@ class Frm_HighLvlController_Raman(tk.Frame):
         
         self._notebook_mapping = ttk.Notebook(frm_mapping)
         self._sfrm_mapping = tk.Frame(self._notebook_mapping)   # Houses the multi mapping controls
+        self._sfrm_integration_experiment = tk.Frame(self._notebook_mapping)
+        self._sfrm_power_experiment = tk.Frame(self._notebook_mapping)
         sfrm_mapping_scrambler = tk.Frame(self._notebook_mapping)     # Houses the mapping scrambler options
         
         self._notebook_mapping.add(self._sfrm_mapping,text='Mapping measurement')
+        self._notebook_mapping.add(self._sfrm_integration_experiment,text='Integration time experiment')
+        self._notebook_mapping.add(self._sfrm_power_experiment,text='Laser power experiment')
         self._notebook_mapping.add(sfrm_mapping_scrambler,text='Mapping coordinats scrambler')
         
         # Packs the frames
@@ -219,6 +232,9 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 
         self._btn_perform_discreetMapping_multi.grid(row=4,column=0,sticky='ew',pady=(5,0))
         self._btn_perform_continuousMapping_multi.grid(row=4,column=1,sticky='ew',pady=(5,0))
+
+        self._init_experiment_settings()
+        self._init_power_experiment_settings()
         
     # >>> Mapping scrambler options setup <<<
         self._bool_randomise_mappingCoor = tk.BooleanVar(value=False)
@@ -266,8 +282,522 @@ class Frm_HighLvlController_Raman(tk.Frame):
         """
         Terminates the controller, saving the mapping coordinates to the temporary folder.
         """
-        pass
+        worker = self._experiment_thread
+        if worker is not None:
+            self._experiment_cancel.set()
+            worker.join()
     
+    def _init_experiment_settings(self):
+        """Build experiment controls; hardware work runs outside the Tk thread."""
+        self._experiment_thread = None
+        self._experiment_cancel = threading.Event()
+        self._ssfrm_experiment_settings = tk.LabelFrame(
+            self._sfrm_integration_experiment, text='Integration time experiment settings')
+        self._ssfrm_experiment_settings.grid(
+            row=0, column=0, sticky='ew', pady=(5, 0))
+        self._ssfrm_experiment_settings.grid_columnconfigure(1, weight=1)
+        self._sfrm_integration_experiment.grid_columnconfigure(0, weight=1)
+
+        # Keep text until the experiment runner validates and reads these values.
+        self._str_experiment_integration_times_ms = tk.StringVar(
+            master=self, value=str(AppRamanEnum.DEFAULT_INTEGRATION_TIME_MS.value))
+        self._str_experiment_photobleach_delay_ms = tk.StringVar(
+            master=self, value='0')
+
+        self._str_experiment_coordinate_name = tk.StringVar(
+            master=self, value='Select one coordinate set above')
+        tk.Label(self._ssfrm_experiment_settings,
+                 text='Coordinate name:').grid(
+                     row=0, column=0, sticky='w', padx=5, pady=5)
+        tk.Label(self._ssfrm_experiment_settings,
+                 textvariable=self._str_experiment_coordinate_name,
+                 anchor='w', justify='left', wraplength=250).grid(
+                     row=0, column=1, sticky='ew', padx=5, pady=5)
+
+        tk.Label(self._ssfrm_experiment_settings,
+                 text='Integration times [ms]:').grid(
+                     row=1, column=0, sticky='w', padx=5, pady=5)
+        self._entry_experiment_integration_times = tk.Entry(
+            self._ssfrm_experiment_settings,
+            textvariable=self._str_experiment_integration_times_ms)
+        self._entry_experiment_integration_times.grid(
+            row=1, column=1, sticky='ew', padx=5, pady=5)
+        tk.Label(self._ssfrm_experiment_settings,
+                 text='Comma-separated, in acquisition order (e.g. 100, 500, 1000).',
+                 anchor='w', justify='left', wraplength=360).grid(
+                     row=2, column=0, columnspan=2, sticky='w', padx=5)
+
+        tk.Label(self._ssfrm_experiment_settings,
+                 text='Photobleaching delay [ms]:').grid(
+                     row=3, column=0, sticky='w', padx=5, pady=5)
+        self._entry_experiment_photobleach_delay = tk.Entry(
+            self._ssfrm_experiment_settings,
+            textvariable=self._str_experiment_photobleach_delay_ms)
+        self._entry_experiment_photobleach_delay.grid(
+            row=3, column=1, sticky='ew', padx=5, pady=5)
+        tk.Label(self._ssfrm_experiment_settings,
+                 text='Wait at each point before its first spectrum; 0 means no extra wait.',
+                 anchor='w', justify='left', wraplength=360).grid(
+                     row=4, column=0, columnspan=2, sticky='w', padx=5)
+        tk.Label(self._ssfrm_experiment_settings,
+                 text='One spectrum per integration time, at every selected point.',
+                 anchor='w', justify='left', wraplength=360).grid(
+                     row=5, column=0, columnspan=2, sticky='w', padx=5, pady=5)
+
+        tk.Button(self._ssfrm_experiment_settings, text='Preview map names',
+                  command=self._preview_experiment_map_names).grid(
+                      row=6, column=0, columnspan=2, sticky='w', padx=5, pady=5)
+        self._str_experiment_map_names_preview = tk.StringVar(
+            master=self, value='Select a coordinate set and enter integration times, then preview map names.')
+        tk.Label(self._ssfrm_experiment_settings,
+                 textvariable=self._str_experiment_map_names_preview,
+                 anchor='w', justify='left', wraplength=360).grid(
+                     row=7, column=0, columnspan=2, sticky='w', padx=5, pady=5)
+        self._str_experiment_integration_times_ms.trace_add(
+            'write', self._clear_experiment_map_names_preview)
+        self._frm_coorHub_treeview._tree_listMappingCoor.bind(
+            '<<TreeviewSelect>>', self._update_experiment_coordinate_name, add='+')
+
+        self._ssfrm_experiment_scan_options = tk.LabelFrame(
+            self._sfrm_integration_experiment, text='Scan options')
+        self._ssfrm_experiment_scan_options.grid(
+            row=1, column=0, sticky='ew', pady=(5, 0))
+        self._str_experiment_scanMethod = tk.StringVar(
+            master=self, value=Enum_ScanMthd.SNAKE.value)
+        self._str_experiment_scanDir = tk.StringVar(
+            master=self, value=Enum_ScanDir.XDIR.value)
+        self._build_scanoptions(
+            self._ssfrm_experiment_scan_options,
+            self._str_experiment_scanMethod, self._str_experiment_scanDir)
+
+        self._ssfrm_experiment_mapping_options = tk.LabelFrame(
+            self._sfrm_integration_experiment, text='Mapping options')
+        self._ssfrm_experiment_mapping_options.grid(
+            row=2, column=0, sticky='ew', pady=(5, 0))
+        self._btn_experiment_discreet_mapping = tk.Button(
+            self._ssfrm_experiment_mapping_options,
+            text='Run integration time experiment\non the selected coordinate set',
+            command=self.start_integration_experiment)
+        self._btn_experiment_continuous_mapping = tk.Button(
+            self._ssfrm_experiment_mapping_options,
+            text='Perform multi-continuous mapping\nof the selected coordinates',
+            state='disabled')
+        self._btn_experiment_discreet_mapping.grid(
+            row=0, column=0, sticky='ew', padx=5, pady=5)
+        self._btn_experiment_continuous_mapping.grid(
+            row=0, column=1, sticky='ew', padx=5, pady=5)
+        for column in range(2):
+            self._ssfrm_experiment_mapping_options.grid_columnconfigure(column, weight=1)
+        tk.Label(self._ssfrm_experiment_mapping_options,
+                 text='Select one coordinate set above. Continuous mapping is unavailable '
+                      'for this experiment.',
+                 anchor='w', justify='left', wraplength=360).grid(
+                     row=1, column=0, columnspan=2, sticky='w', padx=5, pady=5)
+
+    def _clear_experiment_map_names_preview(self, *_):
+        self._str_experiment_map_names_preview.set('Settings changed. Preview map names again.')
+
+    def _init_power_experiment_settings(self):
+        settings = tk.LabelFrame(self._sfrm_power_experiment, text='Laser power experiment settings')
+        settings.grid(row=0, column=0, sticky='ew', pady=5)
+        settings.grid_columnconfigure(1, weight=1)
+        self._sfrm_power_experiment.grid_columnconfigure(0, weight=1)
+        self._str_power_levels_mw = tk.StringVar(master=self, value='')
+        self._str_power_integration_ms = tk.StringVar(
+            master=self, value=str(AppRamanEnum.DEFAULT_INTEGRATION_TIME_MS.value))
+        self._str_power_bleach_mw = tk.StringVar(master=self, value='')
+        self._str_power_bleach_ms = tk.StringVar(master=self, value='0')
+        self._str_power_settle_ms = tk.StringVar(master=self, value='100')
+        tk.Label(settings, text='Coordinate name:').grid(row=0, column=0, sticky='w', padx=5)
+        tk.Label(settings, textvariable=self._str_experiment_coordinate_name, wraplength=250,
+                 anchor='w', justify='left').grid(row=0, column=1, sticky='w', padx=5)
+        fields = [('Acquisition powers [mW]:', self._str_power_levels_mw),
+                  ('Fixed integration time [ms]:', self._str_power_integration_ms),
+                  ('Photobleaching power [mW]:', self._str_power_bleach_mw),
+                  ('Photobleaching duration [ms]:', self._str_power_bleach_ms),
+                  ('Power settling time [ms]:', self._str_power_settle_ms)]
+        for row, (label, variable) in enumerate(fields, 1):
+            tk.Label(settings, text=label).grid(row=row, column=0, sticky='w', padx=5, pady=3)
+            tk.Entry(settings, textvariable=variable).grid(row=row, column=1, sticky='ew', padx=5, pady=3)
+        tk.Label(settings, text='Comma-separated powers, acquired lowest to highest.\n'
+                 'Bleach once per point; duration 0 disables bleaching.\n'
+                 'Powers refer to laser channel 1, not calibrated tissue power.\n'
+                 'Channel 1 is set to 0 mW between points and after the run.\n'
+                 'Switching and settling add illumination time to software waits.\n'
+                 'Connect a serial-verified laser with emission/channel 1 enabled first.',
+                 anchor='w', justify='left', wraplength=420).grid(
+                     row=6, column=0, columnspan=2, sticky='w', padx=5, pady=5)
+        self._str_power_map_names_preview = tk.StringVar(master=self, value='Select coordinates and preview map names.')
+        tk.Button(settings, text='Preview map names', command=self._preview_power_map_names).grid(
+            row=7, column=0, columnspan=2, sticky='w', padx=5, pady=3)
+        tk.Label(settings, textvariable=self._str_power_map_names_preview, wraplength=420,
+                 anchor='w', justify='left').grid(row=8, column=0, columnspan=2, sticky='w', padx=5)
+        self._str_power_levels_mw.trace_add('write', lambda *_:
+            self._str_power_map_names_preview.set('Powers changed. Preview map names again.'))
+        self._frm_coorHub_treeview._tree_listMappingCoor.bind('<<TreeviewSelect>>', lambda *_:
+            self._str_power_map_names_preview.set('Coordinates changed. Preview map names again.'), add='+')
+        scan = tk.LabelFrame(self._sfrm_power_experiment, text='Scan options')
+        scan.grid(row=1, column=0, sticky='ew', pady=5)
+        self._str_power_scan_method = tk.StringVar(master=self, value=Enum_ScanMthd.SNAKE.value)
+        self._str_power_scan_direction = tk.StringVar(master=self, value=Enum_ScanDir.XDIR.value)
+        self._build_scanoptions(scan, self._str_power_scan_method, self._str_power_scan_direction)
+        options = tk.LabelFrame(self._sfrm_power_experiment, text='Mapping options')
+        options.grid(row=2, column=0, sticky='ew', pady=5)
+        self._btn_power_experiment = tk.Button(
+            options, text='Run laser power experiment\non the selected coordinate set',
+            command=lambda: self.start_integration_experiment('laser_power'))
+        self._btn_power_experiment.grid(row=0, column=0, sticky='ew', padx=5, pady=5)
+        options.grid_columnconfigure(0, weight=1)
+
+    def _power_settings(self):
+        laser = getattr(self, '_laser_panel', None)
+        if laser is None or not laser.controller.power_control_available:
+            raise ValueError('Connect a serial-verified laser in the Laser tab first.')
+        return validate_power_experiment(
+            self._str_power_levels_mw.get(), self._str_power_integration_ms.get(),
+            self._str_power_bleach_mw.get(), self._str_power_bleach_ms.get(), self._str_power_settle_ms.get(),
+            self.raman_controller.get_experiment_integration_limits_us(), laser.controller.validate_power_mw)
+
+    def _preview_power_map_names(self):
+        try:
+            selected = self._frm_coorHub_treeview.get_selected_mappingCoor(flg_message=False)
+            if len(selected) != 1:
+                raise ValueError('Select exactly one coordinate set for this experiment.')
+            settings = self._power_settings()
+            names = build_power_map_names(selected[0].mappingUnit_name, settings['powers_mw'],
+                self._dataHub_map.get_MappingHub().get_list_MappingUnit_names())
+            self._str_power_map_names_preview.set('Map names:\n' + '\n'.join(names))
+        except ValueError as error:
+            self._str_power_map_names_preview.set(str(error))
+
+    def _update_experiment_coordinate_name(self, *_):
+        selected = self._frm_coorHub_treeview.get_selected_mappingCoor(flg_message=False)
+        self._str_experiment_coordinate_name.set(
+            selected[0].mappingUnit_name if len(selected) == 1 else 'Select one coordinate set above')
+        self._clear_experiment_map_names_preview()
+
+    def _get_experiment_map_names(self, coordinate_set=None):
+        """Validate names against the current hub; call again before creating maps."""
+        if coordinate_set is None:
+            selected = self._frm_coorHub_treeview.get_selected_mappingCoor(flg_message=False)
+            if len(selected) != 1:
+                raise ValueError('Select exactly one coordinate set for this experiment.')
+            coordinate_set = selected[0]
+        return build_integration_map_names(
+            coordinate_set.mappingUnit_name,
+            self._str_experiment_integration_times_ms.get(),
+            self._dataHub_map.get_MappingHub().get_list_MappingUnit_names())
+
+    def _preview_experiment_map_names(self):
+        try:
+            names = self._get_experiment_map_names()
+        except ValueError as error:
+            self._str_experiment_map_names_preview.set(str(error))
+            return
+        self._str_experiment_map_names_preview.set('Map names:\n' + '\n'.join(names))
+
+    def start_integration_experiment(self, experiment_kind='integration'):
+        """Snapshot and validate UI settings before starting a hardware worker."""
+        if self._experiment_thread is not None:
+            return
+        try:
+            mapping_buttons = self._list_shortcut_widgets + [
+                self._btn_perform_discreetMapping_multi, self._btn_perform_continuousMapping_multi]
+            if self.raman_controller.get_running_status() or any(
+                    button.cget('text') == 'STOP' for button in mapping_buttons):
+                raise ValueError('Stop the current measurement or mapping run first.')
+            selected = self._frm_coorHub_treeview.get_selected_mappingCoor(flg_message=False)
+            if len(selected) != 1:
+                raise ValueError('Select exactly one coordinate set for this experiment.')
+            if experiment_kind == 'laser_power':
+                power_settings = self._power_settings()
+                names = build_power_map_names(selected[0].mappingUnit_name, power_settings['powers_mw'],
+                    self._dataHub_map.get_MappingHub().get_list_MappingUnit_names())
+                times, delay = (power_settings['integration_time_ms'],), 0
+                scan_method = self._str_power_scan_method.get()
+                scan_direction = self._str_power_scan_direction.get()
+            else:
+                names = self._get_experiment_map_names(selected[0])
+                times, delay = validate_experiment_settings(
+                    self._str_experiment_integration_times_ms.get(),
+                    self._str_experiment_photobleach_delay_ms.get(),
+                    self.raman_controller.get_experiment_integration_limits_us())
+                scan_method = self._str_experiment_scanMethod.get()
+                scan_direction = self._str_experiment_scanDir.get()
+            coordinates = [tuple(float(value) for value in coordinate)
+                           for coordinate in selected[0].mapping_coordinates]
+            if not coordinates or any(len(coordinate) != 3 or
+                    not all(math.isfinite(value) for value in coordinate) for coordinate in coordinates):
+                raise ValueError('The coordinate set must contain finite X, Y and Z positions.')
+            coordinates = self._convertCoor_byScanOptions(
+                coordinates, scan_method=scan_method, scan_direction=scan_direction)
+            original_us = self.raman_controller._controller.get_integration_time_us()
+            was_auto = self._ramanHub.isrunning_auto_measurement()
+            autosave_dir = os.path.abspath(SaveParamsEnum.AUTOSAVE_PATH.value)
+            os.makedirs(autosave_dir, exist_ok=True)
+            # A new directory for every run prevents overwriting any prior result.
+            recovery_dir = tempfile.mkdtemp(prefix=f'{experiment_kind}_experiment_', dir=autosave_dir)
+            plan = dict(experiment_kind=experiment_kind, coordinate_set=selected[0].mappingUnit_name,
+                        run_name=names[0].rsplit('_', 1)[0],
+                        coordinates=coordinates, integration_times_ms=times,
+                        photobleach_delay_ms=delay, scan_method=scan_method,
+                        scan_direction=scan_direction, map_names=names)
+            laser_panel = getattr(self, '_laser_panel', None)
+            monitoring = laser_panel is not None and laser_panel.controller.connected
+            plan.update(laser_monitoring='background' if monitoring else 'no_laser_connection',
+                        laser_monitor_interval_ms=500)
+            if experiment_kind == 'laser_power':
+                plan.update(power_settings)
+                plan.update(laser_serial=self._laser_panel.controller.profile.expected_serial,
+                            laser_max_power_mw=self._laser_panel.controller.profile.max_power_mw,
+                            laser_wavelength_nm=self._laser_panel.controller.profile.wavelength_nm,
+                            power_reference='Laser channel 1 setpoint; not calibrated tissue power')
+            with open(os.path.join(recovery_dir, 'settings.json'), 'x', encoding='utf-8') as output:
+                json.dump(plan, output, indent=2)
+        except Exception as error:
+            messagebox.showerror('Cannot start mapping experiment', str(error))
+            return
+
+        self._experiment_events = queue.Queue()
+        self._experiment_cancel.clear()
+        self._experiment_recovery_dir = recovery_dir
+        self._experiment_widget_states = []
+        self._active_experiment_kind = experiment_kind
+        self._active_experiment_button = (self._btn_power_experiment if experiment_kind == 'laser_power'
+                                          else self._btn_experiment_discreet_mapping)
+        self._active_experiment_title = ('Laser power experiment' if experiment_kind == 'laser_power'
+                                         else 'Integration time experiment')
+        self._power_laser_reserved = False
+        units = [MeaRMap_Unit(name) for name in names]
+        try:
+            if monitoring:
+                self._laser_panel.reserve_for_experiment(require_power_control=experiment_kind == 'laser_power')
+                self._power_laser_reserved = True
+            # All names were checked as a group; never allow automatic renaming.
+            hub = self._dataHub_map.get_MappingHub()
+            for unit in units:
+                hub.append_mapping_unit(unit)
+            self._dataHub_map._flg_issaved = False
+            self._dataHub_map.update_tree()
+            self._lock_experiment_controls()
+            self.motion_controller._integration_experiment_running = True
+            self.raman_controller._flg_isrunning.set()
+            self.flg_isrunning_mapping = True
+            self._active_experiment_button.configure(
+                state='normal', text='STOP experiment', bg='red', command=self.stop_integration_experiment)
+            self._experiment_thread = threading.Thread(
+                target=self._run_integration_experiment,
+                args=(plan, units, original_us, was_auto))
+            self._experiment_thread.start()
+        except Exception as error:
+            self._restore_experiment_controls()
+            self.raman_controller._flg_isrunning.clear()
+            self.flg_isrunning_mapping = False
+            self._experiment_thread = None
+            messagebox.showerror('Cannot start mapping experiment', str(error))
+            return
+        self.after(50, self._poll_integration_experiment)
+
+    def _lock_experiment_controls(self):
+        """Remember original states so disabled features stay disabled afterward."""
+        frames = (self._sfrm_mapping, self._sfrm_integration_experiment,
+                  self._frm_coorGen, self._frm_coorHub_treeview, self._dataHub_map,
+                  self.raman_controller._sfrm_controls, self.raman_controller._sfrm_data,
+                  self.motion_controller._frm_mctrl, self.motion_controller._frm_GoToCoord)
+        if hasattr(self, '_sfrm_power_experiment'):
+            frames += (self._sfrm_power_experiment,)
+        seen = set()
+        for frame in frames:
+            for widget in get_all_widgets(frame):
+                if widget in seen or not isinstance(widget, (tk.Button, tk.Entry, tk.Spinbox,
+                                                            tk.Radiobutton, tk.Checkbutton, ttk.Combobox)):
+                    continue
+                seen.add(widget)
+                self._experiment_widget_states.append((widget, widget.cget('state')))
+                widget.configure(state='disabled')
+
+    def _restore_experiment_controls(self):
+        self.motion_controller._integration_experiment_running = False
+        for widget, state in self._experiment_widget_states:
+            widget.configure(state=state)
+        self._btn_experiment_discreet_mapping.configure(
+            text='Run integration time experiment\non the selected coordinate set',
+            bg=self.bg_colour, command=self.start_integration_experiment)
+        if hasattr(self, '_btn_power_experiment'):
+            self._btn_power_experiment.configure(
+                text='Run laser power experiment\non the selected coordinate set', bg=self.bg_colour,
+                command=lambda: self.start_integration_experiment('laser_power'))
+        if getattr(self, '_power_laser_reserved', False):
+            self._power_laser_reserved = False
+            self._laser_panel.release_from_experiment()
+
+    def stop_integration_experiment(self):
+        self._experiment_cancel.set()
+        self._active_experiment_button.configure(state='disabled', text='Stopping experiment...')
+        self.statbar.configure(text='Stopping after the current move, laser command or exposure; retaining spectra.')
+
+    def _run_integration_experiment(self, plan, units, original_us, was_auto):
+        """Worker: no Tk calls. Results are acknowledged by the Tk polling loop."""
+        error = None
+        completed = 0
+        monitor = None
+
+        def store(index, coordinate, result):
+            reply = queue.Queue(maxsize=1)
+            self._experiment_events.put(('measurement', (units[index], coordinate, result, reply)))
+            failure = reply.get()
+            if failure is not None:
+                raise failure
+
+        def checkpoint():
+            # Exclude plot observers and their Tk objects from the recovery file.
+            snapshot = MeaRMap_Hub()
+            for unit in units:
+                if unit.get_numMeasurements():
+                    snapshot.append_mapping_unit(unit.copy(flg_newID=False))
+            temporary_path = os.path.join(self._experiment_recovery_dir, 'maps.tmp')
+            with open(temporary_path, 'wb') as output:
+                dill.dump(snapshot, output)
+            os.replace(temporary_path, os.path.join(self._experiment_recovery_dir, 'maps.pkl'))
+
+        try:
+            self.raman_controller.pause_auto_measurement()
+            if plan.get('laser_monitoring') == 'background':
+                panel = self._laser_panel
+                monitor = BackgroundLaserMonitor(
+                    panel.submit_status_for_monitor, panel.controller.last_status,
+                    self._experiment_cancel, self._experiment_recovery_dir,
+                    power_sweep=plan.get('experiment_kind') == 'laser_power',
+                    interval_s=plan.get('laser_monitor_interval_ms', 500) / 1000)
+                monitor.start()
+            if plan.get('experiment_kind') == 'laser_power':
+                panel = self._laser_panel
+                laser = panel.controller
+                execute = panel.execute_for_experiment
+                execute(laser.prepare_power_experiment)
+
+                def set_power(value):
+                    if monitor is not None:
+                        monitor.transition()
+                    status = execute(lambda: laser.set_power_mw(value))
+                    if monitor is not None and value == 0:
+                        monitor.stable_at(0)
+                    return status
+
+                def acquire_at_power(value):
+                    operation = lambda: self.raman_controller.acquire_experiment_spectrum(
+                        plan['integration_time_ms'], laser_power_mw=value,
+                        laser_wavelength_nm=plan['laser_wavelength_nm'])
+                    return monitor.acquire(operation) if monitor is not None else operation()
+
+                def store_at_power(index, coordinate, result, status):
+                    store(index, coordinate, result)
+                    record = dict(timestamp=result[0], coordinate=coordinate,
+                                  map_name=plan['map_names'][index],
+                                  requested_power_mw=plan['powers_mw'][index],
+                                  channel_1_setpoint_mw=status.channel_setpoints_mw[0],
+                                  channel_enabled=status.channel_enabled,
+                                  output_readback_before_exposure_mw=status.output_mw,
+                                  laser_serial=status.serial)
+                    with open(os.path.join(self._experiment_recovery_dir, 'power_readbacks.jsonl'),
+                              'a', encoding='utf-8') as output:
+                        output.write(json.dumps(record) + '\n')
+
+                completed = run_power_experiment(
+                    plan['coordinates'], plan['powers_mw'], plan['photobleach_power_mw'],
+                    plan['photobleach_duration_ms'], plan['power_settle_ms'], plan['scan_direction'],
+                    self._experiment_cancel, self.motion_controller.move_for_experiment,
+                    set_power, lambda: execute(laser.prepare_power_experiment), acquire_at_power, store_at_power,
+                    lambda text: self._experiment_events.put(('progress', text)), checkpoint,
+                    power_ready=monitor.stable_at if monitor is not None else None)
+            else:
+                def acquire_at_time(value):
+                    operation = lambda: self.raman_controller.acquire_experiment_spectrum(value)
+                    return monitor.acquire(operation) if monitor is not None else operation()
+                completed = run_pointwise_experiment(
+                    plan['coordinates'], plan['integration_times_ms'], plan['photobleach_delay_ms'],
+                    plan['scan_direction'], self._experiment_cancel, self.motion_controller.move_for_experiment,
+                    acquire_at_time, store,
+                    lambda text: self._experiment_events.put(('progress', text)), checkpoint)
+        except Exception as failure:
+            error = str(failure)
+        finally:
+            if monitor is not None:
+                try:
+                    monitor.stop()
+                    if monitor.fault:
+                        error = (error + '\n' if error else '') + (
+                            f'Background laser monitor: {monitor.fault} '
+                            'Check laser_quality.json for suspect or unobserved spectra.')
+                except Exception as failure:
+                    error = (error + '\n' if error else '') + f'Laser monitoring log failed: {failure}'
+            completed = min(unit.get_numMeasurements() for unit in units)
+            try:
+                self.raman_controller._controller.set_integration_time_us(original_us)
+                if was_auto:
+                    self.raman_controller.resume_auto_measurement()
+            except Exception as failure:
+                error = (error + '\n' if error else '') + f'Could not restore spectrometer: {failure}'
+            self._experiment_events.put(('finished', (completed, len(plan['coordinates']), error)))
+
+    def _poll_integration_experiment(self):
+        """Update maps and widgets on the Tk thread, including failure cleanup."""
+        finished = None
+        for _ in range(100):
+            try:
+                kind, payload = self._experiment_events.get_nowait()
+            except queue.Empty:
+                break
+            if kind == 'progress':
+                if not self._experiment_cancel.is_set():
+                    self.statbar.configure(text=payload, background='yellow')
+            elif kind == 'measurement':
+                unit, coordinate, result, reply = payload
+                failure = None
+                try:
+                    timestamp, measurement = result
+                    unit.append_ramanmeasurement_data(timestamp=timestamp, coor=coordinate, measurement=measurement)
+                    self.measurement_data_2D_unit = unit
+                    self._dataHub_map._flg_issaved = False
+                    self._dataHub_map.update_tree()
+                except Exception as error:
+                    failure = error
+                    self._experiment_cancel.set()
+                finally:
+                    reply.put(failure)
+                if failure is None:
+                    try:
+                        self.raman_controller.display_experiment_spectrum(measurement)
+                    except Exception as error:
+                        print(f'Experiment spectrum display failed: {error}')
+            elif kind == 'finished':
+                finished = payload
+                break
+        if finished is None:
+            self.after(50, self._poll_integration_experiment)
+            return
+        completed, total, error = finished
+        self._experiment_thread.join()
+        self._experiment_thread = None
+        self.flg_isrunning_mapping = False
+        self.raman_controller._flg_isrunning.clear()
+        self._restore_experiment_controls()
+        stopped = self._experiment_cancel.is_set()
+        outcome = 'failed' if error else ('stopped' if stopped else 'complete')
+        self.statbar.configure(text=f'Experiment {outcome}: {completed}/{total} points complete.',
+                               background='red' if error else self.bg_colour)
+        details = (f'Experiment {outcome}. Acquired spectra remain in the Data Hub.\n'
+                   f'Recovery folder: {self._experiment_recovery_dir}\n'
+                   'Use Data Hubs to save/export the named maps.')
+        if getattr(self, '_active_experiment_kind', None) == 'laser_power' and not error:
+            details += '\nChannel 1 setpoint is 0 mW; the emission switch is unchanged.'
+        details += '\nIf a laser was connected, background status and coverage are saved in laser_quality.json.'
+        title = getattr(self, '_active_experiment_title', 'Integration time experiment')
+        if error:
+            messagebox.showerror(title, f'{error}\n\n{details}')
+        else:
+            messagebox.showinfo(title, details)
+
     def _init_scanoptions(self):
         """
         Initialises the scan options for the mapping measurement.
@@ -277,16 +807,20 @@ class Frm_HighLvlController_Raman(tk.Frame):
         """
         # Scan options using the radio buttons
         self._str_scanMethod = tk.StringVar(value=Enum_ScanMthd.SNAKE.value)
+        self._str_scanDir = tk.StringVar(value=Enum_ScanDir.XDIR.value)
+        self._build_scanoptions(
+            self._ssfrm_scan_options, self._str_scanMethod, self._str_scanDir)
 
+    def _build_scanoptions(self, parent, scan_method, scan_direction):
+        """Build matching scan controls using the supplied tab's settings."""
         for i, scan_opt in enumerate(Enum_ScanMthd):
-            rb_scan_opt = tk.Radiobutton(self._ssfrm_scan_options, text=scan_opt.value.capitalize(),
-                                        variable=self._str_scanMethod, value=scan_opt.value)
+            rb_scan_opt = tk.Radiobutton(parent, text=scan_opt.value.capitalize(),
+                                        variable=scan_method, value=scan_opt.value)
             rb_scan_opt.grid(row=0,column=i, sticky='w', padx=5, pady=5)
 
-        self._str_scanDir = tk.StringVar(value=Enum_ScanDir.XDIR.value)
         for i, scan_dir in enumerate(Enum_ScanDir):
-            rb_scan_dir = tk.Radiobutton(self._ssfrm_scan_options, text=scan_dir.value,
-                                        variable=self._str_scanDir, value=scan_dir.value)
+            rb_scan_dir = tk.Radiobutton(parent, text=scan_dir.value,
+                                        variable=scan_direction, value=scan_dir.value)
             rb_scan_dir.grid(row=1,column=i, sticky='w', padx=5, pady=5)
 
     def get_mappingUnit_data(self) -> MeaRMap_Unit:
@@ -338,7 +872,8 @@ class Frm_HighLvlController_Raman(tk.Frame):
         
         return True
     
-    def _convertCoor_byScanOptions(self,mapping_coor:list=None,precision:int=4,ends_only:bool=False):
+    def _convertCoor_byScanOptions(self,mapping_coor:list=None,precision:int=4,ends_only:bool=False,
+                                 scan_method=None,scan_direction=None):
         """
         Converts coordinates to raster scan format.
 
@@ -351,8 +886,8 @@ class Frm_HighLvlController_Raman(tk.Frame):
             list: The coordinates reordered for the raster scan, or None if the input is None.
         """
         
-        flg_snake = self._str_scanMethod.get() == Enum_ScanMthd.SNAKE.value
-        dir_scan = self._str_scanDir.get()
+        flg_snake = (self._str_scanMethod.get() if scan_method is None else scan_method) == Enum_ScanMthd.SNAKE.value
+        dir_scan = self._str_scanDir.get() if scan_direction is None else scan_direction
         
         if not isinstance(mapping_coor, list) or len(mapping_coor) == 0:
             print('No coordinates to convert')
