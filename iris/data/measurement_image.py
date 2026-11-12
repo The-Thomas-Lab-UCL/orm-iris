@@ -867,6 +867,10 @@ class MeaImg_Hub():
         
         self._list_observer = []          # List of observers for the hub
         
+        # Guards the unit registry (the lists and the ID<->name lookups) so that the GUI can
+        # read a consistent summary while a worker thread adds or removes units.
+        self._lock_units = threading.RLock()
+        
     def check_measurement_exist(self) -> bool:
         """
         Checks if the measurements are stored
@@ -921,10 +925,11 @@ class MeaImg_Hub():
                 list of number of measurements in the unit,
                 list of metadata dictionaries
         """
-        list_units:list[MeaImg_Unit] = self._dict_ImageUnits['image_unit']
+        with self._lock_units:
+            list_units:list[MeaImg_Unit] = list(self._dict_ImageUnits['image_unit'])
+            list_ids = list(self._dict_ImageUnits['unit_id'])
+            list_names = [self._dict_unit_IDName[id] for id in list_ids]
         
-        list_ids = self._dict_ImageUnits['unit_id']
-        list_names = [self._dict_unit_IDName[id] for id in list_ids]
         list_numMeasurements = [unit.get_numMeasurements() for unit in list_units]
         list_metadata = [unit.get_metadata(incl_nameid=False) for unit in list_units]
         
@@ -938,15 +943,17 @@ class MeaImg_Hub():
             unit (ImageMeasurement_Unit): ImageMeasurement_Unit object to be appended
         """
         assert isinstance(unit, MeaImg_Unit), 'Unit must be an ImageMeasurement_Unit object'
-        assert unit.get_IdName()[0] not in self._dict_unit_IDName, 'Unit ID already exists'
-        assert unit.get_IdName()[1] not in self._dict_unit_NameID, 'Unit name already exists'
         
-        self._dict_ImageUnits['unit_id'].append(unit.get_IdName()[0])
-        self._dict_ImageUnits['image_unit'].append(unit)
-        
-        unitId,unitName = unit.get_IdName()
-        self._dict_unit_NameID[unitName] = unitId
-        self._dict_unit_IDName[unitId] = unitName
+        with self._lock_units:
+            assert unit.get_IdName()[0] not in self._dict_unit_IDName, 'Unit ID already exists'
+            assert unit.get_IdName()[1] not in self._dict_unit_NameID, 'Unit name already exists'
+            
+            self._dict_ImageUnits['unit_id'].append(unit.get_IdName()[0])
+            self._dict_ImageUnits['image_unit'].append(unit)
+            
+            unitId,unitName = unit.get_IdName()
+            self._dict_unit_NameID[unitName] = unitId
+            self._dict_unit_IDName[unitId] = unitName
         
         self.notify_observers()
         
@@ -968,17 +975,48 @@ class MeaImg_Hub():
         Args:
             unit_id (str): ID of the ImageMeasurement_Unit to be removed
         """
-        assert unit_id in self._dict_ImageUnits['unit_id'], 'Unit ID does not exist'
+        self._remove_unit_unlocked(unit_id)
+        self.notify_observers()
         
-        idx = self._dict_ImageUnits['unit_id'].index(unit_id)
-        self._dict_ImageUnits['unit_id'].pop(idx)
-        self._dict_ImageUnits['image_unit'].pop(idx)
+    def _remove_unit_unlocked(self, unit_id:str) -> None:
+        """
+        Removes a single ImageMeasurement_Unit from the registry without notifying the observers.
         
-        unit_name = self._dict_unit_IDName[unit_id]
-        self._dict_unit_NameID.pop(unit_name)
-        self._dict_unit_IDName.pop(unit_id)
+        Args:
+            unit_id (str): ID of the ImageMeasurement_Unit to be removed
+        """
+        with self._lock_units:
+            assert unit_id in self._dict_ImageUnits['unit_id'], 'Unit ID does not exist'
+            
+            idx = self._dict_ImageUnits['unit_id'].index(unit_id)
+            self._dict_ImageUnits['unit_id'].pop(idx)
+            self._dict_ImageUnits['image_unit'].pop(idx)
+            
+            unit_name = self._dict_unit_IDName[unit_id]
+            self._dict_unit_NameID.pop(unit_name)
+            self._dict_unit_IDName.pop(unit_id)
+        
+    def remove_ImageMeasurementUnits(self, list_unit_id:list[str]) -> list[str]:
+        """
+        Removes several ImageMeasurement_Units from the hub in one go. The observers are notified
+        once, after every unit has been removed, so a listening treeview is rebuilt a single time
+        and never sees a half-removed registry.
+        
+        Args:
+            list_unit_id (list[str]): IDs of the ImageMeasurement_Units to be removed
+        
+        Returns:
+            list[str]: One message per unit that could not be removed. Empty if all succeeded.
+        """
+        list_errors = []
+        with self._lock_units:
+            for unit_id in list_unit_id:
+                unit_name = self._dict_unit_IDName.get(unit_id, unit_id)
+                try: self._remove_unit_unlocked(unit_id)
+                except Exception as e: list_errors.append(f"{unit_name}: {e}")
         
         self.notify_observers()
+        return list_errors
         
     def rename_ImageMeasurementUnit(self, unit_id:str, new_name:str) -> None:
         """
@@ -992,19 +1030,20 @@ class MeaImg_Hub():
             AssertionError: unit_id does not exist
             AssertionError: new_name already exists in the hub
         """
-        assert unit_id in self._dict_unit_IDName, 'Unit ID does not exist'
-        assert new_name not in self._dict_unit_NameID, 'Unit name already exists'
+        with self._lock_units:
+            assert unit_id in self._dict_unit_IDName, 'Unit ID does not exist'
+            assert new_name not in self._dict_unit_NameID, 'Unit name already exists'
 
-        old_name = self._dict_unit_IDName[unit_id]
+            old_name = self._dict_unit_IDName[unit_id]
 
-        # Update hub lookup dicts
-        del self._dict_unit_NameID[old_name]
-        self._dict_unit_NameID[new_name] = unit_id
-        self._dict_unit_IDName[unit_id] = new_name
+            # Update hub lookup dicts
+            del self._dict_unit_NameID[old_name]
+            self._dict_unit_NameID[new_name] = unit_id
+            self._dict_unit_IDName[unit_id] = new_name
 
-        # Update the unit itself
-        unit = self.get_ImageMeasurementUnit(unit_id=unit_id)
-        unit.set_name(new_name)
+            # Update the unit itself
+            unit = self.get_ImageMeasurementUnit(unit_id=unit_id)
+            unit.set_name(new_name)
 
         self.notify_observers()
 
@@ -1021,15 +1060,16 @@ class MeaImg_Hub():
         assert (unit_id is not None) or (unit_name is not None), 'Either unit ID or unit name must be provided'
         assert not (unit_id is not None and unit_name is not None), 'Only one of unit ID or unit name must be provided'
         
-        # Get the unit ID from the unit name if provided
-        if unit_name is not None:
-            assert unit_name in self._dict_unit_NameID, 'Unit name does not exist'
-            unit_id = self._dict_unit_NameID[unit_name]
+        with self._lock_units:
+            # Get the unit ID from the unit name if provided
+            if unit_name is not None:
+                assert unit_name in self._dict_unit_NameID, 'Unit name does not exist'
+                unit_id = self._dict_unit_NameID[unit_name]
+                
+            assert unit_id in self._dict_ImageUnits['unit_id'], 'Unit ID does not exist'
             
-        assert unit_id in self._dict_ImageUnits['unit_id'], 'Unit ID does not exist'
-        
-        idx = self._dict_ImageUnits['unit_id'].index(unit_id)
-        return self._dict_ImageUnits['image_unit'][idx]
+            idx = self._dict_ImageUnits['unit_id'].index(unit_id)
+            return self._dict_ImageUnits['image_unit'][idx]
     
     def add_observer(self,observer:Callable) -> None:
         """

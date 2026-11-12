@@ -260,6 +260,36 @@ class List_MeaCoor_Hub(list[MeaCoor_mm]):
             self._autodelete_mappingCoor(mappingUnit_name)
         else: raise KeyError(f"Mapping unit {mappingUnit_name} not found in the list")
     
+    def remove_list_mappingCoor(self, list_mappingUnit_name:list[str]) -> list[str]:
+        """
+        Removes several mapping units from the list of mapping coordinates in one go. The
+        observers are notified once, after every unit has been removed, so a listening treeview
+        is rebuilt a single time and never sees a half-removed list. The autosaved files are
+        deleted afterwards, as that touches the disk.
+        
+        Args:
+            list_mappingUnit_name (list[str]): The names of the mapping units to remove.
+        
+        Returns:
+            list[str]: One message per unit that could not be removed. Empty if all succeeded.
+        """
+        list_errors = []
+        list_removed = []
+        for mappingUnit_name in list_mappingUnit_name:
+            try:
+                if not isinstance(mappingUnit_name, str):
+                    raise TypeError(f"Expected str, got {type(mappingUnit_name)}")
+                idx = self.search_mappingCoor(mappingUnit_name)
+                if idx is None: raise KeyError(f"Mapping unit {mappingUnit_name} not found in the list")
+                self.pop(idx)
+                list_removed.append(mappingUnit_name)
+            except Exception as e: list_errors.append(f"{mappingUnit_name}: {e}")
+        
+        if list_removed: self._notify_observers()
+        for mappingUnit_name in list_removed: self._autodelete_mappingCoor(mappingUnit_name)
+        
+        return list_errors
+    
     def rename_mappingCoor(self, old_name:str, new_name:str):
         """
         Renames a mapping unit in the list of mapping coordinates.

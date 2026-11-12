@@ -987,6 +987,7 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
         # Set up the variable for the controller later
         self.ctrl_xy = xy_controller    # The xy-stage controller (proxy)
         self.ctrl_z = z_controller      # The z-stage controller (proxy)
+        self._set_stop_unsupported_reported:set[str] = set()  # Stages already reported as not supporting stop_motion()
         
         try: self._controller_id_camera = self._stageHub.get_camera_controller().get_identifier()
         except: self._controller_id_camera = 'failed to get camera ID'; qw.QErrorMessage(self).showMessage('Failed to get camera ID')
@@ -1674,6 +1675,35 @@ class Wdg_MotionController(Ui_stagecontrol, qw.QWidget):
             float: The velocity in percentage, relative to the device's maximum velocity
         """
         return self.ctrl_xy.calculate_vel_relative(vel_xy_mmPerSec)
+    
+    @Slot(threading.Event)
+    def stop_motion(self, event_finish:threading.Event|None=None) -> bool:
+        """
+        Stops all stage motion as soon as possible, including an ongoing "go to coordinate" movement,
+        using the controllers' stop_motion() (a controlled stop that keeps the homing). A controller that
+        does not support it carries on to its current target.
+        
+        Args:
+            event_finish (threading.Event|None): Set once the stop commands have been sent (also on an error)
+        
+        Returns:
+            bool: True if both stages accepted the stop, False if either does not support it (or failed)
+        """
+        flg_stopped = True
+        try:
+            for name, ctrl in (('xy', self.ctrl_xy), ('z', self.ctrl_z)):
+                try: flg_ctrl_stopped = bool(ctrl.stop_motion())
+                except Exception as e:
+                    print(f'Error in stop_motion ({name}-stage): {e}')
+                    flg_ctrl_stopped = False
+                if not flg_ctrl_stopped and name not in self._set_stop_unsupported_reported:
+                    # Reported once per stage, since a scan re-sends the stop while it waits
+                    self._set_stop_unsupported_reported.add(name)
+                    print(f'The {name}-stage cannot be stopped mid-movement, it will finish its current move first')
+                flg_stopped = flg_stopped and flg_ctrl_stopped
+        finally:
+            if isinstance(event_finish,threading.Event): event_finish.set()
+        return flg_stopped
     
     @Slot(float,float,threading.Event)
     def set_vel_relative(self,vel_xy:float=-1.0,vel_z:float=-1.0,event_finish:threading.Event|None=None):

@@ -12,6 +12,7 @@ from enum import Enum
 import math
 import numpy as np
 import random
+import re
 
 from dataclasses import dataclass
 
@@ -23,11 +24,13 @@ if __name__ == '__main__':
 
 import threading
 import time
-from iris.utils.general import messagebox_request_input, get_all_widgets
+from iris.utils.general import messagebox_request_input, get_all_widgets, get_timestamp_us_int
+from iris.utils.scan_progress import ScanPathProgress, continuous_group_labels
+from iris.utils.mea_pause import MeasurementPauseGate
 
 from iris.gui.motion_video import Wdg_MotionController, Motion_GoToCoor_Worker
 from iris.gui.raman import Wdg_SpectrometerController, RamanMeasurement_Worker, AcquisitionParams, Enum_ContinuousMeasurementTrigger as EnumTrig, Syncer_Raman
-from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping
+from iris.gui.dataHub_MeaRMap import Wdg_DataHub_Mapping, DATAHUB_MEMORY_CRITICAL_GB, DATAHUB_OFFLOAD_MINMEMORY_GB, DATAHUB_MEMORYCHECK_INTERVAL_SEC
 from iris.gui.dataHub_MeaImg import Wdg_DataHub_Image, Wdg_DataHub_ImgCal
 from iris.gui.hilvl_coorGen import Wdg_Hilvl_CoorGenerator
 from iris.gui.submodules.mappingCoordinatesTreeview import Wdg_Treeview_MappingCoordinates
@@ -60,6 +63,25 @@ GOTO_STALL_TIMEOUT_BASE_SEC = 15.0
 # is appropriate here (it's a last-resort safety net against a genuinely hung hardware call -
 # Wdg_MotionController.set_vel_relative always releases this event promptly on its own otherwise).
 CONTINUOUS_SETVEL_WAIT_TIMEOUT_SEC = 5.0
+
+# Safety factor on the data streamers' storage requested for a continuous scan: the Raman streamer keeps
+# this many times the spectra of the longest scan line, and the stage streamer keeps this many times its
+# duration of coordinates. A line's spectra are only retrieved (and their coordinates looked up) once the
+# line is finished, so the streamers must hold at least one whole line, plus margin for an autosaver backlog.
+STREAMER_STORAGE_SAFETY_FACTOR = 2.0
+
+# Mapping speed auto-adjustment (continuous mapping): the longest scan line is scanned while the speed factor
+# is re-estimated from every new spectrum, and the test line is stopped as soon as the estimate converges.
+AUTO_ADJUST_POLL_INTERVAL_SEC = 0.1         # How often the new spectra are checked [s]
+AUTO_ADJUST_MIN_SPECTRA = 10                # Minimum number of spectra before an estimate is made
+AUTO_ADJUST_CONVERGENCE_WINDOW = 5          # Number of consecutive estimates that must agree
+AUTO_ADJUST_CONVERGENCE_TOLERANCE = 0.01    # Relative spread (max-min)/mean allowed within the window to count as converged
+
+# Stopping a continuous mapping mid-movement: while the stage moves, the scan checks for a cancellation at this
+# interval and then asks the stages to stop straight away (see Wdg_MotionController.stop_motion). The stop is
+# re-sent at STOP_RESEND_INTERVAL_SEC in case it arrived just before the movement started.
+GOTO_CANCEL_POLL_INTERVAL_SEC = 0.05
+STOP_RESEND_INTERVAL_SEC = 1.0
 
 class Hilvl_Raman_Design(Ui_Hilvl_Raman,qw.QWidget):
     def __init__(self,parent):
@@ -230,6 +252,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     sig_error_during_mea = Signal(str)  # Signal emitted when an error occurs during measurement
     sig_mea_done = Signal() # Signal emitted when measurement is done (no differentiation between success, cancelled, or error)
     sig_mea_done_msg = Signal(str)  # Signal emitted when measurement is done with a message
+    sig_unscanned_coors = Signal(list)  # Emitted just before the done signals with the scan coordinates that were not completed
     
     msg_mea_error = "An error occurred during the mapping measurement: "
     msg_mea_cancelled = "Mapping measurement was cancelled by the user"
@@ -240,11 +263,14 @@ class Hilvl_MeasurementAcq_Worker(QObject):
     _sig_stop_autosaver = Signal()
     _sig_gotocor = Signal(tuple, threading.Event, float, queue.Queue)
     _sig_setvelrel = Signal(float, float, threading.Event)
+    _sig_stop_motion = Signal(threading.Event)
     _sig_acquire_discrete_mea = Signal(AcquisitionParams, queue.Queue)
     _sig_acquire_continuous_mea = Signal(AcquisitionParams, queue.Queue, queue.Queue, queue.Queue)
     _sig_acquire_list_coors = Signal(list, threading.Event)
 
-    def __init__(self, mapping_hub:MeaRMap_Hub, syncer_raman:Syncer_Raman, event_isacquiring:threading.Event):
+    def __init__(self, mapping_hub:MeaRMap_Hub, syncer_raman:Syncer_Raman, event_isacquiring:threading.Event,
+                 pause_gate:MeasurementPauseGate|None=None, stageHub:DataStreamer_StageCam|None=None,
+                 ramanHub:DataStreamer_Raman|None=None):
         """
         Worker to perform the measurement acquisition for Raman imaging. For the slots details, refer to the
         methods in RamanMeasurement_Worker class in raman.py.
@@ -253,52 +279,65 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             mapping_hub (MeaRMap_Hub): The mapping measurement hub to store the measurement data
             syncer_raman (Syncer_Raman): The synchronization object for Raman measurements
             event_isacquiring (threading.Event): The event flag to indicate if a measurement is ongoing
+            pause_gate (MeasurementPauseGate|None): Gate used to park the scan while the data hub
+                writes a database file, so that the scan cannot append to a unit mid-write.
+                Defaults to None, which runs the scan without ever pausing.
+            stageHub (DataStreamer_StageCam|None): The stage data streamer, asked to keep enough coordinates
+                for a continuous scan. Defaults to None, which leaves it at its config value.
+            ramanHub (DataStreamer_Raman|None): The Raman data streamer, asked to keep enough spectra for a
+                continuous scan. Defaults to None, which leaves it at its config value.
         """
         super().__init__()
         self.mapping_hub = mapping_hub
         self._syncer = syncer_raman
         self._event_isacquiring = event_isacquiring
+        self._pause_gate = pause_gate
+        self._stageHub = stageHub
+        self._ramanHub = ramanHub
+
+    def _request_streamer_storage(self, num_points_line:int, line_duration_sec:float) -> None:
+        """
+        Asks the data streamers to hold enough data for the longest scan line (times
+        STREAMER_STORAGE_SAFETY_FACTOR). A request only ever extends the streamers' config values and
+        replaces the previous request. Pair it with _clear_streamer_storage_request().
+
+        Args:
+            num_points_line (int): Number of spectra in the longest scan line
+            line_duration_sec (float): Duration of the longest scan line [s]
+        """
+        num_spectra = int(math.ceil(STREAMER_STORAGE_SAFETY_FACTOR * num_points_line))
+        duration_sec = STREAMER_STORAGE_SAFETY_FACTOR * line_duration_sec
+        try:
+            if self._ramanHub is not None: self._ramanHub.request_storage(num_spectra)
+            if self._stageHub is not None: self._stageHub.request_coordinate_retention(duration_sec)
+            print(f'Data streamer storage requested: at least {num_spectra} spectra and {duration_sec:.0f} s of stage coordinates')
+        except Exception as e:
+            print(f'Error in _request_streamer_storage: {e}')
+
+    def _clear_streamer_storage_request(self) -> None:
+        """
+        Returns the data streamers to their config storage values.
+        """
+        try:
+            if self._ramanHub is not None: self._ramanHub.clear_storage_request()
+            if self._stageHub is not None: self._stageHub.clear_coordinate_retention_request()
+        except Exception as e:
+            print(f'Error in _clear_streamer_storage_request: {e}')
+
+    def _pause_checkpoint(self, progress:ScanPathProgress|None=None) -> None:
+        """
+        Parks the scan if the data hub is writing a database file, and discounts the time spent
+        parked from the progress estimate so the pause is not mistaken for a slow stage.
+
+        Args:
+            progress (ScanPathProgress|None): The scan's progress estimator, if any
+        """
+        if self._pause_gate is None: return
+        duration_paused = self._pause_gate.checkpoint(self._event_isacquiring)
+        if duration_paused > 0:
+            if progress is not None: progress.add_paused_time(duration_paused)
+            print(f'Scan resumed after being paused for {duration_paused:.1f} s by a data hub save')
     
-    def _calculate_time_remaining(self, points_done:int, total_points:int, time_elapsed:float) -> str:
-        """
-        Calculates the estimated time remaining for the measurement.
-
-        Args:
-            points_done (int): The number of points already measured
-            total_points (int): The total number of points to be measured
-            time_elapsed (float): The time elapsed since the start of the measurement in seconds
-            
-        Returns:
-            str: The estimated time remaining (auto converted to hours, minutes, seconds)
-        """
-        if points_done == 0:
-            return "Waiting for first point..."
-        time_per_point = time_elapsed / points_done
-        points_remaining = total_points - points_done
-        time_remaining = time_per_point * points_remaining
-        return self._convert_time_to_hms(time_remaining)
-        
-    def _convert_time_to_hms(self, time_remaining:float) -> str:
-        """
-        Converts time in seconds to a string in hours, minutes, and seconds.
-        
-        Args:
-            time_remaining (float): The time remaining in seconds
-        
-        Returns:
-            str: The time remaining in "Xh Ym Zs" format
-        """
-        hours = int(time_remaining // 3600)
-        minutes = int((time_remaining % 3600) // 60)
-        seconds = int(time_remaining % 60)
-        
-        if hours > 0:
-            return f"{hours}h {minutes}m {seconds}s"
-        elif minutes > 0:
-            return f"{minutes}m {seconds}s"
-        else:
-            return f"{seconds}s"
-
     def _calculate_goto_stall_timeout(self, params:AcquisitionParams) -> float:
         """
         Calculates the stall-timeout to use for a "go to coordinate" movement during a mapping
@@ -330,6 +369,28 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         try: return result_goto.get_nowait()
         except queue.Empty: return None
 
+    def _wait_goto_cancellable(self, event_finish_goto:threading.Event) -> bool:
+        """
+        Waits for a "go to coordinate" movement to finish. If the measurement is cancelled in the meantime,
+        asks the stages to stop immediately (re-sent every STOP_RESEND_INTERVAL_SEC until the movement ends).
+        A stage that cannot be stopped mid-movement simply finishes its move.
+
+        Args:
+            event_finish_goto (threading.Event): The event passed alongside the _sig_gotocor emission
+
+        Returns:
+            bool: True if a stop was requested, i.e. the movement may have ended before its target
+        """
+        flg_stop_requested = False
+        time_last_stop = 0.0
+        while not event_finish_goto.wait(GOTO_CANCEL_POLL_INTERVAL_SEC):
+            if self._event_isacquiring.is_set(): continue
+            if time.time() - time_last_stop >= STOP_RESEND_INTERVAL_SEC:
+                self._sig_stop_motion.emit(threading.Event())
+                time_last_stop = time.time()
+                flg_stop_requested = True
+        return flg_stop_requested
+
     @Slot(AcquisitionParams, list, queue.Queue)
     def run_scan_discrete(
         self,
@@ -343,13 +404,30 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         accumulation = params['accumulation']
         goto_timeout = self._calculate_goto_stall_timeout(params)
 
-        time_start = time.time()
-        total_points = len(mapping_coordinates)
+        # Pre-compute the XY path of the scan, so that the progress/time estimates can be based on
+        # the distance actually travelled rather than on the plain point count. The per-point
+        # integration time is a known, distance-independent cost, so it is given to the estimator.
+        progress = ScanPathProgress(
+            mapping_coordinates,
+            fixed_time_per_point_sec=accumulation * int_time / 1000.0,
+        )
+        self.sig_progress_update_str.emit(progress.initial_message('points'))
+
         self._event_isacquiring.set()
+        if self._pause_gate is not None: self._pause_gate.scan_started()
         msg = self.msg_mea_finished
+        list_failed = []    # The points skipped due to an error
+        progress.start()
         for i, coor in enumerate(mapping_coordinates):
             try:
                 # time1 = time.time()
+                if not self._event_isacquiring.is_set():
+                    msg = self.msg_mea_cancelled
+                    break
+
+                # Hold here while the data hub is writing a database file. Between points is a
+                # safe place to park: nothing is being integrated and the stage is stationary.
+                self._pause_checkpoint(progress)
                 if not self._event_isacquiring.is_set():
                     msg = self.msg_mea_cancelled
                     break
@@ -392,22 +470,24 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                 # print(f'Point {i+1}/{total_points} done. Move time: {(time2-time1)*1e3:.0f} ms, Measurement time: {(time3-time2)*1e3:.0f} ms. Total time: {(time3-time1)*1e3:.0f} ms.')
                 
             except queue.Empty:
+                list_failed.append(coor)
                 self.sig_error_during_mea.emit(self.msg_mea_error + 'Measurement acquisition timed out.')
                 print('Error in run_scan_discrete: Measurement acquisition timed out.')
                 
             except Exception as e:
+                list_failed.append(coor)
                 self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
                 print('Error in run_scan_discrete:',e)
                 
             finally:
                 # Update progress
-                points_done = i + 1
-                time_elapsed = time.time() - time_start
-                time_remaining_str = self._calculate_time_remaining(points_done, total_points, time_elapsed)
-                progress_msg = f'Measured {points_done}/{total_points} points. Remaining est.: {time_remaining_str}. Elapsed: {self._convert_time_to_hms(time_elapsed)}. Total est.: {self._convert_time_to_hms(time_elapsed + (time_elapsed/points_done)*(total_points-points_done))}.'
-                self.sig_progress_update_str.emit(progress_msg)
+                self.sig_progress_update_str.emit(progress.update(i + 1).message('points'))
+        else: i = len(mapping_coordinates)  # Not stopped: every point was gone through
         
         self._event_isacquiring.clear()
+        if self._pause_gate is not None: self._pause_gate.scan_finished()
+        # On a stop, i is the point that was not measured
+        self.sig_unscanned_coors.emit(list_failed + mapping_coordinates[i:])
         self.emit_finish_signals(msg)
         return
 
@@ -440,10 +520,26 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         
         print('Acquisition started, moving to start position...')
         # >>> Perform the mapping measurement <<<
-        time_start = time.time()
-        total_points = len(mapping_coordinates_ends)
+        # Pre-compute the XY path of the scan for the progress/time estimates. There is no
+        # distance-independent per-line cost here (the spectra are acquired while the stage moves),
+        # but the scan lines and the retraces are travelled at very different speeds, so they are
+        # labelled as separate groups and get their own measured travel rate.
+        progress = ScanPathProgress(
+            mapping_coordinates_ends,
+            group_labels=continuous_group_labels(len(mapping_coordinates_ends)),
+        )
+        self.sig_progress_update_str.emit(progress.initial_message('lines'))
+
         self._event_isacquiring.set()
+        if self._pause_gate is not None: self._pause_gate.scan_started()
         goto_timeout = self._calculate_goto_stall_timeout(params)
+
+        # Size the data streamers' storage for the longest scan line, whose spectra are only retrieved
+        # once the line is done. First estimated from the integration time, refined after the speed
+        # auto-adjustment below with the measured spectrum rate (which includes the readout overheads).
+        num_points_line = max(1, int(mapping_speed_param.auto_adjust_expected_number_of_points))
+        line_duration_sec = num_points_line * params['accumulation'] * params['int_time_ms'] / 1000.0
+        self._request_streamer_storage(num_points_line, line_duration_sec)
 
         # Prepare the start of the measurement
         self._syncer.set_notready()
@@ -451,15 +547,15 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         self._syncer.wait_ready()
 
         try:
-            self._auto_adjust_mapping_speed(
+            spectrum_period_sec = self._auto_adjust_mapping_speed(
                 mapping_speed_param=mapping_speed_param,
-                q_test=q_test,
                 event_finish_setvel=event_finish_setvel,
                 event_finish_goto=event_finish_goto,
                 q_trig=q_trig,
-                coor_mea=mapping_coordinates_ends[0],
                 goto_timeout=goto_timeout,
             )
+            if spectrum_period_sec is not None and num_points_line * spectrum_period_sec > line_duration_sec:
+                self._request_streamer_storage(num_points_line, num_points_line * spectrum_period_sec)
         except Exception as e:
             # Don't let a failure here (e.g. a stage comms timeout) silently kill the whole scan
             # thread before it even starts the main loop - report it and continue with the
@@ -468,23 +564,38 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             print('Error in _auto_adjust_mapping_speed:',e)
 
         msg = self.msg_mea_finished
+        list_failed = []    # The end coordinates (start, end) of the scan lines lost to an error
+        # Start the scan clock only now, so the speed auto-adjustment above is excluded from both the
+        # elapsed time and the measured travel rate
+        progress.start()
         for i, coor in enumerate(mapping_coordinates_ends):
             try:
                 if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled; break
-                self._execute_scan_continuous_step(mapping_speed_param, q_mea_out, event_finish_setvel, event_finish_goto, q_trig, i, coor, goto_timeout)
+                # Hold here while the data hub is writing a database file. Only park before going to a
+                # line START (even i), i.e. after the previous line was STOREd: the IGNORE issued on
+                # arrival then discards the spectra acquired while parked. Parking before a line END
+                # (odd i) would leave the stage sitting at the line start after its IGNORE, so the whole
+                # pause gets stored with that line and its oldest spectra outlive the stage hub's
+                # coordinate history (dropped by the autosaver -> missing left side of the map).
+                if i % 2 == 0: self._pause_checkpoint(progress)
+                if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled; break
+                if not self._execute_scan_continuous_step(mapping_speed_param, q_mea_out, event_finish_setvel, event_finish_goto, q_trig, i, coor, goto_timeout):
+                    msg = self.msg_mea_cancelled; break # Stopped mid-movement
             except Exception as e:
+                if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled; break   # A side effect of the stop, not an error
+                list_failed.extend(mapping_coordinates_ends[i - i % 2 : i - i % 2 + 2])
                 self.sig_error_during_mea.emit(self.msg_mea_error + str(e))
                 print('Error in run_scan_continuous:',e)
             finally:
                 # Update progress
-                points_done = i + 1
-                time_elapsed = time.time() - time_start
-                time_remaining_str = self._calculate_time_remaining(points_done, total_points, time_elapsed)
-                progress_msg = f'Measured {points_done}/{total_points} lines. Remaning est.: {time_remaining_str}. Elapsed: {self._convert_time_to_hms(time_elapsed)}. Total est.: {self._convert_time_to_hms(time_elapsed + (time_elapsed/points_done)*(total_points-points_done))}.'
-                self.sig_progress_update_str.emit(progress_msg)
+                self.sig_progress_update_str.emit(progress.update(i + 1).message('lines'))
+        else: i = len(mapping_coordinates_ends)    # Not stopped: every line was gone through
+        if not self._event_isacquiring.is_set(): msg = self.msg_mea_cancelled   # Also catches a stop during the last line
         
-        # Stop raman frame's continuous measurement and store the final measurements
-        q_trig.put(EnumTrig.STORE)
+        # Stop raman frame's continuous measurement and store the final measurements. On a cancellation the
+        # spectra since the last line was stored are discarded instead: they belong to a line (or a retrace)
+        # that was interrupted part-way, now that the stage can be stopped mid-movement.
+        q_trig.put(EnumTrig.IGNORE if msg == self.msg_mea_cancelled else EnumTrig.STORE)
         q_trig.put(EnumTrig.FINISH)
 
         # Restore the stage speed to normal (100%), whether the scan finished or was stopped early.
@@ -495,6 +606,15 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         event_finish_setvel.wait()
 
         self._event_isacquiring.clear()
+        self._clear_streamer_storage_request()
+        if self._pause_gate is not None: self._pause_gate.scan_finished()
+        # On a stop, i is the coordinate that was not reached. A line is only stored on reaching its
+        # end (odd index), so a stop on its way there loses the whole line, from its start (even index).
+        # A stop may also prevent the last travelled line from being stored, so on a cancellation the
+        # line before a stop at a line start (or after the last line) is counted as unscanned too.
+        idx_unscanned = i - i % 2
+        if msg == self.msg_mea_cancelled and i % 2 == 0: idx_unscanned = max(0, i - 2)
+        self.sig_unscanned_coors.emit(list_failed + mapping_coordinates_ends[idx_unscanned:])
         self.emit_finish_signals(msg)
 
     def _execute_scan_continuous_step(
@@ -507,7 +627,7 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         coor_idx:int,
         coor:tuple,
         goto_timeout:float,
-        ) -> None:
+        ) -> bool:
         """
         Executes a single step in the continuous mapping measurement.
 
@@ -520,6 +640,9 @@ class Hilvl_MeasurementAcq_Worker(QObject):
             i (int): The index of the current coordinate
             coor (tuple): The target coordinate
             goto_timeout (float): Stall-timeout [s] to use for the movement - see _calculate_goto_stall_timeout
+
+        Returns:
+            bool: True if the target was reached and its trigger sent, False if the movement was stopped on purpose
         """
         # Go to the requested coordinates
         # time1 = time.time()
@@ -534,10 +657,12 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                     result_goto,
                 )
         # No externally-imposed cap: Motion_GoToCoor_Worker guarantees the event is always
-        # eventually set, bounded by its own stall-detection using goto_timeout.
-        event_finish_goto.wait()
+        # eventually set, bounded by its own stall-detection using goto_timeout. A cancellation
+        # stops the stage mid-movement where supported.
+        flg_stop_requested = self._wait_goto_cancellable(event_finish_goto)
         goto_result_msg = self._get_goto_result(result_goto)
         if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
+            if flg_stop_requested: return False # Stopped on purpose: the caller sees the cancellation and ends the scan
             raise TimeoutError(f"Failed to reach the target coordinate: {goto_result_msg or 'unknown error'}")
         # time2 = time.time()
 
@@ -571,38 +696,46 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         # time4 = time.time()
         
         # print(f'Point {coor_idx+1} done. Move time: {(time2-time1)*1e3:.0f} ms, SetVel time: {(time3-time2)*1e3:.0f} ms, Sync time: {(time4-time3)*1e3:.0f} ms. Total time: {(time4-time1)*1e3:.0f} ms.')
+        return True
         
     def _auto_adjust_mapping_speed(
         self,
         mapping_speed_param:MappingSpeedParam,
-        q_test:queue.Queue,
         event_finish_setvel:threading.Event,
         event_finish_goto:threading.Event,
         q_trig:queue.Queue,
-        coor_mea:tuple,
         goto_timeout:float,
-        ):
+        ) -> float|None:
         """
-        Auto adjusts the mapping speed based on the given parameters by performing a test measurement between the start and end coordinates and calculating the number of measurements collected.
+        Auto adjusts the mapping speed by scanning the longest line and monitoring the spectra while the
+        stage moves. The speed factor is re-estimated with every new spectrum from the actual spacing between
+        the spectra (stage displacement between their timestamps), and the test stops as soon as the estimate
+        converges (see AUTO_ADJUST_* constants), instead of always scanning the whole line. The stage is then
+        left at full speed, ready for the mapping to move to its first line.
+        
+        If the estimate never converges, the latest estimate at the end of the line is used.
 
         Args:
             mapping_speed_param (MappingSpeedParam): The mapping speed parameters for the measurement
-            q_test (queue.Queue): The queue to store the measurement data
             event_finish_setvel (threading.Event): Event to signal the completion of setting velocity
             event_finish_goto (threading.Event): Event to signal the completion of going to coordinates
             q_trig (queue.Queue): Queue to send the measurement trigger commands
-            coor_mea (tuple): The start coordinate of the measurement to return to after the adjustment
             goto_timeout (float): Stall-timeout [s] to use for the movements - see _calculate_goto_stall_timeout
-        """
 
-        # Go to the requested coordinates
-        # time1 = time.time()
-        # print(f'\nMoving to coordinates: {coor} (Index {coor_idx}), distance from last: {math.dist(self._last_coor, coor) if hasattr(self, "_last_coor") else "N/A"}')
+        Returns:
+            float|None: The measured time per spectrum [s] during the test, or None if no estimate was made
+        """
+        if self._stageHub is None or self._ramanHub is None:
+            raise RuntimeError('The stage and Raman data streamers are required for the mapping speed auto-adjustment')
+        
         coor_start = mapping_speed_param.auto_adjust_coor_start
         coor_end = mapping_speed_param.auto_adjust_coor_end
+        num_points = mapping_speed_param.auto_adjust_expected_number_of_points
+        if num_points < 2 or math.dist(coor_start, coor_end) <= 0:
+            raise ValueError('The auto-adjustment line must have at least 2 points and a non-zero length')
+        spacing_target_mm = math.dist(coor_start, coor_end) / (num_points - 1)  # The grid pitch along the line
 
-        # print(f'Auto adjusting mapping speed: Coor start: {coor_start}, Coor end: {coor_end}, Distance: {math.dist(coor_start, coor_end):.3f} mm')
-
+        # Go to the start of the test line
         event_finish_goto.clear()
         result_goto:queue.Queue = queue.Queue()
         self._sig_gotocor.emit(
@@ -616,19 +749,18 @@ class Hilvl_MeasurementAcq_Worker(QObject):
         if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
             raise TimeoutError(f"Failed to reach the auto-adjust start coordinate: {goto_result_msg or 'unknown error'}")
 
-        # Adjust the mapping speed to the initial speed
+        # Set the initial mapping speed
         event_finish_setvel.clear()
         self._sig_setvelrel.emit(mapping_speed_param.mapping_speed_rel_percent, -1.0, event_finish_setvel)
         if not event_finish_setvel.wait(CONTINUOUS_SETVEL_WAIT_TIMEOUT_SEC):
             raise TimeoutError('Failed to set the stage velocity for auto-adjust. Setting velocity timed out.')
 
-        # Start the measurement trigger
+        # Discard the spectra so far, so the acquisition worker's next retrieval stays small
         self._syncer.set_notready()
-        q_trig.put(EnumTrig.IGNORE) # Ignore all the measurements so far
+        q_trig.put(EnumTrig.IGNORE)
         self._syncer.wait_ready()
 
-        # print('Auto adjust mapping speed: Moving to end coordinate for test measurement...')
-        # Move to the end coordinate
+        # Start the test line and monitor it while the stage moves
         event_finish_goto.clear()
         result_goto = queue.Queue()
         self._sig_gotocor.emit(
@@ -637,48 +769,82 @@ class Hilvl_MeasurementAcq_Worker(QObject):
                     goto_timeout,
                     result_goto,
                 )
+        
+        ts_monitor_start:int|None = None    # Spectra are only used after the stage has started moving (skips the start-up/acceleration)
+        num_spectra_last = 0
+        list_factors:list[float] = []       # Speed factor estimates, one per new spectrum
+        spectrum_period_sec:float|None = None
+        flg_converged = False
+        flg_stopped = False
+        while not event_finish_goto.wait(AUTO_ADJUST_POLL_INTERVAL_SEC):
+            if not self._event_isacquiring.is_set(): break  # Cancelled: stop the stage below
+            
+            if ts_monitor_start is None:
+                ts_now = get_timestamp_us_int()
+                coor_now = self._stageHub.get_coordinates_closest(ts_now)
+                if coor_now is not None and math.dist(coor_now, coor_start) >= spacing_target_mm: ts_monitor_start = ts_now
+                continue
+            
+            list_ts = self._ramanHub.get_timestamps(ts_monitor_start)
+            if len(list_ts) <= num_spectra_last or len(list_ts) < AUTO_ADJUST_MIN_SPECTRA: continue
+            num_spectra_last = len(list_ts)
+            
+            # Actual spacing between the spectra: stage displacement between the first and last spectrum
+            coor_first = self._stageHub.get_coordinates_interpolate(list_ts[0])
+            coor_last = self._stageHub.get_coordinates_interpolate(list_ts[-1])
+            if coor_first is None or coor_last is None: continue
+            spacing_actual_mm = math.dist(coor_first, coor_last) / (len(list_ts) - 1)
+            if spacing_actual_mm <= 0: continue
+            
+            list_factors.append(spacing_target_mm / spacing_actual_mm)  # More spectra than wanted (smaller spacing) -> speed up
+            spectrum_period_sec = (list_ts[-1] - list_ts[0]) / 1e6 / (len(list_ts) - 1)
+            
+            # Converged once the latest estimates agree within the tolerance
+            window = list_factors[-AUTO_ADJUST_CONVERGENCE_WINDOW:]
+            if len(window) == AUTO_ADJUST_CONVERGENCE_WINDOW:
+                mean = sum(window) / len(window)
+                if (max(window) - min(window)) / mean <= AUTO_ADJUST_CONVERGENCE_TOLERANCE:
+                    flg_converged = True
+                    break
+        
+        # Stop the test line early (converged or cancelled), then wait for the movement to wind down so the
+        # stage is free for the next command. A stopped move is expected to report not reaching its target.
+        if not event_finish_goto.is_set():
+            flg_stopped = True
+            event_finish_stop = threading.Event()
+            self._sig_stop_motion.emit(event_finish_stop)
+            event_finish_stop.wait(CONTINUOUS_SETVEL_WAIT_TIMEOUT_SEC)
         event_finish_goto.wait()
         goto_result_msg = self._get_goto_result(result_goto)
-        if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
+        if not flg_stopped and goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
             raise TimeoutError(f"Failed to reach the auto-adjust end coordinate: {goto_result_msg or 'unknown error'}")
         
-        # print('Auto adjust mapping speed: Collecting measurements for speed adjustment...')
-        # Collect the measurements in the queue
-        self._syncer.set_notready()
-        q_trig.put(EnumTrig.STORE_TEST)
-        self._syncer.wait_ready()        
+        # Leave the stage at full speed so the mapping moves to its first line straight away
+        event_finish_setvel.clear()
+        self._sig_setvelrel.emit(100.0, -1.0, event_finish_setvel)
+        if not event_finish_setvel.wait(CONTINUOUS_SETVEL_WAIT_TIMEOUT_SEC):
+            raise TimeoutError('Failed to set the stage velocity after auto-adjust. Setting velocity timed out.')
         
-        # print('Auto adjust mapping speed: Finishing test measurement...')
-        # print(f'Number of measurements collected in test queue: {q_test.qsize()}')
-        # Measure the number of measurements collected
-        num_mea = 0
-        while not q_test.empty():
-            _ = q_test.get()
-            num_mea += 1
+        if not self._event_isacquiring.is_set(): return None
+        if len(list_factors) == 0:
+            print('Auto adjust mapping speed: Not enough measurements collected, cannot adjust speed.')
+            self.sig_autoAdjSpeed_newMultiplier.emit(mapping_speed_param.mapping_speed_multiplier)
+            return None
         
-        # Calculate the new mapping speed
-        expected_num_mea = mapping_speed_param.auto_adjust_expected_number_of_points
-        if num_mea == 0:
-            print('Auto adjust mapping speed: No measurements collected, cannot adjust speed.')
-        else:
-            speed_adjust_factor = num_mea / expected_num_mea
-            new_modifier = mapping_speed_param.mapping_speed_multiplier * speed_adjust_factor
-            new_speed_percent = mapping_speed_param.mapping_speed_rel_percent * speed_adjust_factor
-            new_speed_percent = max(MINIMUM_RELATIVE_SPEED_PERCENT, min(new_speed_percent, 100.0))   # Clamp between a minimum and 100%
-            print(f'Auto adjust mapping speed: Collected {num_mea} measurements, expected {expected_num_mea}. Adjusting stage-speed from {mapping_speed_param.mapping_speed_rel_percent:.2f}% to {new_speed_percent:.2f}%.')
-            mapping_speed_param.mapping_speed_rel_percent = new_speed_percent
-            mapping_speed_param.mapping_speed_multiplier = new_modifier
+        # Apply the latest estimate
+        speed_adjust_factor = list_factors[-1]
+        new_modifier = mapping_speed_param.mapping_speed_multiplier * speed_adjust_factor
+        new_speed_percent = mapping_speed_param.mapping_speed_rel_percent * speed_adjust_factor
+        new_speed_percent = max(MINIMUM_RELATIVE_SPEED_PERCENT, min(new_speed_percent, 100.0))   # Clamp between a minimum and 100%
+        status = f'converged after {num_spectra_last} measurements' if flg_converged else \
+            f'did not converge within the line ({num_spectra_last} measurements), using the latest estimate'
+        print(f'Auto adjust mapping speed: {status}. Speed factor {speed_adjust_factor:.3f}. '
+              f'Adjusting stage-speed from {mapping_speed_param.mapping_speed_rel_percent:.2f}% to {new_speed_percent:.2f}%.')
+        mapping_speed_param.mapping_speed_rel_percent = new_speed_percent
+        mapping_speed_param.mapping_speed_multiplier = new_modifier
         self.sig_autoAdjSpeed_newMultiplier.emit(mapping_speed_param.mapping_speed_multiplier)
         
-        # Return to the measurement start coordinate
-        event_finish_goto.clear()
-        result_goto = queue.Queue()
-        self._sig_gotocor.emit((float(coor_mea[0]),float(coor_mea[1]),float(coor_mea[2])),event_finish_goto,goto_timeout,result_goto)
-        event_finish_goto.wait()
-        goto_result_msg = self._get_goto_result(result_goto)
-        if goto_result_msg != Motion_GoToCoor_Worker.msg_target_reached:
-            raise TimeoutError(f"Failed to return to the measurement start coordinate after auto-adjust: {goto_result_msg or 'unknown error'}")
-        
+        return spectrum_period_sec
         
     @Slot(str)
     def emit_finish_signals(self,msg:str):
@@ -721,6 +887,10 @@ class WorkerPipelineManager(QObject):
         )
         hilvlacq_worker._sig_setvelrel.connect(
             motion_controller.set_vel_relative,
+            qc.Qt.ConnectionType.QueuedConnection
+        )
+        hilvlacq_worker._sig_stop_motion.connect(
+            motion_controller.stop_motion,
             qc.Qt.ConnectionType.QueuedConnection
         )
         hilvlacq_worker._sig_acquire_discrete_mea.connect(raman_worker.acquire_single_measurement)
@@ -821,15 +991,30 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
     # >>> Mapping widgets and parameters setups <<<
         # Parameters
         self._list_sel_mapCoor = []
-        self._flg_meaCancelled = False # Flag to indicate if the measurement was cancelled
-        
+        self._mapCoor_inProgress:MeaCoor_mm|None = None # The mapping coordinates being scanned
+        self._scanDir_inProgress:str = ''               # The scan direction used for the scan in progress
+        self._list_unscanned_coor:list = []             # The scan coordinates not completed in the last scan (from the worker)
+        self._list_remaining_names:list[str] = []       # Names of the unscanned coordinates added to the hub in this run
+
+        # Low memory handling (requested by the data hub, see Wdg_DataHub_Mapping._check_system_memory)
+        self._flg_stop_for_offload = False      # The scan is being stopped to offload the data hub, then resumed
+        self._flg_stop_for_memory = False       # The scan is being stopped for good: memory is critically low
+        self._flg_awaiting_offload = False      # Stopped, waiting for the offload to finish to resume
+        self._flg_awaiting_memory = False       # Offloaded, waiting for enough free memory to resume
+        self._flg_resume_cancelled = False      # The user pressed stop while waiting for the offload
+        self._mapCoor_resume:MeaCoor_mm|None = None     # The remaining coordinates to resume on after the offload
+        self._avail_memory_gb_critical = 0.0    # The available memory that triggered a critical stop [GB]
+        self._timer_resume_memory = QTimer(self)    # Re-checks the memory while waiting to resume
+        self._timer_resume_memory.setInterval(int(DATAHUB_MEMORYCHECK_INTERVAL_SEC * 1000))
+        self._timer_resume_memory.timeout.connect(self._check_memory_for_resume)
+
         # >> Mapping options widgets setup <<
         self._btn_discrete = wdg.btn_discrete
         self._btn_discrete.clicked.connect(lambda: self.initiate_mapping(MappingMethods.DISCRETE))
         self._btn_continuous = wdg.btn_continuous
         self._btn_continuous.clicked.connect(lambda: self.initiate_mapping(MappingMethods.CONTINUOUS))
         self._btn_stop = wdg.btn_stop
-        self._btn_stop.clicked.connect(lambda: self.sig_stop_measurement.emit())
+        self._btn_stop.clicked.connect(self._handle_stop_clicked)
         
     # >>> Mapping scrambler options setup <<<
         self._rb_snake = wdg.rb_snake
@@ -924,10 +1109,17 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         """
     # >>> Worker setups <<<
         self._event_isacquiring = threading.Event()
+        # Shared with the data hub: every database write parks the scan for its duration, and
+        # the scan in turn tells the hub when it is safe to write.
+        self._pause_gate = MeasurementPauseGate()
+        self._dataHub_map.set_pause_gate(self._pause_gate)
         self._worker_hilvlacq = Hilvl_MeasurementAcq_Worker(
             self._dataHub_map.get_MappingHub(),
             self.raman_controller.get_syncer_acquisition(),
-            self._event_isacquiring)
+            self._event_isacquiring,
+            pause_gate=self._pause_gate,
+            stageHub=self._stageHub,
+            ramanHub=self._ramanHub)
         
         # Try to get the goto worker, but be defensive about timing
         try:
@@ -956,6 +1148,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.sig_run_scan_continuous.connect(self._worker_hilvlacq.run_scan_continuous)
         self._worker_hilvlacq.sig_error_during_mea.connect(self.handle_error_during_mapping)
         self._worker_hilvlacq.sig_mea_done_msg.connect(self._worker_autoMeaStorer.relay_finished_message)
+        self._worker_hilvlacq.sig_unscanned_coors.connect(self._store_unscanned_coordinates)
         
         # Connection: Thread and worker management
         self._thread_hilvlacq = QThread(self)
@@ -976,6 +1169,14 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         # Signal to stop the autosaver
         self._worker_hilvlacq.sig_mea_done.connect(self._worker_autoMeaStorer.stop_autosaver)
         
+        # The unit is released to the data hub's autosave/offload in handle_mapping_completion, not on
+        # sig_mea_done: the autosaver is still storing the last spectra into it at that point.
+
+        # Low memory handling: the data hub asks for the scan to be stopped (and resumed after an offload)
+        self._dataHub_map.sig_req_stop_for_offload.connect(self._handle_offload_stop_request)
+        self._dataHub_map.sig_memory_critical.connect(self._handle_memory_critical)
+        self._dataHub_map.sig_offload_finished.connect(self._handle_offload_finished)
+
         # Signal to start and set the autosaver
         self.sig_start_autosaver.connect(self._worker_autoMeaStorer.start_autosaver)
         self.sig_set_autosaver.connect(self._worker_autoMeaStorer.set_save_params)
@@ -1182,7 +1383,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         return total_distance
     
     def _initialise_mapping_parameters(self, mappingHub:MeaRMap_Hub, mapping_coordinates_mm:MeaCoor_mm,
-                                       mappingUnit_name:str|None=None) -> tuple[list,float,str]:
+                                       mappingUnit_name:str|None=None) -> tuple[list,float,str]|None:
         """
         Performs the initial checks prior to the mapping measurement:
             1. Running status check
@@ -1197,7 +1398,8 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             mappingUnit_name (str|None): The mapping ID. If None, the user will be prompted to enter it. Defaults to None.
             
         Returns:
-            tuple: mapping coordinates, mapping speed (mm/sec), mapping ID
+            tuple|None: mapping coordinates, mapping speed (mm/sec), mapping ID.
+                None if the user cancelled the mapping ID request.
             
         NOTE:
             Assumes that the mapping coordinate will be followed as a pathway
@@ -1224,20 +1426,24 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             f"The speed modifier in the config file must be a positive number. Got {AppRamanEnum.CONTINUOUS_SPEED_MODIFIER.value}"
         
         # Mapping ID request and check
-        list_mappingUnit_names = list(mappingHub.get_dict_nameToID().keys())
         if mappingUnit_name is None and mapping_coordinates_mm.mappingUnit_name != '':
             mappingUnit_name = mapping_coordinates_mm.mappingUnit_name
         
-        while mappingUnit_name is None:
+        def validator(name:str) -> bool: return name.strip() != '' and mappingHub.validate_new_unit_name(name)
+        
+        if mappingUnit_name is None or not validator(mappingUnit_name):
+            message = 'Enter the ID for the mapping measurement:' if mappingUnit_name is None else \
+                f"The mapping ID '{mappingUnit_name}' already exists.\nEnter a new ID for the mapping measurement:"
             mappingUnit_name = messagebox_request_input(
                 parent=self,
                 title='Mapping ID',
-                message='Enter the ID for the mapping measurement:',
-                default='',
-                validator=self._dataHub_map.get_MappingHub().validate_new_unit_name,
+                message=message,
+                default=mappingUnit_name or '',
+                validator=validator,
                 invalid_msg="Invalid 'mappingUnit name'. The name cannot be empty or already exist. Please try again.",
                 loop_until_valid=True
             )
+            if mappingUnit_name is None: return None    # User cancelled
             
         return (list_coor_mm, mapping_speed_mmPerSec, mappingUnit_name)
         
@@ -1406,31 +1612,347 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         self.statbar.showMessage(msg,5000)
         self.statbar.setStyleSheet("QStatusBar { background-color : red; color : white; }")
         
+    @Slot(list)
+    def _store_unscanned_coordinates(self, list_unscanned:list):
+        """
+        Stores the scan coordinates the worker did not complete, used to update the coordinate
+        hub once the measurement is over
+
+        Args:
+            list_unscanned (list): The unscanned scan coordinates (discrete: the points, continuous: the line ends)
+        """
+        self._list_unscanned_coor = list_unscanned
+        
+    def _get_unscanned_coordinates(self, list_coor_mm:list, list_unscanned:list, method:MappingMethods,
+                                   scan_direction:str, precision:int=4) -> list:
+        """
+        Converts the unscanned scan coordinates from the worker back into mapping coordinates.
+        
+        Args:
+            list_coor_mm (list): The original mapping coordinates, [(x1,y1,z1),(x2,y2,z2),...]
+            list_unscanned (list): The unscanned scan coordinates. Discrete: the points,
+                continuous: the end coordinates of the scan lines.
+            method (MappingMethods): The mapping method used for the scan
+            scan_direction (str): The scan direction used for the scan (Enum_ScanDir value)
+            precision (int): The decimal places the line coordinates are rounded to. Must match the
+                one used in _convertCoor_byScanOptions. Defaults to 4.
+            
+        Returns:
+            list: The unscanned mapping coordinates
+        """
+        # Discrete: the scan coordinates are the mapping coordinates themselves
+        if method == MappingMethods.DISCRETE: return [tuple(float(c) for c in coor) for coor in list_unscanned]
+        
+        # Continuous: an unscanned line covers every original point sharing its line coordinate
+        # (y for x-direction scans, x for y-direction scans), see _convertCoor_byScanOptions
+        axis = 1 if scan_direction == Enum_ScanDir.XDIR.value else 0
+        set_lines = {round(float(coor[axis]), precision) for coor in list_unscanned}
+        return [coor for coor in list_coor_mm if round(float(coor[axis]), precision) in set_lines]
+    
+    def _update_coorHub_after_mapping(self, flg_finished:bool) -> None:
+        """
+        Updates the mapping coordinates hub after a scan: removes the scanned mapping coordinates
+        if the scan finished, and adds its unscanned coordinates (if any) as a new entry.
+        A cancelled scan keeps its mapping coordinates.
+
+        Args:
+            flg_finished (bool): True if the scan finished, False if it was cancelled
+        """
+        mapCoor = self._mapCoor_inProgress
+        if mapCoor is None: return
+
+        list_remaining = self._get_unscanned_coordinates(
+            mapCoor.mapping_coordinates, self._list_unscanned_coor,
+            self._last_mappingmethod, self._scanDir_inProgress)
+
+        name = mapCoor.mappingUnit_name
+        if flg_finished and self._coorHub.search_mappingCoor(name) is not None:
+            self._coorHub.remove_mappingCoor(name)
+
+        # Nothing scanned: the kept original already holds every unscanned coordinate
+        if len(list_remaining) == 0 or (not flg_finished and len(list_remaining) == len(mapCoor.mapping_coordinates)):
+            return
+
+        name_remaining = self._get_remaining_name(name)
+        self._coorHub.append(MeaCoor_mm(name_remaining, list_remaining))
+        self._list_remaining_names.append(name_remaining)
+
+    def _get_remaining_name(self, name:str) -> str:
+        """
+        Returns a free name for the unscanned remainder of a mapping, unused in both the coordinate hub
+        and the mapping hub (so a resumed scan never stops to ask for a new unit name).
+
+        Args:
+            name (str): The name of the original mapping coordinates
+
+        Returns:
+            str: The name for the remainder
+        """
+        mappingHub = self._dataHub_map.get_MappingHub()
+        # Named after the original, without a previous '_remaining' suffix so they don't stack up
+        name_base = re.sub(r'_remaining(_\d+)?$', '', name) + '_remaining'
+        name_remaining = name_base
+        i = 2
+        while not self._coorHub.validator_new_name(name_remaining) or not mappingHub.validate_new_unit_name(name_remaining):
+            name_remaining = f'{name_base}_{i}'
+            i += 1
+        return name_remaining
+
+    # >>> Low memory handling <<<
+
+    @Slot()
+    def _handle_stop_clicked(self):
+        """
+        Stops the running scan. While a scan is stopped for an offload, cancels its resume instead.
+        """
+        if self._flg_awaiting_memory:
+            # Nothing is running or writing: give up straight away
+            self._end_offload_pause('Mapping measurement cancelled', 'The mapping measurement was cancelled by the user', flg_error=False)
+            return
+        if self._flg_awaiting_offload or self._flg_stop_for_offload: self._flg_resume_cancelled = True
+        self.sig_stop_measurement.emit()
+
+    @Slot()
+    def _handle_offload_stop_request(self):
+        """
+        Memory is low: stops the running scan so that the data hub can offload it, after which the scan
+        is resumed on the remaining coordinates (see _pause_for_offload and _handle_offload_finished).
+        """
+        if self._flg_stop_for_memory or self._flg_stop_for_offload or self._flg_awaiting_offload or self._flg_awaiting_memory: return
+        if self._mapCoor_inProgress is None:
+            # The scan has just ended on its own: nothing to stop, offload straight away
+            self._dataHub_map.request_offload(notify=False)
+            return
+
+        self._flg_stop_for_offload = True
+        self._flg_resume_cancelled = False
+        print(f'{time.strftime("%H:%M:%S")}: low system memory, stopping the scan to offload the data hub')
+        self.statbar.showMessage('Low system memory: stopping the scan to offload the data hub. It will resume automatically.')
+        self.statbar.setStyleSheet("QStatusBar { background-color : orange; color : black; }")
+        self.sig_stop_measurement.emit()
+
+    @Slot(float)
+    def _handle_memory_critical(self, avail_gb:float):
+        """
+        Memory is critically low: stops the running scan for good (no resume, the queued ROIs are dropped).
+        The error is shown once the scan is over, in handle_mapping_completion.
+
+        Args:
+            avail_gb (float): The available system memory [GB]
+        """
+        if self._flg_stop_for_memory: return
+        if self._mapCoor_inProgress is None: return
+
+        self._flg_stop_for_memory = True
+        self._flg_stop_for_offload = False  # Overrides a stop for an offload: no resume
+        self._avail_memory_gb_critical = avail_gb
+        print(f'{time.strftime("%H:%M:%S")}: critically low system memory ({avail_gb:.2f} GB), stopping the scan')
+        self.statbar.showMessage(f'Critically low system memory ({avail_gb:.2f} GB available): stopping the scan.')
+        self.statbar.setStyleSheet("QStatusBar { background-color : red; color : white; }")
+        self.sig_stop_measurement.emit()
+
+    def _msg_memory_critical(self, avail_gb:float) -> str:
+        """
+        Returns:
+            str: The error message for a scan stopped on critically low memory
+        """
+        return (f'The mapping measurement was stopped because the system memory is critically low '
+                f'({avail_gb:.2f} GB available, minimum {DATAHUB_MEMORY_CRITICAL_GB:.1f} GB).\n\n'
+                'It will not be resumed automatically. The measured data is kept in the data hub and is '
+                'offloaded to the autosave folder as soon as possible. Free up memory (e.g. close other '
+                'applications) before restarting the measurement.')
+
+    def _pause_for_offload(self) -> None:
+        """
+        Called once a scan stopped for an offload is over and every spectrum is stored in its unit.
+        Prepares the remaining coordinates to resume on and asks the data hub for the offload.
+
+        Note:
+            With 'delete finished coordinates' checked, the original coordinates are replaced in the
+            coordinate hub by the remainder right away, so the list stays correct however the resumed
+            scan ends.
+        """
+        mapCoor = self._mapCoor_inProgress
+        self._mapCoor_inProgress = None
+        self._mapCoor_resume = None
+
+        if mapCoor is not None:
+            list_remaining = self._get_unscanned_coordinates(
+                mapCoor.mapping_coordinates, self._list_unscanned_coor,
+                self._last_mappingmethod, self._scanDir_inProgress)
+            if len(list_remaining) > 0:
+                self._mapCoor_resume = MeaCoor_mm(self._get_remaining_name(mapCoor.mappingUnit_name), list_remaining)
+            if self._widget.chk_delFinished.isChecked():
+                try:
+                    if self._coorHub.search_mappingCoor(mapCoor.mappingUnit_name) is not None:
+                        self._coorHub.remove_mappingCoor(mapCoor.mappingUnit_name)
+                    if self._mapCoor_resume is not None: self._coorHub.append(self._mapCoor_resume)
+                except Exception as e: print(f'_pause_for_offload: could not update the coordinate list: {e}')
+
+        self._flg_awaiting_offload = True
+        self._btn_stop.setEnabled(True)     # Lets the user cancel the resume
+        self.statbar.showMessage('Low system memory: offloading the data hub. The scan will resume automatically once done.')
+        self.statbar.setStyleSheet("QStatusBar { background-color : orange; color : black; }")
+        self._dataHub_map.request_offload(notify=True)
+
+    @Slot(bool, str)
+    def _handle_offload_finished(self, flg_success:bool, message:str):
+        """
+        Once the offload for a stopped scan is done, waits for enough free memory to resume it (see
+        _check_memory_for_resume), unless the offload failed or the user cancelled in the meantime.
+
+        Args:
+            flg_success (bool): Whether the offload succeeded
+            message (str): The offload's outcome message
+        """
+        if not self._flg_awaiting_offload: return
+        self._flg_awaiting_offload = False
+
+        if self._flg_resume_cancelled:
+            self._end_offload_pause('Mapping measurement cancelled', 'The mapping measurement was cancelled by the user', flg_error=False)
+            return
+        if not flg_success:
+            self._end_offload_pause('Mapping measurement stopped',
+                f'The mapping measurement was stopped to offload the data hub, but the offload failed, so it was not resumed:\n{message}')
+            return
+
+        self._flg_awaiting_memory = True
+        self._check_memory_for_resume()
+        if self._flg_awaiting_memory: self._timer_resume_memory.start()
+
+    @Slot()
+    def _check_memory_for_resume(self):
+        """
+        Resumes the scan stopped for an offload once the available memory is back above the offload
+        threshold. Resuming any lower would only get the scan stopped again on the data hub's next check,
+        chopping it into tiny units, as the offload evidently did not free enough memory (e.g. another
+        application is holding it). Keeps waiting until then, unless memory falls critically low (the
+        scan is then stopped for good) or the user presses stop.
+        """
+        if not self._flg_awaiting_memory: return
+        try: avail_gb = self._dataHub_map.get_available_memory_gb()
+        except Exception as e:
+            print(f'_check_memory_for_resume: could not read the system memory: {e}')
+            return
+
+        if avail_gb < DATAHUB_MEMORY_CRITICAL_GB:
+            self._end_offload_pause('Mapping stopped: low memory', self._msg_memory_critical(avail_gb))
+            return
+        if avail_gb < DATAHUB_OFFLOAD_MINMEMORY_GB:
+            self.statbar.showMessage(f'Low system memory: waiting for {DATAHUB_OFFLOAD_MINMEMORY_GB:.1f} GB to be available '
+                                     f'to resume the scan ({avail_gb:.2f} GB now). Press stop to cancel.')
+            self.statbar.setStyleSheet("QStatusBar { background-color : orange; color : black; }")
+            return
+
+        self._timer_resume_memory.stop()
+        self._flg_awaiting_memory = False
+        mapCoor_resume = self._mapCoor_resume
+        self._mapCoor_resume = None
+        self.statbar.setStyleSheet("")
+        if mapCoor_resume is not None:
+            print(f'{time.strftime("%H:%M:%S")}: offload done ({avail_gb:.2f} GB available), resuming the scan as {mapCoor_resume.mappingUnit_name}')
+            self._list_sel_mapCoor.insert(0, mapCoor_resume)
+            self.initiate_mapping(method=self._last_mappingmethod)
+        else:
+            # The scan was stopped right at its end: carry on as if it had finished
+            self.handle_mapping_completion(self._worker_hilvlacq.msg_mea_finished)
+
+    def _end_offload_pause(self, title:str, msg:str, flg_error:bool=True) -> None:
+        """
+        Gives up on resuming a scan stopped for an offload: drops the queued ROIs, releases the widgets
+        and tells the user.
+
+        Args:
+            title (str): The dialog title
+            msg (str): The dialog message
+            flg_error (bool): Shows an error dialog if True, a warning otherwise. Defaults to True.
+        """
+        self._timer_resume_memory.stop()
+        self._flg_awaiting_offload = False
+        self._flg_awaiting_memory = False
+        self._flg_resume_cancelled = False
+        mapCoor_resume = self._mapCoor_resume
+        self._mapCoor_resume = None
+
+        self._list_sel_mapCoor.clear()
+        self.raman_controller.reset_enable_widgets()
+        self.motion_controller.enable_widgets()
+        self.enable_widgets()
+        self.statbar.showMessage(title)
+        self.statbar.setStyleSheet("")
+        if mapCoor_resume is not None and self._widget.chk_delFinished.isChecked():
+            msg += f'\n\nThe unscanned coordinates are in the coordinate list as:\n  • {mapCoor_resume.mappingUnit_name}'
+        msg += self._pop_remaining_names_message()
+        if flg_error: qw.QMessageBox.critical(self, title, msg)
+        else: qw.QMessageBox.warning(self, title, msg)
+
+    def _pop_remaining_names_message(self) -> str:
+        """
+        Returns a message listing the unscanned coordinates added to the hub in this run (empty if
+        there are none), and clears that list
+        """
+        if len(self._list_remaining_names) == 0: return ''
+        msg = '\n\nThe unscanned coordinates have been added to the coordinate list as:\n' + \
+            '\n'.join(f'  • {name}' for name in self._list_remaining_names)
+        self._list_remaining_names.clear()
+        return msg
+
     @Slot(str)
     def handle_mapping_completion(self, msg:str):
         """
         Handles the completion of a mapping measurement
         """
+        # Only now is every spectrum stored in the unit (the autosaver relays this message once it is
+        # done), so only now may the data hub autosave or offload it
+        self._dataHub_map.clear_unit_in_progress()
+
+        flg_stop_for_memory, self._flg_stop_for_memory = self._flg_stop_for_memory, False
+        flg_stop_for_offload, self._flg_stop_for_offload = self._flg_stop_for_offload, False
+        if flg_stop_for_offload and msg == self._worker_hilvlacq.msg_mea_cancelled:
+            self._pause_for_offload()
+            return
+        # Answer an offload process still waiting on this scan's stop: the scan ended on its own before the
+        # stop took effect, or a critical memory stop took over. Otherwise that process would block every
+        # other offload until it timed out.
+        if flg_stop_for_offload or self._dataHub_map.is_offload_in_progress():
+            self._dataHub_map.request_offload(notify=False)
+
         self.raman_controller.reset_enable_widgets()
         self.motion_controller.enable_widgets()
         self.enable_widgets()
         self.statbar.showMessage('Mapping measurement complete')
         self.statbar.setStyleSheet("") # Reset to default
-        
-        if msg == self._worker_hilvlacq.msg_mea_cancelled:
+
+        msg_finished = self._worker_hilvlacq.msg_mea_finished
+        if self._widget.chk_delFinished.isChecked() and msg in (msg_finished, self._worker_hilvlacq.msg_mea_cancelled):
+            try: self._update_coorHub_after_mapping(flg_finished=msg == msg_finished)
+            except Exception as e: qw.QMessageBox.warning(self,'Coordinate list update failed',f'Failed to update the mapping coordinate list: {e}')
+        self._mapCoor_inProgress = None
+
+        if flg_stop_for_memory:
+            # Stopped for good, whatever the scan itself reported: the queued ROIs are dropped too
             self._list_sel_mapCoor.clear()
-            qw.QMessageBox.warning(self,'Mapping measurement cancelled','The mapping measurement was cancelled by the user')
+            self.statbar.showMessage('Mapping stopped: critically low system memory')
+            self.statbar.setStyleSheet("QStatusBar { background-color : red; color : white; }")
+            qw.QMessageBox.critical(self,'Mapping stopped: low memory',
+                                    self._msg_memory_critical(self._avail_memory_gb_critical) + self._pop_remaining_names_message())
+            return
+        elif msg == self._worker_hilvlacq.msg_mea_cancelled:
+            self._list_sel_mapCoor.clear()
+            qw.QMessageBox.warning(self,'Mapping measurement cancelled','The mapping measurement was cancelled by the user'
+                                   + self._pop_remaining_names_message())
             return
         elif msg.startswith(self._worker_hilvlacq.msg_mea_error):
             self._list_sel_mapCoor.clear()
-            qw.QMessageBox.critical(self,'Mapping measurement error',msg)
+            qw.QMessageBox.critical(self,'Mapping measurement error',msg + self._pop_remaining_names_message())
             return
-        
+
         if msg == self._worker_hilvlacq.msg_mea_finished and len(self._list_sel_mapCoor) == 0:
             self._widget.chk_contMap_autoAdjustSpeed.setChecked(True)
             if self._widget.chk_beamdump.isChecked():
                 self.motion_controller.go_to_beamdump()
-            qw.QMessageBox.information(self,'Mapping measurement complete','The mapping measurement is complete and added to the data hub')
+            qw.QMessageBox.information(self,'Mapping measurement complete','The mapping measurement is complete and added to the data hub'
+                                       + self._pop_remaining_names_message())
         elif msg == self._worker_hilvlacq.msg_mea_finished:
             self.initiate_mapping(method=self._last_mappingmethod)
         else: raise ValueError("Invalid mapping completion message")
@@ -1439,7 +1961,12 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         """
         Performs discrete mapping based on the mapping coordinates stored in the list
         """
-        def reset(): self.enable_widgets()
+        def reset():
+            self._list_sel_mapCoor.clear()
+            self._mapCoor_inProgress = None
+            self.raman_controller.reset_enable_widgets()
+            self.motion_controller.enable_widgets()
+            self.reset_mapping_widgets()
         assert method in MappingMethods, "Invalid mapping method. Check the MappingMethods enum."
         
         mapping_hub = self._dataHub_map.get_MappingHub()
@@ -1458,6 +1985,10 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             qw.QMessageBox.critical(self,'Error',f"Failed to initialise mapping parameters for '{mappingUnit_name}': {e}")
             reset()
             return
+        if result is None:  # User cancelled the mapping ID request
+            reset()
+            qw.QMessageBox.warning(self,'Mapping measurement cancelled','The mapping measurement was cancelled by the user')
+            return
         
         list_coor, mapping_speed_mmPerSec, unit_name = result
         if method == MappingMethods.CONTINUOUS: ends_only = True
@@ -1470,15 +2001,21 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
             reset()
             return
                 
+        # Kept to update the coordinate hub once the scan is over (see handle_mapping_completion)
+        self._mapCoor_inProgress = mapCoor
+        self._scanDir_inProgress = self._get_scan_options()[1]
+        self._list_unscanned_coor = []
+
         try:
             self._widget.chk_contMap_autoAdjustSpeed.setEnabled(False)
             self._btn_stop.setEnabled(True)
             assert list_coor is not None and len(list_coor)>0, "No coordinates to perform mapping"
-            self._request_Mapping(mapping_coordinates=list_coor, unit_name=unit_name, method=method, mapping_speed_param=mappingSpeedParam)
+            if not self._request_Mapping(mapping_coordinates=list_coor, unit_name=unit_name, method=method, mapping_speed_param=mappingSpeedParam):
+                reset()
+                qw.QMessageBox.warning(self,'Mapping measurement cancelled','The mapping measurement was cancelled by the user')
         except Exception as e:
             qw.QMessageBox.critical(self,'Error',f"Failed to perform mapping for '{mappingUnit_name}': {e}")
             reset()
-            if not self._flg_meaCancelled: self._coorHub.remove_mappingCoor(mappingUnit_name)
         
     def _request_Mapping(
         self,
@@ -1486,7 +2023,14 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         unit_name:str,
         method:MappingMethods,
         mapping_speed_param:MappingSpeedParam,
-        ) -> None:
+        ) -> bool:
+        """
+        Requests the mapping measurement from the worker.
+        
+        Returns:
+            bool: True if the measurement was requested, False if it was cancelled
+                (e.g., the user cancelled the unit renaming prompt)
+        """
         assert method in MappingMethods, "Invalid mapping method. Check the MappingMethods enum."
     # >>> Initialisations <<<
         # Generate the extra metadata for the mapping measurement
@@ -1494,7 +2038,10 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
         
         # Initialise the mapping measurement data class
         mea_unit = MeaRMap_Unit(unit_name, extra_metadata=extra_metadata)
-        self._dataHub_map.append_MappingUnit(mea_unit)
+        if not self._dataHub_map.append_MappingUnit(mea_unit): return False
+        # Tell the data hub this unit is live, so its autosave leaves it out and its offload
+        # never drops it from memory while the scan is still writing into it
+        self._dataHub_map.mark_unit_in_progress(mea_unit.get_unit_id())
 
         # Scramble the mapping coordinates if requested
         mapping_coordinates = self._scramble_mapping_coordinates(mapping_coordinates, method)
@@ -1520,6 +2067,7 @@ class Wdg_HighLvlController_Raman(qw.QWidget):
                 mapping_speed_param,
                 q_autosave,
                 )
+        return True
 
 def test_hilvl_Raman_app(processor:mpp.Pool|None=None):
     """

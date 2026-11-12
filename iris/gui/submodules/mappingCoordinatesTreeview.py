@@ -26,8 +26,11 @@ class Coor_saveload_worker(QObject):
     sig_save_done = Signal() # Emitted when the mapping coordinates are saved.
     sig_load_done = Signal() # Emitted when the mapping coordinates are loaded.
     
+    sig_remove_done = Signal(int, list) # Emitted when the removal finishes: (number removed, per-unit errors).
+    
     sig_save_error = Signal(str) # Emitted when there is an error in saving the mapping coordinates.
     sig_load_error = Signal(str) # Emitted when there is an error in loading the mapping coordinates.
+    sig_remove_error = Signal(str) # Emitted when the removal itself fails.
     
     message_loaded_lastsession = "Previous unfinished mapping coordinates found and has been loaded"
     
@@ -59,6 +62,24 @@ class Coor_saveload_worker(QObject):
                 self.sig_load_done.emit()
             except Exception as e: self.sig_load_error.emit(f"Failed to load mapping coordinates: {e}")
         return
+    
+    @Slot(list)
+    def remove_MappingCoordinates(self,list_coorNames:list[str]):
+        """
+        Removes the given mapping coordinates from the hub.
+        
+        Args:
+            list_coorNames (list[str]): The list of mapping coordinate names to remove.
+        
+        Note:
+            Runs in the worker thread: every removal deletes that unit's autosaved .csv from the
+            disk, which would otherwise block the GUI when many units are removed at once.
+        """
+        try:
+            list_errors = self._mappingCoorHub.remove_list_mappingCoor(list_coorNames)
+            self.sig_remove_done.emit(len(list_coorNames) - len(list_errors), list_errors)
+        except Exception as e:
+            self.sig_remove_error.emit(f"Failed to remove the mapping coordinates: {e}")
     
     @Slot(list, str, str)
     def save_MappingCoordinates(self,list_coorNames:list[str],dirpath:str,type:Literal['pickle','csv']='pickle'):
@@ -101,6 +122,7 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
     """
     sig_load_mappingCoor = Signal(list) # Emitted to load the mapping coordinates from the local disk.
     sig_save_mappingCoor = Signal(list, str, str) # Emitted to save the mapping coordinates to the local disk.
+    sig_remove_mappingCoor = Signal(list) # Emitted to remove the mapping coordinates off the GUI thread.
     
     _sig_update_tree = Signal() # Emitted when the treeview needs to be updated.
     
@@ -129,6 +151,7 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         self._btn_load = wdg.btn_load
         self._btn_save = wdg.btn_save
         
+        self._btn_remove_ori = self._btn_remove.text()
         self._btn_remove.clicked.connect(lambda: self._remove_selected_mapping_coordinate())
         self._btn_rename.clicked.connect(lambda: self.rename_MappingCoordinate())
         self._btn_load.clicked.connect(lambda: self._load_MappingCoordinates())
@@ -153,9 +176,12 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
         
         self.sig_load_mappingCoor.connect(self._worker.load_MappingCoordinates)
         self.sig_save_mappingCoor.connect(self._worker.save_MappingCoordinates)
+        self.sig_remove_mappingCoor.connect(self._worker.remove_MappingCoordinates)
         
         self._worker.sig_save_error.connect(self.handle_save_error)
         self._worker.sig_load_error.connect(self.handle_load_error)
+        self._worker.sig_remove_done.connect(self._handle_remove_result)
+        self._worker.sig_remove_error.connect(self.handle_remove_error)
         
         self._worker.sig_save_done.connect(lambda: self._btn_save.setEnabled(True))
         self._worker.sig_load_done.connect(lambda: self._btn_load.setEnabled(True))
@@ -317,15 +343,79 @@ class Wdg_Treeview_MappingCoordinates(qw.QWidget):
                 except ValueError as e:
                     qw.QMessageBox.warning(self, 'Error', f"Invalid unit name: {e}")
     
+    def _disable_buttons_removal(self):
+        """
+        Disables every button that touches the hub while a removal runs in the worker thread,
+        so the coordinates cannot be saved, loaded, renamed or removed from mid-removal.
+        """
+        self._btn_remove.setEnabled(False)
+        self._btn_remove.setText('Removing...')
+        self._btn_rename.setEnabled(False)
+        self._btn_load.setEnabled(False)
+        self._btn_save.setEnabled(False)
+
+    def _reset_buttons_removal(self):
+        """
+        Re-enables the buttons disabled by _disable_buttons_removal.
+        """
+        self._btn_remove.setEnabled(True)
+        self._btn_remove.setText(self._btn_remove_ori)
+        self._btn_rename.setEnabled(True)
+        self._btn_load.setEnabled(True)
+        self._btn_save.setEnabled(True)
+
+    @Slot(str)
+    def handle_remove_error(self, msg:str):
+        """
+        Handles a failed removal by re-enabling the buttons and showing a message box.
+        
+        Args:
+            msg (str): The error message to show.
+        """
+        self._reset_buttons_removal()
+        self._sig_update_tree.emit()
+        qw.QMessageBox.warning(self, 'Remove error', msg)
+
+    @Slot(int, list)
+    def _handle_remove_result(self, num_removed:int, list_errors:list):
+        """
+        Re-enables the buttons and refreshes the treeview once a worker removal has finished.
+        
+        Args:
+            num_removed (int): Number of mapping coordinates that were removed.
+            list_errors (list): One message per unit that could not be removed.
+        """
+        self._reset_buttons_removal()
+        self._sig_update_tree.emit()
+
+        if list_errors:
+            qw.QMessageBox.warning(
+                self, 'Partially removed',
+                f"{num_removed} mapping coordinate(s) removed.\n\nCould not remove:\n"
+                + '\n'.join(list_errors))
+
     def _remove_selected_mapping_coordinate(self):
         """
-        Removes the selected mapping coordinate from the list
+        Removes the selected mapping coordinate(s) from the list. The removal itself is handed to
+        the worker thread, as it deletes the autosaved file of every removed unit from the disk.
         """
         list_selection = self._tree.selectedItems()
         list_unitname = [item.text(1) for item in list_selection]
-        
-        for unitname in list_unitname:
-            self._mappingCoorHub.remove_mappingCoor(unitname)
+
+        if len(list_unitname) == 0:
+            qw.QMessageBox.information(self, 'No selection', 'No mapping coordinates have been selected.')
+            return
+
+        confirm = qw.QMessageBox.question(
+            self, 'Confirm removal',
+            f'Are you sure you want to remove the {len(list_unitname)} selected mapping coordinate(s)?'
+            '\n!!! This action cannot be undone !!!',
+            qw.QMessageBox.StandardButton.Yes | qw.QMessageBox.StandardButton.No,
+            qw.QMessageBox.StandardButton.No)
+        if confirm != qw.QMessageBox.StandardButton.Yes: return
+
+        self._disable_buttons_removal()
+        self.sig_remove_mappingCoor.emit(list_unitname)
     
     @Slot()
     def _update_multi_mapping_tree(self):

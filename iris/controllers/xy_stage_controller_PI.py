@@ -25,6 +25,9 @@ import time
 import threading
 
 from iris.controllers import ControllerConfigEnum,ControllerDirectionEnum
+from iris.controllers.stage_motion_stop import homing_guard, is_homing, is_stop_requested
+
+PI_HALT_TIMEOUT_SEC = 5.0  # How long the axes may take to come to a halt after HLT [s]
 
 def test():
     with GCSDevice() as pidevice:
@@ -301,6 +304,7 @@ class XYController_PI(Class_XYController):
         
         return (x, y)
     
+    @homing_guard
     def homing_n_coor_calibration(self):
         """
         A function to recalibrate the coordinate system of the device.
@@ -329,10 +333,14 @@ class XYController_PI(Class_XYController):
         assert self._min_travelx <= coor_abs[0] <= self._max_travelx, 'Coordinate x is out of range'
         assert self._min_travely <= coor_abs[1] <= self._max_travely, 'Coordinate y is out of range'
         
+        self._flg_stop_requested = False
         self.device.MOV([self._dict_axes['x'],self._dict_axes['y']], coor_abs)
 
         # Wait until target is reached
-        pitools.waitontarget(self.device, self._allaxes)
+        try: pitools.waitontarget(self.device, self._allaxes)
+        except Exception:
+            if is_stop_requested(self): return  # Interrupted by stop_motion(): an expected early return
+            raise
 
         return
     
@@ -352,16 +360,54 @@ class XYController_PI(Class_XYController):
         elif dir == 'yfwd': self.device.MOV(self._dict_axes['y'], self._max_travely)
         elif dir == 'yrev': self.device.MOV(self._dict_axes['y'], self._min_travely)
 
+    def _halt(self):
+        """
+        Halts the xy-axes smoothly and leaves them on target where they stopped, keeping the referencing.
+        
+        Uses HLT (decelerating halt) when the controller supports it, then re-targets the current position:
+        once halted that is a zero-length move, which puts the axes back "on target" so that a move_direct()
+        waiting for it in another thread returns. On a controller without HLT the re-target is the stop itself
+        (the controller decelerates and settles there). STP/STF are deliberately not used: they stop abruptly
+        and, on GCS 3.0 controllers, can leave the axes in a fault state that needs a reset.
+        
+        Note:
+            The position is re-targeted in raw device coordinates (straight from qPOS), so no axis remapping
+            is involved.
+        """
+        axes = [self._dict_axes['x'],self._dict_axes['y']]
+        if self.device.HasHLT():
+            self.device.HLT(axes,noraise=True)  # Sets GCS error 10 (stopped by command), masked by noraise
+            time_end = time.time() + PI_HALT_TIMEOUT_SEC
+            while any(self.device.IsMoving(axes).values()):
+                if time.time() > time_end: raise TimeoutError(f'The axes did not halt within {PI_HALT_TIMEOUT_SEC} s')
+                time.sleep(0.01)
+        
+        positions = self.device.qPOS(axes)
+        self.device.MOV(axes, [positions[axis] for axis in axes])
+        pitools.waitontarget(self.device, axes)
+
     def stop_move(self):
         """
-        Stops the continuous movement of the motors by sending a new
-        target position to the current position
+        Stops the continuous movement of the motors, see _halt()
         """
-        coor = self.get_coordinates()
-        coor = self._remap_coordinates_flip(coor,get=True)
-        self.device.MOV([self._dict_axes['x'],self._dict_axes['y']], coor)
-        pitools.waitontarget(self.device, self._allaxes)
+        self._halt()
         return
+
+    def stop_motion(self) -> bool:
+        """
+        Stops any ongoing movement as soon as possible (HLT where supported, keeps the referencing), including
+        a move_direct() running in another thread. See Class_XYController.stop_motion() and _halt().
+        
+        Returns:
+            bool: True if the stop was sent, False if not possible (homing in progress, or a comms error)
+        """
+        if is_homing(self): return False
+        self._flg_stop_requested = True
+        try: self._halt()
+        except Exception as e:
+            print(f'PI stop_motion failed: {e}')
+            return False
+        return True
 
     def get_jog(self):
         """

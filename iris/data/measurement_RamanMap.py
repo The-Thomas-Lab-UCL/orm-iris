@@ -48,6 +48,14 @@ from iris import DataAnalysisConfigEnum as DAEnum
 from iris.data import SaveParamsEnum, MissingDataFileError
 from iris.gui import AppPlotEnum
 
+# Merging units (MeaRMap_Hub.merge_mapping_units). The measurement metadata keys below are written by the
+# mapping controller (Wdg_HighLvlController_Raman._generate_metadata_dict).
+MERGE_INSTRUMENT_METADATA_KEYS = ('camera_id', 'xystage_id', 'zstage_id')   # Must match, as must the Raman metadata
+# Only describe how the scan path was run, not the measurement itself, so they may differ between merged units
+# (e.g. a scan resumed with other scan options). The merged unit keeps those of the unit merged into.
+MERGE_IGNORED_METADATA_KEYS = ('mapping_method', 'scan_method', 'scan_direction',
+                               'scramble_random', 'scramble_skipover', 'scramble_skipover_value')
+
 class MeaRMap_Unit():
     """
     This is a class to store a list of measurement data during a mapping measurement.
@@ -510,7 +518,33 @@ class MeaRMap_Unit():
         self._flg_measurement_exist = True
         
         self._notify_observers()
-        
+
+    def extend_measurements(self, other:'MeaRMap_Unit', notify:bool=True) -> None:
+        """
+        Appends every measurement of another unit after this unit's measurements, in their stored order.
+        The measurements are shared by reference, not copied, so this costs (almost) no extra memory.
+
+        Args:
+            other (MeaRMap_Unit): The unit whose measurements are appended. Left unchanged.
+            notify (bool): Notify the observers once done. Defaults to True.
+
+        Note:
+            Does not check that the units are compatible (metadata, spectral axis, unique timestamps):
+            see MeaRMap_Hub.check_units_mergeable.
+        """
+        assert isinstance(other, MeaRMap_Unit), 'extend_measurements: The input data type is not correct. Expected a MeaRMap_Unit.'
+        assert other is not self, 'extend_measurements: A unit cannot be extended with itself.'
+
+        dict_other = other.get_dict_measurements(copy=True)
+        with self._lock_measurement:
+            assert set(dict_other.keys()) == set(self._dict_measurement.keys()),\
+                'extend_measurements: The measurement keys of the two units are not the same.'
+            for key in self._dict_measurement.keys():
+                self._dict_measurement[key].extend(dict_other[key])
+            self._flg_measurement_exist = len(self._dict_measurement[self._label_ts]) > 0
+
+        if notify: self._notify_observers()
+
     def get_RamanMeasurement_df_fromIdx(self,idx:int) -> pd.DataFrame:
         """
         Grabs the averaged dataframe stored
@@ -641,7 +675,11 @@ class MeaRMap_Unit():
         assert measurement_id in self._dict_measurement[self._mea_id_key], 'get_avg_df: The timestamp does not exist in the stored data.'
         
         with self._lock_measurement:
-            idx = bisect.bisect_left(self._dict_measurement[self._mea_id_key], measurement_id)
+            list_ids = self._dict_measurement[self._mea_id_key]
+            idx = bisect.bisect_left(list_ids, measurement_id)
+            # The IDs are normally in acquisition order, but a merged unit keeps the order its units were
+            # merged in, so the binary search is checked and falls back to a linear one
+            if idx >= len(list_ids) or list_ids[idx] != measurement_id: idx = list_ids.index(measurement_id)
             df = self._dict_measurement[self._label_avemea][idx]
         
         return df
@@ -1201,6 +1239,100 @@ class MeaRMap_Hub():
             except Exception as e: print(f"Error in remove_mapping_unit_id: {e}")
             unit.delete_self()
             del self._dict_mappingMeasurementUnits['measurement_unit'][unit_idx]
+
+    def check_units_mergeable(self, list_unit_ids:list[str]) -> list[str]:
+        """
+        Checks whether the given units can be merged into one: every unit must hold measurements, share
+        the same Raman measurement metadata and instruments (i.e. the same measurement metadata, apart from
+        how the scan path was run, see MERGE_IGNORED_METADATA_KEYS), the same spectral axis, and no
+        measurement (timestamp) may appear in more than one unit.
+
+        Args:
+            list_unit_ids (list[str]): The IDs of the units to merge, the first being the one merged into
+
+        Returns:
+            list[str]: One message per problem found. Empty if the units can be merged.
+        """
+        list_problems = []
+        if len(list_unit_ids) < 2: return ['At least two units are needed for a merge.']
+        if len(set(list_unit_ids)) != len(list_unit_ids): return ['A unit is selected more than once.']
+
+        list_units:list[MeaRMap_Unit] = []
+        for unit_id in list_unit_ids:
+            try: list_units.append(self.get_MappingUnit(unit_id=unit_id))
+            except ValueError: list_problems.append(f'Unit ID {unit_id} does not exist (anymore).')
+        if list_problems: return list_problems
+
+        for unit in list_units:
+            if unit.get_numMeasurements() == 0: list_problems.append(f"'{unit.get_unit_name()}' holds no measurements.")
+        if list_problems: return list_problems
+
+        ref = list_units[0]
+        ref_name = ref.get_unit_name()
+        ref_metadata = ref.get_dict_measurement_metadata()
+        ref_wavelengths = np.array(ref.get_list_wavelengths(), dtype=np.float64)
+        for unit in list_units[1:]:
+            name = unit.get_unit_name()
+            metadata = unit.get_dict_measurement_metadata()
+            for key in sorted((set(ref_metadata) | set(metadata)) - set(MERGE_IGNORED_METADATA_KEYS)):
+                kind = 'Instrument' if key in MERGE_INSTRUMENT_METADATA_KEYS else 'Metadata'
+                if key not in ref_metadata or key not in metadata:
+                    list_problems.append(f"{kind} '{key}' is in '{ref_name if key in ref_metadata else name}' only "
+                                         f"('{ref_name}' vs '{name}').")
+                elif ref_metadata[key] != metadata[key]:
+                    list_problems.append(f"{kind} '{key}' differs: {ref_metadata[key]!r} in '{ref_name}', "
+                                         f"{metadata[key]!r} in '{name}'.")
+
+            wavelengths = np.array(unit.get_list_wavelengths(), dtype=np.float64)
+            if wavelengths.shape != ref_wavelengths.shape or not np.allclose(wavelengths, ref_wavelengths):
+                list_problems.append(f"The spectral axis (wavelengths) of '{name}' differs from that of '{ref_name}'.")
+
+        # The timestamps identify the measurements, so they must stay unique in the merged unit
+        set_ts = set()
+        for unit in list_units:
+            list_ts = unit.get_list_RamanMeasurement_ids(copy=True)
+            if not set_ts.isdisjoint(list_ts):
+                list_problems.append(f"'{unit.get_unit_name()}' shares measurements (timestamps) with another selected unit "
+                                     "(e.g. it is a copy of it).")
+            set_ts.update(list_ts)
+
+        return list_problems
+
+    def merge_mapping_units(self, list_unit_ids:list[str], new_name:str) -> MeaRMap_Unit:
+        """
+        Merges the given units into the first one, in the given order: each unit's measurements are appended
+        to the first unit, and that unit is then removed from the hub straight away to free its memory.
+        The first unit keeps its ID and metadata, and is renamed to new_name.
+
+        Args:
+            list_unit_ids (list[str]): The IDs of the units to merge, in merge order. The first is merged into.
+            new_name (str): The name of the merged unit. May be the name of any of the merged units.
+
+        Returns:
+            MeaRMap_Unit: The merged unit
+
+        Raises:
+            ValueError: The units cannot be merged (see check_units_mergeable), or the name is taken
+        """
+        assert isinstance(new_name, str) and new_name.strip() != '', 'merge_mapping_units: The new name must be a non-empty string.'
+
+        with self._lock:
+            list_problems = self.check_units_mergeable(list_unit_ids)
+            if list_problems: raise ValueError('The units cannot be merged:\n' + '\n'.join(list_problems))
+            if new_name in self._dict_mappingUnit_NameID and self._dict_mappingUnit_NameID[new_name] not in list_unit_ids:
+                raise ValueError(f"merge_mapping_units: The name '{new_name}' is already used by another unit.")
+
+            target = self.get_MappingUnit(unit_id=list_unit_ids[0])
+            for unit_id in list_unit_ids[1:]:
+                target.extend_measurements(self.get_MappingUnit(unit_id=unit_id), notify=False)
+                # Its measurements now live in the target: release the unit itself right away
+                self.remove_mapping_unit_id(unit_id)
+
+            # Every other merged unit is gone by now, so their names are free
+            self.rename_mapping_unit(target.get_unit_id(), new_name)
+
+        self._notify_observers()
+        return target
         
         # # Force the garbage collector to collect the deleted object
         # gc.collect()
@@ -1743,32 +1875,80 @@ class MeaRMap_Handler():
     @thread_assign
     def save_MappingHub_database(self,mappingHub:MeaRMap_Hub,savedirpath:str,savename:str) -> threading.Thread:
         """
-        Saves the mapping measurement data into a database.
+        Saves the mapping measurement data into a database, in a thread of its own.
         
         Args:
             mappingHub (mapping_measurement_new): mapping_measurement_new object to be saved
-            savepath (str): path to save the data. Defaults to None.
+            savedirpath (str): directory to save the data in
+            savename (str): name of the database file
+        
+        Note:
+            The work happens in a detached thread, so a failure here cannot be observed by the
+            caller: joining the returned thread tells you it has stopped, not that it
+            succeeded. Callers that must report success or failure (and callers that already
+            run in a thread of their own) should call save_MappingHub_database_sync instead.
+        """
+        self.save_MappingHub_database_sync(
+            mappingHub=mappingHub, savedirpath=savedirpath, savename=savename)
+    
+    def save_MappingHub_database_sync(
+        self,
+        mappingHub:MeaRMap_Hub,
+        savedirpath:str,
+        savename:str,
+        list_unit_ids:list[str]|None=None,
+        ) -> str:
+        """
+        Saves the mapping measurement data into a database in the calling thread, raising on
+        failure so that the caller can report what happened.
+        
+        Args:
+            mappingHub (MeaRMap_Hub): The hub holding the units to be saved
+            savedirpath (str): directory to save the data in
+            savename (str): name of the database file
+            list_unit_ids (list[str]|None): Save only these units. Defaults to None, which
+                saves every unit in the hub. Used to leave an in-progress measurement out of
+                an autosave or an offload.
+        
+        Returns:
+            str: The full path the database was written to
+        
+        Raises:
+            AssertionError: The hub, the unit selection or the savename is not usable
+            Exception: Whatever the underlying sqlite/file write raises
         """
         assert isinstance(mappingHub, MeaRMap_Hub), 'save_mapping_measurement: The input data type is not correct. Expected mapping_measurement_new object.'
         assert mappingHub.check_measurement_exist(), 'save_mapping_measurement: The measurement data does not exist.'
         assert isinstance(savename,str) and savename != '', 'save_mapping_measurement: The input savename is not correct. Expected a valid filename.'
         
+        if list_unit_ids is None: list_unit_ids = mappingHub.get_list_MappingUnit_ids()
+        assert len(list_unit_ids) > 0, 'save_mapping_measurement: There are no units to save.'
+        
         if not os.path.exists(savedirpath) or not os.path.isdir(savedirpath): os.makedirs(savedirpath)
         
         if savename[-3:] != '.db': savename += '.db'
         savepath = os.path.join(savedirpath,savename)
-            
+        
+        # Resolve the units before opening the database: a unit that has gone away in the
+        # meantime (e.g. removed from another panel) is skipped rather than aborting the save.
+        list_measurement_units = []
+        for unit_id in list_unit_ids:
+            try: list_measurement_units.append(mappingHub.get_MappingUnit(unit_id))
+            except Exception: continue
+        assert len(list_measurement_units) > 0, 'save_mapping_measurement: None of the requested units could be resolved.'
+        
         # Connect to the database
         conn:sql.Connection = sql.connect(savepath)
         
         # Save the mapping_measurement_unit metadata and measurement data
-        list_unit_ids = mappingHub.get_list_MappingUnit_ids()
-        list_measurement_units = [mappingHub.get_MappingUnit(id) for id in list_unit_ids]
-        for measurement_unit in list_measurement_units:
-            self._save_MappingMeasurementUnit_metadata_database(measurement_unit,conn)    
-            self._save_MappingMeasurementUnit_measurement_database(measurement_unit,conn,savepath)
-            
-        conn.close()
+        try:
+            for measurement_unit in list_measurement_units:
+                self._save_MappingMeasurementUnit_metadata_database(measurement_unit,conn)    
+                self._save_MappingMeasurementUnit_measurement_database(measurement_unit,conn,savepath)
+        finally:
+            conn.close()
+        
+        return savepath
     
     @thread_assign
     def save_MappingHub_pickle(self,mappingHub:MeaRMap_Hub,savedirpath:str,

@@ -115,6 +115,10 @@ class DataStreamer_StageCam(mp.Process):
         self._lock_coor_pipe = mp.Lock()  # Lock for the coordinate pipe
         self._lock_cam_pipe = mp.Lock()   # Lock for the camera pipe
         
+        # > Shared values <
+        # Temporary coordinate retention requested by a measurement [s], 0 = none (see request_coordinate_retention)
+        self._retention_request_sec = mp.Value('d', 0.0)
+        
     class Enum_CoorType(Enum):
         """
         An enumeration for the type of coordinate retrieval
@@ -127,14 +131,18 @@ class DataStreamer_StageCam(mp.Process):
         A coordinate storage and processor for the stage hub, to be run 
         in a separate process.
         """
-        def __init__(self,pipe:mpc.Connection):
+        def __init__(self,pipe:mpc.Connection,retention_request_sec:'mp.sharedctypes.Synchronized|None'=None):
             """
             Stores and interpolates the coordinates from the stage controllers.
 
             Args:
                 pipe (mpc.Connection): _description_
+                retention_request_sec (Synchronized|None): Shared value holding a temporary retention
+                    request [s] from the main process (0 = no request). It can only extend the retention
+                    beyond the config value, never shorten it. None disables requests.
             """
             self._pipe = pipe   # Pipe for communication with the main process
+            self._retention_request_sec = retention_request_sec
             
             # > Operation parameters <
             self._list_timestamp = []   # List of timestamps for the child process
@@ -146,7 +154,7 @@ class DataStreamer_StageCam(mp.Process):
             self._lock = mp.Lock()   # Threading lock for the list because it's only going to be accessed by the child process
             
             # > Constants <
-            self._max_measurement = MPMeaHubEnum.STAGEHUB_MAXSTORAGE.value # Maximum number of coordinates stored
+            self._retention_default_us = int(MPMeaHubEnum.STAGEHUB_RETENTION_SEC.value * 1e6) # How long the coordinates are kept by default [us]
             
             # > Thread <
             self._thread:threading.Thread = threading.Thread()
@@ -159,13 +167,22 @@ class DataStreamer_StageCam(mp.Process):
                 timestamp (int): Timestamp in [us]
                 coordinate (tuple[float,float,float]): Coordinates (x,y,z)
             """
+            retention_us = self._retention_default_us
+            if self._retention_request_sec is not None:
+                retention_us = max(retention_us, int(self._retention_request_sec.value * 1e6))
+            prune_slack_us = max(int(retention_us * 0.1), 1)  # Prune in chunks of this age, not on every append
+            
             with self._lock:
                 self._list_timestamp.append(timestamp)
                 self._list_coordinates.append(coordinate)
                 
-                if len(self._list_timestamp) > self._max_measurement:
-                    self._list_timestamp.pop(0)
-                    self._list_coordinates.pop(0)
+                # Drop the coordinates older than the retention window. Done in chunks since every
+                # deletion from the front shifts the whole list.
+                ts_cutoff = timestamp - retention_us
+                if self._list_timestamp[0] < ts_cutoff - prune_slack_us:
+                    idx = bisect.bisect_left(self._list_timestamp, ts_cutoff)
+                    del self._list_timestamp[:idx]
+                    del self._list_coordinates[:idx]
             self._flg_data_added.set()
 
         def get_closest_coordinate(self,timestamp:int) -> tuple[int,tuple[float,float,float]]|None:
@@ -221,7 +238,12 @@ class DataStreamer_StageCam(mp.Process):
                     with self._lock: idx = bisect.bisect_left(self._list_timestamp,timestamp)
                     if idx >= len(self._list_timestamp)-1:
                         self.wait_coordinate()
-                    elif idx == 0: return self._list_timestamp[idx]  # If the requested timestamp is before the first recorded timestamp, return the first recorded coordinate
+                    elif idx == 0:
+                        # The requested timestamp is older than the retained history: there is no
+                        # coordinate to give, and guessing one would misplace the measurement
+                        print(f'get_interpolated_coordinate: Timestamp {timestamp} is older than the stored '
+                              'stage history. Increase "stagehub_retention_sec" in the config.ini file.')
+                        return None
                     else: break
                     
                 with self._lock:
@@ -653,6 +675,26 @@ class DataStreamer_StageCam(mp.Process):
         """
         self._namespace.stage_offset_ms = offset_ms
     
+    def request_coordinate_retention(self, duration_sec:float) -> None:
+        """
+        Requests the coordinates to be kept for at least the given duration, e.g. for the duration of a
+        measurement whose coordinates are looked up long after they were recorded. The request can only
+        extend the retention beyond the "stagehub_retention_sec" config value, never shorten it, and
+        replaces any previous request. Always pair it with clear_coordinate_retention_request().
+        
+        Args:
+            duration_sec (float): The requested retention [s]
+        """
+        assert isinstance(duration_sec,(int,float)) and duration_sec >= 0, 'Duration must be a non-negative number'
+        self._retention_request_sec.value = float(duration_sec)
+        
+    def clear_coordinate_retention_request(self) -> None:
+        """
+        Clears the retention request, returning to the "stagehub_retention_sec" config value. The
+        excess coordinates are dropped on the next appends.
+        """
+        self._retention_request_sec.value = 0.0
+    
     def run(self):
         print('>>>>>> Stage hub is running <<<<<<')
         self._collect_coordinateAndImage()
@@ -660,7 +702,7 @@ class DataStreamer_StageCam(mp.Process):
 
     def _collect_coordinateAndImage(self):
         self._flg_selfrunning.set()
-        child_proc_coor = self._child_CoorProc(self._coor_pipe_child)
+        child_proc_coor = self._child_CoorProc(self._coor_pipe_child, self._retention_request_sec)
         child_proc_coor.run()
         child_proc_cam = self._child_CamProc(self._cam_pipe_child,self.cam_controller)
         child_proc_cam.run()

@@ -20,6 +20,7 @@ import multiprocessing as mp
 from iris.controllers.class_xy_stage_controller import Class_XYController
 
 from iris.controllers import ControllerConfigEnum, ControllerSpecificConfigEnum, ControllerDirectionEnum
+from iris.controllers.stage_motion_stop import homing_guard, is_homing, is_stop_requested
 
 import ctypes
 co_initialize = ctypes.windll.ole32.CoInitialize
@@ -398,6 +399,7 @@ class XYController_M30XYM(Class_XYController):
         self._lock.release()
         return coor_x,coor_y
     
+    @homing_guard
     def homing_n_coor_calibration(self):
         """
         A function to recalibrate the coordinate system of the device.
@@ -494,6 +496,7 @@ class XYController_M30XYM(Class_XYController):
             workx = self._motorx.InitializeWaitHandler()
             worky = self._motory.InitializeWaitHandler()
             
+            self._flg_stop_requested = False
             self._motorx.MoveTo(coor_abs[0], workx)
             self._motory.MoveTo(coor_abs[1], worky)
             
@@ -504,12 +507,15 @@ class XYController_M30XYM(Class_XYController):
             self._motorx.WaitForSettingsInitialized(self._timeout_move_fast)
             self._motory.WaitForSettingsInitialized(self._timeout_move_fast)
             
-        self._motorx.Wait(self._timeout_move_fast)
-        self._motory.Wait(self._timeout_move_fast)
-        
-        # Waits for both threads to end
-        self._isrunning_motorx = 0
-        self._isrunning_motory = 0
+        try:
+            self._motorx.Wait(self._timeout_move_fast)
+            self._motory.Wait(self._timeout_move_fast)
+        except Exception:
+            if not is_stop_requested(self): raise   # Otherwise interrupted by stop_motion(): an expected early return
+        finally:
+            # Waits for both threads to end
+            self._isrunning_motorx = 0
+            self._isrunning_motory = 0
         
     def move_continuous(self,dir:str):
         """
@@ -705,6 +711,22 @@ class XYController_M30XYM(Class_XYController):
         # Update the motor test
         self._isrunning_motorx = 0
         self._isrunning_motory = 0
+    
+    def stop_motion(self) -> bool:
+        """
+        Stops any ongoing movement as soon as possible (profiled Kinesis stop, keeps the homing), including a
+        move_direct() running in another thread. See Class_XYController.stop_motion().
+        
+        Returns:
+            bool: True if the stop was sent, False if not possible (homing in progress, or a comms error)
+        """
+        if is_homing(self): return False
+        self._flg_stop_requested = True
+        try: self.stop_move()
+        except Exception as e:
+            print(f'M30XY stop_motion failed: {e}')
+            return False
+        return True
     
     def movementtest(self):
         print("\n>>>>> MOTOR TEST: CIRCULAR MOTION <<<<<")

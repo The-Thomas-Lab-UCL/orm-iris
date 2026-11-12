@@ -12,7 +12,7 @@ from iris.utils.general import read_update_config_file_section
 
 dict_mpHub_default = {
     # > Maximum storage <
-    'stagehub_maxstorage': 500,   # Maximum number of measurements stored in the stage measurement hub. Default: 500
+    'stagehub_retention_sec': 300.0,  # How long the stage coordinates are kept in the stage measurement hub [s]. Default: 300
     'ramanhub_maxstorage': 500,   # Maximum number of measurements stored in the Raman measurement hub. Default: 500
     # > Sampling interval and time offset between the stage and the stage measurement hub <
     'stagehub_maxinterval': 100,      # Maximum interval for between stage coordinate reportings in [ms]. Default: 100
@@ -22,7 +22,8 @@ dict_mpHub_default = {
 
 dict_mpHub_comments = {
     # > Maximum storage <
-    'stagehub_maxstorage': 'Maximum number of measurements stored in the stage measurement hub. Default: 500',
+    'stagehub_retention_sec': 'How long the stage coordinates are kept in the stage measurement hub [s]. Must exceed the longest '
+                              'time a measurement can wait before its coordinates are looked up (e.g. a scan line plus any pause). Default: 300',
     'ramanhub_maxstorage': 'Maximum number of measurements stored in the Raman measurement hub. Default: 500',
     # > Sampling interval and time offset between the stage and the stage measurement hub <
     'stagehub_maxinterval': 'Maximum interval for between stage coordinate reportings in [ms]. Default: 100',
@@ -39,7 +40,7 @@ dict_mpHub_read = read_update_config_file_section(
 
 # >>> Enum setup <<<
 class MPMeaHubEnum(Enum):   # Short for Multiprocessing Measurement Hub Enum
-    STAGEHUB_MAXSTORAGE = dict_mpHub_read['stagehub_maxstorage']
+    STAGEHUB_RETENTION_SEC = dict_mpHub_read['stagehub_retention_sec']
     RAMANHUB_MAXSTORAGE = dict_mpHub_read['ramanhub_maxstorage']
     STAGEHUB_MAXINTERVAL = dict_mpHub_read['stagehub_maxinterval']
     STAGEHUB_REQUEST_INTERVAL = dict_mpHub_read['stagehub_request_interval']

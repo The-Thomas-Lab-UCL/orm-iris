@@ -42,6 +42,7 @@ class XYController_Dummy(Class_XYController):
         
         self._thread_movecontinuous:threading.Thread|None = None
         self._flg_movecontinuous = threading.Event()
+        self._flg_stop_direct = threading.Event()   # Set by stop_motion() to interrupt move_direct()
         
         print('\n>>>>> DUMMY XY controller is used <<<<<')
         
@@ -147,7 +148,8 @@ class XYController_Dummy(Class_XYController):
         # self._coor_x_mm = target_x_mm
         # self._coor_y_mm = target_y_mm
         
-        while True:
+        self._flg_stop_direct.clear()
+        while not self._flg_stop_direct.is_set():
             if self._coor_x_mm < target_x_mm:
                 self._coor_x_mm += self._step_um/1000
             elif self._coor_x_mm > target_x_mm:
@@ -201,6 +203,18 @@ class XYController_Dummy(Class_XYController):
                 print(">>>>> Continuous movement stopped <<<<<")
             else:
                 self._thread_movecontinuous = None
+    
+    def stop_motion(self) -> bool:
+        """
+        Stops any ongoing movement, including a move_direct() running in another thread.
+        See Class_XYController.stop_motion().
+        
+        Returns:
+            bool: Always True
+        """
+        self._flg_stop_direct.set()
+        self.stop_move()
+        return True
     
     def get_jog(self):
         """
