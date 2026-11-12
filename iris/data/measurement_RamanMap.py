@@ -900,12 +900,16 @@ class MeaRMap_Unit():
             try: observer()
             except Exception as e: print(f"Error notifying observer: {e}")
     
-    def copy(self, flg_newID:bool=True) -> Self: # type: ignore
+    def copy(self, flg_newID:bool=True, flg_deepcopy:bool=True) -> Self: # type: ignore
         """
         Creates a copy of the current object.
         
         Args:
             flg_newID (bool): Flag to indicate if a new ID should be assigned. Default is True.
+            flg_deepcopy (bool): Flag to indicate if the measurement data should be deep-copied.
+                If False, the measurement lists are copied but the measurement objects (e.g., the
+                DataFrames) are shared with the original, which saves memory and time. Only use
+                this if the measurements will not be modified in place. Default is True.
             
         Returns:
             Self: A copy of the current object.
@@ -914,8 +918,11 @@ class MeaRMap_Unit():
         else: unit_id = self._unit_id
         
         new_copy = MeaRMap_Unit(unit_name=self._unit_name,unit_id=unit_id)
-        new_copy.set_dict_measurements(deepcopy(self._dict_measurement))
-        new_copy.set_dict_metadata(deepcopy(self._dict_metadata))
+        if flg_deepcopy: new_copy.set_dict_measurements(deepcopy(self._dict_measurement))
+        else: new_copy.set_dict_measurements(self.get_dict_measurements(copy=True))
+        dict_metadata = deepcopy(self._dict_metadata)
+        dict_metadata[self._unit_id_key] = unit_id  # Keep the (new) unit ID instead of the source's
+        new_copy.set_dict_metadata(dict_metadata)
         return new_copy # type: ignore
 
     def delete_self(self):
@@ -1008,7 +1015,7 @@ class MeaRMap_Hub():
             try: callback()
             except Exception as e: print(f'_run_callbacks: Error in callback: {e}')
         
-    def copy_mapping_unit(self,source_unit_id:str,dest_unit_name:str,appendToHub:bool=False) -> MeaRMap_Unit:
+    def copy_mapping_unit(self,source_unit_id:str,dest_unit_name:str,appendToHub:bool=False,deepcopy_mea:bool=True) -> MeaRMap_Unit:
         """
         Copies the mapping unit data from the source to the destination unit ID
         
@@ -1016,6 +1023,9 @@ class MeaRMap_Hub():
             source_unit_id (str): source unit ID
             dest_unit_name (str): destination unit name
             appendToHub (bool): append the copied unit to the hub. Defaults to False.
+            deepcopy_mea (bool): deep-copy the measurement data. If False, the measurement lists
+                are copied but the measurement objects (e.g., the DataFrames) are shared with the
+                source unit, which saves memory and time. Defaults to True.
         
         Returns:
             MappingMeasurement_Unit: copied mapping_measurement_unit object
@@ -1029,7 +1039,8 @@ class MeaRMap_Hub():
         # Construct the destination unit
         dest_unit:MeaRMap_Unit = MeaRMap_Unit()
         dest_unit.set_dict_metadata(deepcopy(source_unit.get_dict_unit_metadata()))
-        dest_unit.set_dict_measurements(deepcopy(source_unit.get_dict_measurements()))
+        if deepcopy_mea: dest_unit.set_dict_measurements(deepcopy(source_unit.get_dict_measurements()))
+        else: dest_unit.set_dict_measurements(source_unit.get_dict_measurements(copy=True))
         dest_unit.set_unitName_and_unitID(dest_unit_name)
         
         if appendToHub:
@@ -1434,7 +1445,8 @@ class MeaRMap_Hub():
             unit_shift = self.copy_mapping_unit(
                 source_unit_id=unit_id,
                 dest_unit_name=unit_name_shift,
-                appendToHub=True
+                appendToHub=True,
+                deepcopy_mea=False  # Measurements are replaced right after, no need to deep-copy
             )
             unit_shift.set_dict_measurements(dict_shifted_mea)
         
