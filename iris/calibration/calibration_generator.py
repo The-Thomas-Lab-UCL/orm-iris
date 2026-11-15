@@ -377,10 +377,29 @@ class Frm_SpectrometerCalibrationGenerator(tk.LabelFrame):
         list_pixel_idx = self._cal_params['intensity_list_pixel_idx']
         list_int_mea = self._cal_params['intensity_list_measured']
         list_int_ref = self._cal_params['intensity_list_reference']
-        transfer_func_coeff, list_ratio_coors = self._calculate_transferFunc_int_cubic(list_pixel_idx,list_int_mea,list_int_ref)
-        
-        # Store the transfer function coefficients
-        if calculate_transfunc:self._cal_params['intensity_poly_coeffs'] = transfer_func_coeff
+        if not (len(list_pixel_idx) == len(list_int_mea) == len(list_int_ref)):
+            raise ValueError('Intensity calibration lists must have matching lengths.')
+        if not list_pixel_idx:
+            if calculate_transfunc:
+                raise ValueError('Intensity calibration requires at least four reference points.')
+            # Saved coefficients can be used without the original reference points.
+            # Clear any plot left over from a previously loaded calibration.
+            self._ax_int_raw.cla()
+            self._ax_int_cal.cla()
+            self._canvas_int.draw()
+            return
+
+        if calculate_transfunc:
+            if len(list_pixel_idx) < 4:
+                raise ValueError('Intensity calibration requires at least four reference points.')
+            transfer_func_coeff, list_ratio_coors = self._calculate_transferFunc_int_cubic(
+                list_pixel_idx, list_int_mea, list_int_ref)
+            self._cal_params['intensity_poly_coeffs'] = transfer_func_coeff
+        else:
+            # Loading a calibration must preserve its saved fit, even with fewer
+            # reference points than would be required to fit a new cubic.
+            list_ratio_coors = [(pixel, ref / mea) for pixel, mea, ref in
+                                zip(list_pixel_idx, list_int_mea, list_int_ref)]
         
         # Plot the transfer function
         self._plot_int_transfer_func(self._cal_params['intensity_list_pixel_idx'],self._cal_params['intensity_list_measured'],

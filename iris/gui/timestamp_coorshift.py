@@ -77,19 +77,23 @@ class sFrm_xyCoorTimestampShift(tk.Frame):
         self._ent_tsShift_ms.bind('<Return>', lambda event: self._apply_timestamp_shift())
         
         # > Variables <
-        self._dict_nameToID = None
+        self._dict_nameToID = {}
         
-        # > Threads <
-        self._thread_update = threading.Thread(target=self._auto_update)
-        self._thread_update.start()
+        # Run widget updates on the Tk thread, once the event loop starts.
+        self._update_after_id = self.after_idle(self._auto_update)
         
     def _auto_update(self):
-        while True:
-            self._dict_nameToID = self._dataHub.get_MappingHub().get_dict_nameToID()
-            list_unitNames = list(self._dict_nameToID.keys())
-            self._combo_sourceUnitName.configure(values=list_unitNames)
-            
-            time.sleep(0.5)
+        self._update_after_id = None
+        self._dict_nameToID = self._dataHub.get_MappingHub().get_dict_nameToID()
+        list_unitNames = list(self._dict_nameToID.keys())
+        self._combo_sourceUnitName.configure(values=list_unitNames)
+        self._update_after_id = self.after(500, self._auto_update)
+
+    def destroy(self):
+        if self._update_after_id is not None:
+            self.after_cancel(self._update_after_id)
+            self._update_after_id = None
+        super().destroy()
     
     @thread_assign
     def _apply_timestamp_shift(self):
