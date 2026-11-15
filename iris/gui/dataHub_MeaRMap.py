@@ -9,6 +9,8 @@ from tkinter import messagebox, filedialog
 from tkinter import ttk
 
 import os
+import tempfile
+from pathlib import Path
 from typing import Callable
 
 import queue
@@ -28,8 +30,11 @@ from iris.data.measurement_Raman import MeaRaman
 from iris.data.measurement_RamanMap import MeaRMap_Hub, MeaRMap_Unit, MeaRMap_Handler
 
 from iris.data import SaveParamsEnum
+from iris.utils.recovery_journal import RecoveryWriter, recover_mapping_hub
+from iris.utils.autosave_storage import disk_capacity, GIB
 
 SEARCHBAR_INIT = 'Search by typing here...'
+PROVISIONAL_AUTOSAVE_FOLDER = Path(__file__).resolve().parents[2] / 'autosave'
 
 class Frm_DataHub_Mapping(tk.Frame):
     def __init__(self, master, mappingHub:MeaRMap_Hub|None=None,width_rel:float=1, height_rel:float=1,autosave:bool=False):
@@ -41,7 +46,7 @@ class Frm_DataHub_Mapping(tk.Frame):
             mappingHub (MeaRMap_Hub|None): The MappingMeasurement_Hub instance. Defaults to None.
             width_rel (float, optional): The relative width of the frame. Defaults to 1.
             height_rel (float, optional): The relative height of the frame. Defaults to 1.
-            autosave (bool, optional): If True, will enable autosaving of the MappingMeasurement_Hub. Defaults to False.
+            autosave (bool, optional): Show incremental map/experiment recovery controls in the acquisition app.
 
         Note: mappingHub will be used during the refresh callback to get the latest MappingMeasurement_Hub.
         """
@@ -114,61 +119,163 @@ class Frm_DataHub_Mapping(tk.Frame):
         frm_control.grid_rowconfigure(0, weight=1)
         
     # > Autosave info <
-        # Autosave parameters
-        self._autosave_path = os.path.abspath(SaveParamsEnum.AUTOSAVE_PATH.value)
-        if not os.path.exists(self._autosave_path): os.makedirs(self._autosave_path)
-        
-        # Autosave widgets
-        self._flg_autosave = SaveParamsEnum.AUTOSAVE_ENABLED.value and autosave
-        self._autosave_interval = SaveParamsEnum.AUTOSAVE_INTERVAL_HOURS.value
-        autosave_interval_str = str(self._autosave_interval) if self._flg_autosave else "Disabled"
-        lbl_autosave_interval = tk.Label(frm_autosave, text=f"Autosave interval: {autosave_interval_str} hours")
-        lbl_autosave_path = tk.Label(frm_autosave, text=f"Autosave path: {self._autosave_path}")
-        
-        lbl_autosave_interval.grid(row=0, column=0, sticky="w")
-        lbl_autosave_path.grid(row=1, column=0, sticky="w")
-        
-        # Autosave thread setup
-        self._flg_isrunning = threading.Event()
-        self._flg_isrunning.set()
-        self._flg_issaving = threading.Event()
-        self._thread_autosave = self._autosave_dataHub(suppress_errors=False)
-        
+        self._autosave_path = None
+        self._recovery_writers = []
+        self._recovery_poll = None
+        self._warned_storage_folders = set()
+        self._cleanup_window = None
+        self._str_disk_space = tk.StringVar(value="Free space will be checked before acquisition.")
+        self._str_autosave_path = tk.StringVar(
+            value=f'Provisional autosave folder: {PROVISIONAL_AUTOSAVE_FOLDER} (choose another folder anytime).')
+        self._str_autosave_status = tk.StringVar(value='Recovery autosave: every 20 seconds; final flush on stop/finish.')
+        tk.Button(frm_autosave, text='Choose autosave data folder', command=self.choose_autosave_folder).grid(
+            row=0, column=0, sticky='w')
+        tk.Button(frm_autosave, text='Recover autosaved data', command=self.recover_autosaved_maps).grid(
+            row=0, column=1, sticky='w')
+        tk.Button(frm_autosave, text='Manage autosave storage', command=self.open_autosave_cleanup).grid(
+            row=0, column=2, sticky='w')
+        tk.Label(frm_autosave, textvariable=self._str_autosave_path, anchor='w', wraplength=650).grid(
+            row=1, column=0, columnspan=3, sticky='w')
+        self._lbl_autosave_status = tk.Label(frm_autosave, textvariable=self._str_autosave_status, anchor='w', wraplength=650)
+        self._lbl_autosave_status.grid(row=2, column=0, columnspan=3, sticky='w')
+        tk.Label(frm_autosave, textvariable=self._str_disk_space, anchor='w').grid(
+            row=3, column=0, columnspan=3, sticky='w')
+
+        if not autosave:
+            frm_autosave.grid_remove()
+
         # Interaction/callback setup
         self._list_observer_load = []
         self._list_observer_selection = []
         
         self._tree_hub.bind("<<TreeviewSelect>>", lambda event: self._notify_observer_selection())
         
-    @thread_assign
-    def _autosave_dataHub(self, suppress_errors:bool=False) -> threading.Thread:
-        """
-        Autosaves the MappingMeasurement_Hub to a pickle file every AUTOSAVE_INTERVAL_HOURS hours.
-        
-        Args:
-            suppress_errors (bool, optional): If True, will suppress errors in the autosave thread. Defaults to False.
-        """
-        if not self._flg_autosave:
-            if not suppress_errors: print("Autosave is disabled. Exiting autosave thread.")
+    def choose_autosave_folder(self):
+        folder = filedialog.askdirectory(parent=self.winfo_toplevel(), title='Choose autosave data folder',
+                                         initialdir=self._autosave_path or str(PROVISIONAL_AUTOSAVE_FOLDER), mustexist=True)
+        if not folder:
             return
-        
-        while self._flg_isrunning.is_set():
-            try:
-                self._flg_issaving.set()  # Set the saving flag
-                if not self._MappingHub.check_measurement_exist(): raise AssertionError("No measurements in the Mapping Hub to autosave")
-                MeaRMap_Handler().save_MappingHub_database(
-                    mappingHub=self._MappingHub,
-                    savedirpath=self._autosave_path,
-                    savename=self._sessionid + "_autosave",
-                )
-                print(f"Autosaved Mapping Hub to {self._autosave_path}/{self._sessionid}_autosave.db")
-            except AssertionError: pass
-            except Exception as e: print (f"Error in autosave thread: {e}")
-            finally:
-                self._flg_issaving.clear()
-                time.sleep(SaveParamsEnum.AUTOSAVE_INTERVAL_HOURS.value * 3600)  # Wait for the autosave interval
-            
-        
+        try:
+            # Check actual write access; network shares may ignore permission bits.
+            with tempfile.TemporaryFile(dir=folder) as probe:
+                probe.write(b'IRIS autosave write check')
+                probe.flush()
+            self._autosave_path = os.path.abspath(folder)
+            self._str_autosave_path.set(f'Autosave data folder: {self._autosave_path}')
+            self._check_autosave_space()
+        except OSError as error:
+            messagebox.showerror('Cannot use autosave folder', str(error))
+
+    def require_autosave_folder(self):
+        """Use the repo-local recovery folder until the user chooses a destination."""
+        if not self._autosave_path:
+            PROVISIONAL_AUTOSAVE_FOLDER.mkdir(parents=True, exist_ok=True)
+            # Fail before acquisition if the default folder cannot be written.
+            with tempfile.TemporaryFile(dir=PROVISIONAL_AUTOSAVE_FOLDER) as probe:
+                probe.write(b'IRIS autosave write check')
+                probe.flush()
+            self._autosave_path = str(PROVISIONAL_AUTOSAVE_FOLDER)
+            self._str_autosave_path.set(f'Provisional autosave folder: {self._autosave_path}')
+        self._check_autosave_space()
+        return self._autosave_path
+
+    def _check_autosave_space(self):
+        capacity = disk_capacity(self._autosave_path or PROVISIONAL_AUTOSAVE_FOLDER)
+        self._str_disk_space.set(f"Free space: {capacity['free_bytes']/GIB:.1f} GiB of {capacity['total_bytes']/GIB:.1f} GiB.")
+        key = str(self._autosave_path or PROVISIONAL_AUTOSAVE_FOLDER)
+        if capacity['low_space'] and key not in self._warned_storage_folders:
+            self._warned_storage_folders.add(key)
+            messagebox.showwarning('Low autosave disk space',
+                f"Only {capacity['free_bytes']/GIB:.1f} GiB remains on the autosave drive. "
+                'Use Manage autosave storage to remove recovery copies you no longer need, '
+                'or choose another data folder. Final exports also need free space.', parent=self.winfo_toplevel())
+
+    def open_autosave_cleanup(self):
+        from iris.gui.autosave_cleanup import AutosaveCleanup
+        if self._cleanup_window is not None and self._cleanup_window.winfo_exists():
+            self._cleanup_window.lift()
+            return
+        self._cleanup_window = AutosaveCleanup(self, self._autosave_path or PROVISIONAL_AUTOSAVE_FOLDER,
+            lambda: [writer.path.parent for writer in self._recovery_writers if writer.run_active])
+
+    def register_recovery_writer(self, writer):
+        self._recovery_writers.append(writer)
+        if self._recovery_poll is None:
+            self._recovery_poll = self.after(1000, self._poll_recovery_status)
+
+    def start_single_autosave(self, settings):
+        folder = self.require_autosave_folder()
+        recovery = tempfile.mkdtemp(prefix='single_acquisition_', dir=folder)
+        unit = MeaRMap_Unit('single_' + get_timestamp_us_str())
+        writer = RecoveryWriter(recovery, settings=dict(settings, acquisition_kind='single',
+                                                       coordinates='Not recorded for standalone spectra'))
+        try:
+            self.register_recovery_writer(writer)
+        except Exception:
+            writer.close()
+            raise
+        return writer, unit
+
+    def _poll_recovery_status(self):
+        self._recovery_poll = None
+        states = [writer.status() for writer in self._recovery_writers]
+        saved = sum(item['committed'] for item in states)
+        acquired = sum(item['accepted'] for item in states)
+        errors = [item['error'] for item in states if item['error']]
+        self._str_autosave_status.set(
+            f'Autosave error: {errors[-1]}. Data remains in memory; save/export it.' if errors else
+            f'Recovery autosave: {saved}/{acquired} spectra committed; every 20 seconds.')
+        capacities = [item for item in states if 'free_bytes' in item]
+        capacities = [item for item in capacities if item.get('run_active')] or capacities[-1:]
+        low = [item for item in capacities if item.get('low_space')]
+        self._lbl_autosave_status.configure(fg='red' if low or errors else 'black')
+        if capacities:
+            self._str_disk_space.set(' | '.join(
+                f"{Path(item['path']).parent.name}: {item['free_bytes']/GIB:.1f} GiB free"
+                for item in capacities if item.get('run_active')) or
+                f"Last autosave drive check: {capacities[-1]['free_bytes']/GIB:.1f} GiB free.")
+        if low:
+            self._str_autosave_status.set(f"LOW DISK SPACE: {min(item['free_bytes'] for item in low)/GIB:.1f} GiB free. "
+                                          + self._str_autosave_status.get())
+        if any(item.get('run_active', not item['finished']) for item in states):
+            self._recovery_poll = self.after(1000, self._poll_recovery_status)
+
+    def recover_autosaved_maps(self):
+        if any(writer.run_active for writer in self._recovery_writers):
+            messagebox.showwarning('Scan in progress', 'Stop or finish the scan before recovering maps.')
+            return
+        path = filedialog.askopenfilename(parent=self.winfo_toplevel(), title='Recover IRIS autosave',
+                                          initialdir=self._autosave_path or str(PROVISIONAL_AUTOSAVE_FOLDER),
+                                          filetypes=[('IRIS recovery files', '*.iris-autosave')])
+        if not path:
+            return
+        try:
+            recovered = recover_mapping_hub(path)
+            # Import as distinct maps; never overwrite maps already in the hub.
+            for unit_id in recovered.get_list_MappingUnit_ids():
+                source = recovered.get_MappingUnit(unit_id)
+                base = source.get_unit_name() + '_recovered'
+                name, number = base, 2
+                while name in self._MappingHub.get_list_MappingUnit_names():
+                    name = f'{base}_{number}'
+                    number += 1
+                unit = MeaRMap_Unit(name)
+                unit.set_dict_metadata(source.generate_unit_metadata(unit_id=unit.get_unit_id(), unit_name=name))
+                unit.set_dict_measurements(source.get_dict_measurements())
+                self._MappingHub.append_mapping_unit(unit)
+            self._flg_issaved = False
+            self.update_tree()
+            messagebox.showinfo('Maps recovered', 'Committed spectra restored. Use Save Mapping Hub [.db] to export them.')
+        except Exception as error:
+            messagebox.showerror('Recovery failed', str(error))
+
+    def destroy(self):
+        if self._recovery_poll is not None:
+            self.after_cancel(self._recovery_poll)
+            self._recovery_poll = None
+        self._str_disk_space = None
+        super().destroy()
+
     def _refresh_dataHub(self):
         """
         Gets the latest MappingMeasurement_Hub from the getter function and updates the tree
@@ -534,14 +641,15 @@ class Frm_DataHub_Mapping(tk.Frame):
             try: [os.remove(file) for file in self._list_pickled]
             except Exception as e: print('Error in deleting temp files:\n', e)
             
-        self._flg_isrunning.clear()  # Stop the autosave thread
-        while self._flg_issaving.is_set():
-            wait_for_autosave = messagebox.askyesno("Autosave", "Autosave thread is still running. Do you want to wait for it to finish?")
-            messagebox.showinfo("Autosave", "Waiting (up to) 1 minute for autosave thread to finish...")
-            if not wait_for_autosave or not self._thread_autosave.is_alive() or not self._flg_issaving.is_set():
-                break
-            self._thread_autosave.join(timeout=60)  # Wait for the autosave thread to finish
-        
+        failures = []
+        for writer in self._recovery_writers:
+            try:
+                writer.close()
+            except Exception as error:
+                failures.append(str(error))
+        if failures:
+            raise RuntimeError('Autosave shutdown errors: ' + '; '.join(failures))
+
         return
         
 class Frm_DataHub_Mapping_Plus(tk.Frame):

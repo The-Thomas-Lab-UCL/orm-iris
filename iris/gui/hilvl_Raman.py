@@ -54,6 +54,9 @@ from iris.multiprocessing.dataStreamer_Raman import DataStreamer_Raman
 
 from iris.gui.image_calibration.plotter_heatmap_overlay import Frm_HeatmapOverlay
 
+from iris.utils.recovery_journal import RecoveryWriter
+from iris.utils.scan_timing import StageTimer, write_scan_timing
+
 from iris.gui import AppRamanEnum, AppPlotEnum
 
 class Enum_ScanMthd(Enum):
@@ -283,9 +286,12 @@ class Frm_HighLvlController_Raman(tk.Frame):
         """
         Terminates the controller, saving the mapping coordinates to the temporary folder.
         """
+        self.flg_isrunning_mapping = False
         worker = self._experiment_thread
         if worker is not None:
             self._experiment_cancel.set()
+            worker.join()
+        for worker in getattr(self, '_standard_mapping_workers', ()):
             worker.join()
     
     def _init_experiment_settings(self):
@@ -501,6 +507,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
         """Snapshot and validate UI settings before starting a hardware worker."""
         if self._experiment_thread is not None:
             return
+        journal = None
         try:
             Frm_HighLvlController_Raman._check_standard_mapping_idle(self)
             mapping_buttons = self._list_shortcut_widgets + [
@@ -535,8 +542,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 coordinates, scan_method=scan_method, scan_direction=scan_direction)
             original_us = self.raman_controller._controller.get_integration_time_us()
             was_auto = self._ramanHub.isrunning_auto_measurement()
-            autosave_dir = os.path.abspath(SaveParamsEnum.AUTOSAVE_PATH.value)
-            os.makedirs(autosave_dir, exist_ok=True)
+            autosave_dir = self._dataHub_map.require_autosave_folder()
             # A new directory for every run prevents overwriting any prior result.
             recovery_dir = tempfile.mkdtemp(prefix=f'{experiment_kind}_experiment_', dir=autosave_dir)
             plan = dict(experiment_kind=experiment_kind, coordinate_set=selected[0].mappingUnit_name,
@@ -556,13 +562,18 @@ class Frm_HighLvlController_Raman(tk.Frame):
                             power_reference='Laser channel 1 setpoint; not calibrated tissue power')
             with open(os.path.join(recovery_dir, 'settings.json'), 'x', encoding='utf-8') as output:
                 json.dump(plan, output, indent=2)
+            journal = RecoveryWriter(recovery_dir, settings=plan)
+            self._dataHub_map.register_recovery_writer(journal)
         except Exception as error:
+            if journal is not None:
+                journal.close()
             messagebox.showerror('Cannot start mapping experiment', str(error))
             return
 
         self._experiment_events = queue.Queue()
         self._experiment_cancel.clear()
         self._experiment_recovery_dir = recovery_dir
+        self._experiment_journal = journal
         self._experiment_widget_states = []
         self._active_experiment_kind = experiment_kind
         self._active_experiment_button = (self._btn_power_experiment if experiment_kind == 'laser_power'
@@ -592,6 +603,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 args=(plan, units, original_us, was_auto))
             self._experiment_thread.start()
         except Exception as error:
+            journal.close()
             self._restore_experiment_controls()
             self.raman_controller._flg_isrunning.clear()
             self.flg_isrunning_mapping = False
@@ -650,17 +662,12 @@ class Frm_HighLvlController_Raman(tk.Frame):
             failure = reply.get()
             if failure is not None:
                 raise failure
+            self._experiment_journal.submit(units[index], result[0], coordinate, result[1])
 
         def checkpoint():
-            # Exclude plot observers and their Tk objects from the recovery file.
-            snapshot = MeaRMap_Hub()
-            for unit in units:
-                if unit.get_numMeasurements():
-                    snapshot.append_mapping_unit(unit.copy(flg_newID=False))
-            temporary_path = os.path.join(self._experiment_recovery_dir, 'maps.tmp')
-            with open(temporary_path, 'wb') as output:
-                dill.dump(snapshot, output)
-            os.replace(temporary_path, os.path.join(self._experiment_recovery_dir, 'maps.pkl'))
+            # Disk commits run independently every 20 seconds, never copy the map
+            # here or wait for disk between scan points.
+            self._experiment_journal.check()
 
         try:
             self.raman_controller.pause_auto_measurement()
@@ -733,6 +740,24 @@ class Frm_HighLvlController_Raman(tk.Frame):
                             'Check laser_quality.json for suspect or unobserved spectra.')
                 except Exception as failure:
                     error = (error + '\n' if error else '') + f'Laser monitoring log failed: {failure}'
+            try:
+                self._experiment_journal.close(release_run=False)
+            except Exception as failure:
+                error = (error + '\n' if error else '') + str(failure)
+            # Preserve the existing recovery snapshot format once, after scanning.
+            try:
+                snapshot = MeaRMap_Hub()
+                for unit in units:
+                    if unit.get_numMeasurements():
+                        snapshot.append_mapping_unit(unit.copy(flg_newID=False))
+                temporary_path = os.path.join(self._experiment_recovery_dir, 'maps.tmp')
+                with open(temporary_path, 'wb') as output:
+                    dill.dump(snapshot, output)
+                os.replace(temporary_path, os.path.join(self._experiment_recovery_dir, 'maps.pkl'))
+            except Exception as failure:
+                error = (error + '\n' if error else '') + f'Final recovery snapshot failed: {failure}'
+            if not self._experiment_journal.thread.is_alive():
+                self._experiment_journal.release_run()
             completed = min(unit.get_numMeasurements() for unit in units)
             try:
                 self.raman_controller._controller.set_integration_time_us(original_us)
@@ -1185,7 +1210,10 @@ class Frm_HighLvlController_Raman(tk.Frame):
             reset()
             return
         
-        messagebox.showinfo('Mapping measurement', 'Scan stopped; collected spectra are retained in the data hub.' if self._flg_meaCancelled else 'The mapping measurement is complete and added to the data hub')
+        messagebox.showinfo('Mapping measurement',
+            ('Scan stopped; collected spectra are retained in the data hub.' if self._flg_meaCancelled else
+             'The mapping measurement is complete and added to the data hub')
+            + f'\nTiming breakdown: {getattr(self, "_last_scan_timing_path", None) or "Unavailable"}')
         reset()
         
     @thread_assign
@@ -1240,7 +1268,10 @@ class Frm_HighLvlController_Raman(tk.Frame):
             
             self.status_update('Mapping measurement complete')
             
-        messagebox.showinfo('Mapping measurement', 'Scan stopped; collected spectra are retained in the data hub.' if self._flg_meaCancelled else 'The mapping measurement is complete and added to the data hub')
+        messagebox.showinfo('Mapping measurement',
+            ('Scan stopped; collected spectra are retained in the data hub.' if self._flg_meaCancelled else
+             'The mapping measurement is complete and added to the data hub')
+            + f'\nTiming breakdown: {getattr(self, "_last_scan_timing_path", None) or "Unavailable"}')
         reset()
         
     def _perform_discreetMapping(self, mapping_hub:MeaRMap_Hub,mapping_coordinates:list, unit_name:str):
@@ -1314,6 +1345,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
                     coor=coor,
                     measurement=measurement
                 )
+                self._mapping_journal.submit(mapping_unit, timestamp_mea, coor, measurement)
             except Exception as e:
                 self._mapping_pending_results.append(result)
                 self._mapping_save_errors.put(e)
@@ -1326,7 +1358,22 @@ class Frm_HighLvlController_Raman(tk.Frame):
             raise RuntimeError('Previous mapping acquisition or saving is still running. '
                                'Wait for cleanup or recover the device connection before another scan.')
 
+    def _start_mapping_autosave(self, coordinates, continuous=False):
+        folder = self._dataHub_map.require_autosave_folder()
+        recovery = tempfile.mkdtemp(prefix='mapping_recovery_', dir=folder)
+        settings = dict(map_name=self.measurement_data_2D_unit.get_unit_name(),
+                        coordinates=[tuple(map(float, coor)) for coor in coordinates],
+                        continuous=continuous, autosave_interval_s=20)
+        with open(os.path.join(recovery, 'settings.json'), 'x', encoding='utf-8') as output:
+            json.dump(settings, output)
+        self._mapping_journal = RecoveryWriter(recovery, settings=settings)
+        self._mapping_recovery_dir = recovery
+        self._dataHub_map.register_recovery_writer(self._mapping_journal)
+
     def _check_mapping_saver(self):
+        journal = getattr(self, "_mapping_journal", None)
+        if journal is not None:
+            journal.check()
         for failures, label in ((self._mapping_save_errors, 'data saver'),
                                 (self._mapping_producer_errors, 'spectrometer worker')):
             try:
@@ -1345,6 +1392,14 @@ class Frm_HighLvlController_Raman(tk.Frame):
         if saver.is_alive():
             self._flg_meaCancelled = True
             raise RuntimeError('Mapping data saver has not stopped; partial data and coordinate offload retained.')
+        journal_error = None
+        journal = getattr(self, '_mapping_journal', None)
+        if journal is not None:
+            try:
+                journal.close(release_run=False)
+            except Exception as failure:
+                journal_error = failure
+                self._flg_meaCancelled = True
         # Partial continuous lines must be repeated from their start endpoint.
         remaining_index = min(index, max(0, len(coordinates) - 1))
         if getattr(self, '_standard_mapping_continuous', False) and remaining_index % 2:
@@ -1354,10 +1409,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
             name = unit_name + '_remaining_' + get_timestamp_us_str()
             self._coorHub.append(MeaCoor_mm(name, remaining))
         # Snapshot data without copying Tk observers, using the experiment format.
-        autosave_dir = os.path.abspath(SaveParamsEnum.AUTOSAVE_PATH.value)
-        os.makedirs(autosave_dir, exist_ok=True)
-        recovery = tempfile.mkdtemp(prefix='mapping_recovery_', dir=autosave_dir)
-        self._mapping_recovery_dir = recovery
+        recovery = self._mapping_recovery_dir
         snapshot = MeaRMap_Hub()
         if self.measurement_data_2D_unit.get_numMeasurements():
             snapshot.append_mapping_unit(self.measurement_data_2D_unit.copy(flg_newID=False))
@@ -1371,10 +1423,15 @@ class Frm_HighLvlController_Raman(tk.Frame):
             with open(os.path.join(recovery, 'pending_results.pkl'), 'xb') as output:
                 dill.dump(pending, output)
         print(f'Mapping recovery saved to: {recovery}')
+        if journal_error is not None:
+            raise journal_error
         self._check_mapping_saver()
         self._frm_coorHub_treeview.delete_offload_mappingCoor(unit_name)
     
     def _scan_discreet(self, mapping_coordinates:list):
+        self._start_mapping_autosave(mapping_coordinates)
+        self._last_scan_timing_path = None
+        timing_records = []
         total_coordinates = len(mapping_coordinates)  # Total number of coordinates
         list_time_estimation = []   # List to store the time estimation
         # thread_save = threading.Thread()
@@ -1395,7 +1452,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
         self._mapping_pending_results = []
         self._standard_mapping_continuous = False
         self._mapping_result_queue = queue_measurement
-        self._standard_mapping_workers = [thread_autosaver]
+        self._standard_mapping_workers = [thread_autosaver, self._mapping_journal.thread]
         self._standard_mapping_active = True
         thread_autosaver.start()
         unit_name = self.measurement_data_2D_unit.get_unit_name()
@@ -1415,12 +1472,15 @@ class Frm_HighLvlController_Raman(tk.Frame):
             previous_y = None
             while i < len(mapping_coordinates):
                 coor = mapping_coordinates[i]
+                row = dict(index=i+1, x_mm=float(coor[0]), y_mm=float(coor[1]), z_mm=float(coor[2]), complete=False)
+                point_timer = StageTimer(row)
                 try:
                     if queue_measurement.qsize() > AppRamanEnum.CONTINUOUS_MEASUREMENT_BUFFER_SIZE.value:
                         if not wait_for_buffer(queue_measurement, thread_autosaver,
                                                lambda: self.flg_isrunning_mapping):
                             break
                     self._check_mapping_saver()
+                    point_timer.mark('buffer_wait_ms')
 
                     # Starts a timer
                     time_0start = time.time()
@@ -1429,10 +1489,12 @@ class Frm_HighLvlController_Raman(tk.Frame):
                     if i%AppRamanEnum.AUTOSAVE_FREQ_DISCREET.value == 0 and i > 0 and not thread_offload.is_alive():
                         thread_offload = self._frm_coorHub_treeview.offload_mappingCoor(unit_name,mapping_coordinates,i)
                             
+                    point_timer.mark('preparation_ms')
                     # Go to the requested coordinates
                     self.motion_controller.go_to_coordinates(
                         float(coor[0]), float(coor[1]), float(coor[2]), override_controls=True,
                         timeout=15.0 + self.raman_controller.get_integration_time_ms() / 1000)
+                    point_timer.mark('motion_ms')
                     if not self.flg_isrunning_mapping:
                         break
                 
@@ -1448,6 +1510,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
                     else:
                         time.sleep(pixel_settle_s)
                 
+                    point_timer.mark('settling_ms')
                     if not self.flg_isrunning_mapping:
                         break
                     previous_y = current_y
@@ -1471,8 +1534,17 @@ class Frm_HighLvlController_Raman(tk.Frame):
                     except queue.Empty:
                         raise RuntimeError('Spectrometer worker did not return a completed spectrum; scan stopped.') from None
                 
+                    point_timer.mark('acquisition_ms')
+                    acquisition_detail = getattr(thread_measurement, 'acquisition_timing', None)
+                    if isinstance(acquisition_detail, dict):
+                        for key, value in acquisition_detail.items():
+                            row['acquisition_' + key] = value
+                    metadata = measurement_multi.get_metadata()
+                    row['expected_integration_ms'] = metadata['integration_time_ms'] * metadata['accumulation']
+
                     # Send the measurement data to the autosaver
                     queue_measurement.put((timestamp,coor,measurement_multi))
+                    point_timer.mark('result_enqueue_ms')
                 
                     time_2raman = time.time()
                     time_total = time_2raman-time_0start
@@ -1497,10 +1569,17 @@ class Frm_HighLvlController_Raman(tk.Frame):
                     self._dataHub_map.update_tree()
                     self.status_update('Performing mapping: {} of {}. Est. time rem.: {}h {}m {}s'\
                         .format(i+2,total_coordinates,tim_rem_hour,time_rem_min,time_rem_sec),bg_colour='yellow')
+                    point_timer.mark('ui_ms')
+                    row['complete'] = True
                 except Exception as e:
                     print('Error in mapping measurement:',e)
                     self.status_update('Error in mapping measurement',bg_colour='red')
                     raise
+                finally:
+                    point_timer.finish()
+                    if 'expected_integration_ms' in row:
+                        row['overhead_ms'] = row['total_ms'] - row['expected_integration_ms']
+                    timing_records.append(row)
                 
                 i+=1
         finally:
@@ -1510,6 +1589,14 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 self._finish_standard_mapping(mapping_coordinates, i, unit_name, thread_autosaver)
             finally:
                 self._standard_mapping_active = False
+                try:
+                    self._last_scan_timing_path = str(write_scan_timing(self._mapping_recovery_dir, timing_records))
+                    print(f'Timing breakdown saved to: {self._last_scan_timing_path}')
+                except Exception as failure:
+                    print(f'Could not write scan timing report: {failure}')
+                finally:
+                    if not thread_autosaver.is_alive() and not self._mapping_journal.thread.is_alive():
+                        self._mapping_journal.release_run()
 
         return thread_plot
         
@@ -1558,6 +1645,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
                     coor=coor,
                     measurement=measurement
                 )
+                self._mapping_journal.submit(mapping_unit, timestamp_mea, coor, measurement)
             except Exception as e:
                 self._mapping_pending_results.append(result)
                 self._mapping_save_errors.put(e)
@@ -1772,6 +1860,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
             mapping_coordinates_ends (list): List of scan coordinates (end coordinates of each scan lines)
             mapping_speed_rel (int): The relative speed to move between the coordinates
         """
+        self._start_mapping_autosave(mapping_coordinates_ends, continuous=True)
         # >> Prep the continuous measurement <<
         # Prep the raman controller
         self._mapping_producer_errors = queue.Queue()
@@ -1800,7 +1889,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
         self._mapping_pending_results = []
         self._standard_mapping_continuous = True
         self._mapping_result_queue = queue_measurement
-        self._standard_mapping_workers = [thread_continuous, thread_autosaver]
+        self._standard_mapping_workers = [thread_continuous, thread_autosaver, self._mapping_journal.thread]
         self._standard_mapping_active = True
         thread_autosaver.start()
         unit_name = self.measurement_data_2D_unit.get_unit_name()
@@ -1873,6 +1962,9 @@ class Frm_HighLvlController_Raman(tk.Frame):
                             self._finish_standard_mapping(mapping_coordinates_ends, i, unit_name, thread_autosaver)
                         except Exception as failure:
                             print(f'Late mapping recovery failed: {failure}')
+                        finally:
+                            if not thread_autosaver.is_alive() and not self._mapping_journal.thread.is_alive():
+                                self._mapping_journal.release_run()
                     threading.Thread(target=finish_late, daemon=True).start()
                     self._flg_meaCancelled = True
                     self.flg_isrunning_mapping = False
@@ -1882,6 +1974,9 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 self._finish_standard_mapping(mapping_coordinates_ends, i, unit_name, thread_autosaver)
             finally:
                 self._standard_mapping_active = False
+                if (not thread_continuous.is_alive() and not thread_autosaver.is_alive()
+                        and not self._mapping_journal.thread.is_alive()):
+                    self._mapping_journal.release_run()
 
         return thread_plot
         

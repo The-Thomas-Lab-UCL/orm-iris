@@ -15,6 +15,7 @@ from test_integration_experiment import (
     SpectrometerController_Dummy,
 )
 from iris.utils.mapping_waits import wait_for_motion, wait_for_buffer
+from iris.utils.recovery_journal import read_recovery
 
 
 class WaitTests(unittest.TestCase):
@@ -64,10 +65,11 @@ class MappingTests(unittest.TestCase):
             _stageHub=SimpleNamespace(get_coordinates_interpolate=lambda timestamp: (0., 0., 0.)),
             _frm_coorHub_treeview=Mock(), motion_controller=Mock(), raman_controller=Mock(),
         )
+        frame._dataHub_map.require_autosave_folder.side_effect = lambda: raman_gui.SaveParamsEnum.AUTOSAVE_PATH.value
         frame.motion_controller.isontarget_gotocoor.return_value = True
         frame.raman_controller.get_integration_time_ms.return_value = 100.
         frame._frm_coorHub_treeview.offload_mappingCoor.return_value = Mock(is_alive=lambda: False)
-        for name in ('_check_mapping_saver', '_finish_standard_mapping', '_scan_discreet',
+        for name in ('_start_mapping_autosave', '_check_mapping_saver', '_finish_standard_mapping', '_scan_discreet',
                      '_scan_continuous', 'measurement_autosaver_discreet',
                      'measurement_autosaver_continuous', '_check_standard_mapping_idle'):
             setattr(frame, name, getattr(Frm_HighLvlController_Raman, name).__get__(frame))
@@ -91,6 +93,12 @@ class MappingTests(unittest.TestCase):
             path = Path(frame._mapping_recovery_dir)
             with (path / 'maps.pkl').open('rb') as source:
                 hub = dill.load(source)
+            self.assertEqual(len(read_recovery(frame._mapping_journal.path)),
+                             frame.measurement_data_2D_unit.get_numMeasurements())
+            if method == '_scan_discreet':
+                timing = json.loads((path / 'scan_timing.json').read_text())
+                self.assertEqual(timing['completed_points'], frame.measurement_data_2D_unit.get_numMeasurements())
+                self.assertIn('settling_ms', timing['summary'])
             return hub.get_MappingUnit(unit_name='test_map'), json.loads(
                 (path / 'remaining_coordinates.json').read_text())
 

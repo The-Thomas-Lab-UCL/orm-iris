@@ -391,15 +391,20 @@ class DataStreamer_Raman(mp.Process):
         """
         assert self._flg_pause_measurement.is_set(), "The continuous measurement is running. Use get_measurement() instead."
         
+        self._last_single_timing = None
+        timing_start = time.perf_counter()
         # Performs a measurement
         result = self._controller.measure_spectrum()
         raw_spectrum, ts_us_int, int_time_us = result
         
+        device_done = time.perf_counter()
         # Calibrate the measurements
         with self._lock_meaCal_pipe:
             self._pipe_cal_mea_front.send(raw_spectrum)
             cal_spectrum = self._pipe_cal_mea_front.recv()
         
+        self._last_single_timing = dict(device_call_ms=(device_done-timing_start)*1000,
+                                        calibration_ms=(time.perf_counter()-device_done)*1000)
         int_time_ms = int_time_us/1000
         
         # Stores the measurement

@@ -1808,6 +1808,7 @@ class MeaRMap_Handler():
             mappingUnit = self._load_MappingMeasurementUnit_metadata_database(unit_id,conn,mappingUnit)
             mappingUnit = self._load_MappingMeasurementUnit_measurement_database(unit_id,conn,loadpath,mappingUnit,flg_readraw)
             mapping_measurement.append_mapping_unit(mappingUnit)
+        conn.close()
         return mapping_measurement
     
     def load_MappingMeasurement_pickle(self,hub:MeaRMap_Hub,loadpath:str) -> MeaRMap_Hub:

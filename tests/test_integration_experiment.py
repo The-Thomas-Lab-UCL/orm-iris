@@ -22,6 +22,7 @@ with tempfile.TemporaryDirectory() as isolated:
     try:
         os.chdir(isolated)
         import dill
+        from iris.utils.recovery_journal import RecoveryWriter
         import numpy as np
         import pandas as pd
         from iris import DataAnalysisConfigEnum
@@ -200,6 +201,7 @@ class StorageAndWorkerTests(unittest.TestCase):
             cancel = SimulatedCancel()
             frame = SimpleNamespace(raman_controller=raman, _experiment_events=queue.Queue(),
                                     _experiment_cancel=cancel, _experiment_recovery_dir=recovery_dir,
+                                    _experiment_journal=RecoveryWriter(recovery_dir),
                                     motion_controller=SimpleNamespace(move_for_experiment=lambda coordinate: None))
             units = [MeaRMap_Unit('sample_100ms'), MeaRMap_Unit('sample_500ms')]
             plan = dict(coordinates=[(0., 0., 0.), (1., 0., 0.)], integration_times_ms=(100., 500.),
@@ -371,7 +373,9 @@ class UIFlowTests(unittest.TestCase):
             _str_experiment_integration_times_ms=values('100,500'),
             _str_experiment_photobleach_delay_ms=values('250'),
             _str_experiment_scanMethod=values('snake'), _str_experiment_scanDir=values('y-direction'),
-            _dataHub_map=SimpleNamespace(get_MappingHub=lambda: hub, update_tree=lambda: None),
+            _dataHub_map=SimpleNamespace(get_MappingHub=lambda: hub, update_tree=lambda: None,
+                require_autosave_folder=lambda: raman_gui.SaveParamsEnum.AUTOSAVE_PATH.value,
+                register_recovery_writer=lambda writer: None),
             raman_controller=raman, _ramanHub=SimpleNamespace(isrunning_auto_measurement=lambda: False),
             motion_controller=SimpleNamespace(move_for_experiment=lambda coor: moves.append(coor)),
             statbar=DummyWidget(), bg_colour='grey', after=lambda delay, callback: callbacks.append(callback),
