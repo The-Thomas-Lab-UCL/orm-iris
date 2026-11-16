@@ -30,6 +30,7 @@ if __name__ == '__main__':
 
 from iris.utils.general import *
 from iris.utils.mapping_waits import wait_for_motion
+from iris.utils.continuous_surface import SurfaceMove
 
 from iris.data.calibration_objective import ImgMea_Cal
 
@@ -820,6 +821,24 @@ class Frm_MotionController(tk.Frame):
         finally:
             if not override_controls:
                 self.enable_controls()
+
+    def follow_surface_line(self, profile, tolerance_mm, running, report):
+        """Move XY continuously while one worker follows Z from actual XY readback."""
+        self._check_mapping_motion_idle()
+        self._flg_ontarget_gotocoor.clear()
+        move = SurfaceMove(profile, self.ctrl_xy.move_direct, self.ctrl_xy.get_coordinates,
+                           self.ctrl_z.move_direct, self.ctrl_z.get_coordinates,
+                           self.ctrl_xy.stop_move, running, tolerance_mm, report)
+        self._mapping_move_threads = move.workers
+        try:
+            move.start()
+            wait_for_motion(move.workers, move.failures, lambda: move.latest_position, 15.)
+        except Exception as failure:
+            report['error'] = str(failure)
+            move.abort.set()
+            raise
+        if move.report['complete']:
+            self._flg_ontarget_gotocoor.set()
 
     def _check_mapping_motion_idle(self):
         if any(worker.is_alive() for worker in getattr(self, '_mapping_move_threads', ())):

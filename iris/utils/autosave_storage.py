@@ -13,7 +13,7 @@ LOCK_NAME = '.iris-recovery.lock'
 RUN_PREFIXES = ('mapping_recovery_', 'integration_experiment_', 'laser_power_experiment_', 'single_acquisition_')
 KNOWN_FILES = {'settings.json', 'maps.pkl', 'maps.tmp', 'pending_results.pkl', 'remaining_coordinates.json',
                'power_readbacks.jsonl', 'laser_monitor.jsonl', 'laser_quality.json',
-               'scan_timing.csv', 'scan_timing.json', 'scan_timing.txt', LOCK_NAME}
+               'scan_timing.csv', 'scan_timing.json', 'scan_timing.txt', 'z_surface_tracking.json', LOCK_NAME}
 JOURNAL_NAME = re.compile(r'recovery_[0-9a-f]{32}\.iris-autosave(?:-journal|-wal|-shm)?\Z')
 
 

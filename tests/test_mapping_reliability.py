@@ -67,10 +67,18 @@ class MappingTests(unittest.TestCase):
         )
         frame._dataHub_map.require_autosave_folder.side_effect = lambda: raman_gui.SaveParamsEnum.AUTOSAVE_PATH.value
         frame.motion_controller.isontarget_gotocoor.return_value = True
+        frame._stage_speeds = [53., 27.]
+        frame.motion_controller.get_VelocityParameters.side_effect = lambda: tuple(frame._stage_speeds)
+        def set_speed(vel_xy=None, vel_z=None):
+            if vel_xy is not None:
+                frame._stage_speeds[0] = vel_xy
+            if vel_z is not None:
+                frame._stage_speeds[1] = vel_z
+        frame.motion_controller.set_vel_relative.side_effect = set_speed
         frame.raman_controller.get_integration_time_ms.return_value = 100.
         frame._frm_coorHub_treeview.offload_mappingCoor.return_value = Mock(is_alive=lambda: False)
         for name in ('_start_mapping_autosave', '_check_mapping_saver', '_finish_standard_mapping', '_scan_discreet',
-                     '_scan_continuous', 'measurement_autosaver_discreet',
+                     '_scan_continuous', '_finish_continuous_mapping', 'measurement_autosaver_discreet',
                      'measurement_autosaver_continuous', '_check_standard_mapping_idle'):
             setattr(frame, name, getattr(Frm_HighLvlController_Raman, name).__get__(frame))
         acquisition = raman_frame(SimulatedSpectrometer())
@@ -188,45 +196,65 @@ class MappingTests(unittest.TestCase):
 
     def test_continuous_stop_restarts_partial_line_at_its_start(self):
         frame = self.frame()
+        frame.motion_controller.enable_controls.side_effect = lambda: self.assertEqual(
+            frame._stage_speeds, [53., 27.])
         producer = self.continuous(frame, stop_on_move=2)
         recovered, remaining = self.isolated_scan(frame, '_scan_continuous')
         self.assertFalse(producer.is_alive())
         self.assertGreater(recovered.get_numMeasurements(), 0)
         self.assertEqual(remaining, [list(point) for point in self.coordinates])
         frame.motion_controller.enable_controls.assert_called_once()
+        self.assertEqual(frame._stage_speeds, [53., 27.])
 
     def test_continuous_completion_drains_all_results(self):
         frame = self.frame()
+        frame.motion_controller.enable_controls.side_effect = lambda: self.assertEqual(
+            frame._stage_speeds, [53., 27.])
         self.continuous(frame)
         recovered, remaining = self.isolated_scan(frame, '_scan_continuous')
         self.assertEqual(recovered.get_numMeasurements(), 4)
         self.assertEqual(remaining, [])
         self.assertFalse(frame._flg_meaCancelled)
+        self.assertEqual(frame._stage_speeds, [53., 27.])
 
     def test_continuous_failure_restores_original_speed(self):
         frame = self.frame()
-        frame.motion_controller.calculate_vel_relative.return_value = 20
-        frame.motion_controller.get_VelocityParameters.return_value = (53., 27.)
-        frame._convertCoor_byScanOptions = lambda coordinates, **kwargs: coordinates
-        frame._scramble_mapping_coordinates = lambda coordinates, mode: coordinates
-        frame._scan_continuous = Mock(side_effect=RuntimeError('scan failed'))
-        with self.assertRaisesRegex(RuntimeError, 'scan failed'):
-            Frm_HighLvlController_Raman._perform_continuousMapping(
-                frame, Mock(), self.coordinates, 0.1, 'map')
-        frame.motion_controller.set_vel_relative.assert_called_once_with(vel_xy=53., vel_z=27.)
+        producer = self.continuous(frame, failure_on_move=2)
+        frame.motion_controller.enable_controls.side_effect = lambda: self.assertEqual(
+            frame._stage_speeds, [53., 27.])
+        with self.assertRaisesRegex(RuntimeError, 'stage disconnected'):
+            self.isolated_scan(frame, '_scan_continuous')
+        self.assertFalse(producer.is_alive())
+        self.assertEqual(frame._stage_speeds, [53., 27.])
+        frame.motion_controller.set_vel_relative.assert_called_with(vel_xy=53., vel_z=27.)
 
     def test_pending_stage_command_does_not_mask_scan_error_or_restore_speed(self):
         frame = self.frame()
-        frame.motion_controller.calculate_vel_relative.return_value = 20
-        frame.motion_controller.get_VelocityParameters.return_value = (53., 27.)
+        self.continuous(frame, failure_on_move=2)
         frame.motion_controller._check_mapping_motion_idle.side_effect = RuntimeError('still running')
-        frame._convertCoor_byScanOptions = lambda coordinates, **kwargs: coordinates
-        frame._scramble_mapping_coordinates = lambda coordinates, mode: coordinates
-        frame._scan_continuous = Mock(side_effect=TimeoutError('stage stalled'))
-        with self.assertRaisesRegex(TimeoutError, 'stage stalled'):
-            Frm_HighLvlController_Raman._perform_continuousMapping(
-                frame, Mock(), self.coordinates, 0.1, 'map')
-        frame.motion_controller.set_vel_relative.assert_not_called()
+        with self.assertRaisesRegex(RuntimeError, 'stage disconnected'):
+            self.isolated_scan(frame, '_scan_continuous')
+        # The only speed command was for the scan line, before the move failed.
+        frame.motion_controller.set_vel_relative.assert_called_once_with(vel_xy=20)
+
+    def test_speed_restore_failure_still_saves_completed_spectra(self):
+        frame = self.frame()
+        producer = self.continuous(frame)
+        scan_speed = frame.motion_controller.set_vel_relative.side_effect
+        def fail_restore(**kwargs):
+            if 'vel_z' in kwargs:
+                raise RuntimeError('speed restore failed')
+            scan_speed(**kwargs)
+        frame.motion_controller.set_vel_relative.side_effect = fail_restore
+        with tempfile.TemporaryDirectory() as directory:
+            enum = SimpleNamespace(AUTOSAVE_PATH=SimpleNamespace(value=directory))
+            with patch.object(raman_gui, 'SaveParamsEnum', enum):
+                with self.assertRaisesRegex(RuntimeError, 'speed restore failed'):
+                    frame._scan_continuous(self.coordinates, 20)
+            self.assertFalse(producer.is_alive())
+            self.assertEqual(frame.measurement_data_2D_unit.get_numMeasurements(), 4)
+            self.assertEqual(len(read_recovery(frame._mapping_journal.path)), 4)
+            self.assertTrue((Path(frame._mapping_recovery_dir) / 'maps.pkl').exists())
 
     def test_last_continuous_worker_error_is_not_reported_as_completion(self):
         frame = self.frame()

@@ -29,6 +29,7 @@ from iris.gui.submodules.meaCoor_modifier.zInterpolate import ZInterpolate as Ma
 from iris.gui.submodules.meaCoor_modifier.topology_visualiser import TopologyVisualizer as MapMod3
 from iris.gui.submodules.meaCoor_modifier.translateXYZ import TranslateXYZ as MapMod4
 from iris.gui.submodules.meaCoor_modifier.gridify import Gridify as MapMod5
+from iris.gui.submodules.scrollable_frame import ScrollableFrame
 
 from iris.utils.general import *
 from iris.gui import AppRamanEnum, AppPlotEnum
@@ -377,7 +378,8 @@ class sFrm_CoorModifier(tk.Frame):
         self._frm_options.grid(row=row,column=0,sticky='nsew'); row+=1
         self._frm_methods.grid(row=row,column=0,sticky='nsew')
         
-        [self.grid_rowconfigure(i, weight=1) for i in range(row+1)]
+        self.grid_rowconfigure(0, weight=0)
+        self.grid_rowconfigure(1, weight=1)
         [self.grid_columnconfigure(i, weight=1) for i in range(col+1)]
         
         # > Options setup <
@@ -406,7 +408,6 @@ class sFrm_CoorModifier(tk.Frame):
         self._frm_options.grid_columnconfigure(0, weight=1)
         
         # > Initial map modifier method setup <
-        self._current_mapModMethod = MapMod1(**self._dict_mapModMethods_kwargs)
         self._dict_mappingmethods_grid_params = {
             'row':0,
             'column':0,
@@ -439,6 +440,13 @@ class sFrm_CoorModifier(tk.Frame):
         for widget in widgets:
             if isinstance(widget,(tk.Frame,tk.LabelFrame)) and widget != self._current_map_method:
                 widget.grid_forget()
+
+    def minimum_content_width(self):
+        # The Z editor can place its plot below its controls. Its side-by-side
+        # request must not force a narrow viewport to become permanently wide.
+        method = self._current_map_method
+        controls = getattr(method, '_frm_controls', method)
+        return max(self._frm_options.winfo_reqwidth(), controls.winfo_reqwidth())
 
     
 class Frm_CoorGenerator(tk.Frame):
@@ -477,7 +485,10 @@ class Frm_CoorGenerator(tk.Frame):
         self.statbar = tk.Label(self, text='Status bar', bd=1, relief=tk.SUNKEN, anchor=tk.W)
         
     # >>> Top level frame setup <<<
-        notebook = ttk.Notebook(self)
+        # Notebook normally requests the largest size of every tab, even hidden
+        # ones. Bound its request so a stacked Z plot cannot push controls below
+        # the window after returning to the coordinate generator.
+        notebook = self._notebook = ttk.Notebook(self, width=1, height=360)
         self._frm_shortcuts = tk.LabelFrame(self, text='Shortcuts')
         self._frm_tv_mapcoor = Frm_Treeview_MappingCoordinates(self,self._coorHub)
         frm_zscan = tk.LabelFrame(self, text='Z-scan coordinate generator (3D scan)')
@@ -490,18 +501,28 @@ class Frm_CoorGenerator(tk.Frame):
         frm_zscan.grid(row=row,column=1,sticky='nsew');col+=1;row+=1
         self._frm_control.grid(row=row,column=1,sticky='ew')
         
-        [self.grid_rowconfigure(i, weight=1) for i in range(row+1)]
+        self.grid_rowconfigure(0, weight=1)
+        for i in range(1, row+1):
+            self.grid_rowconfigure(i, weight=0)
         [self.grid_columnconfigure(i, weight=1) for i in range(col+1)]
         
         # >> Notebook setup <<
-        self._sfrm_mapping_coorGen = tk.LabelFrame(notebook, text='Mapping coordinates generator')
+        self._generator_page = ScrollableFrame(notebook)
+        self._modifier_page = ScrollableFrame(notebook)
+        self._sfrm_mapping_coorGen = tk.LabelFrame(
+            self._generator_page.content, text='Mapping coordinates generator')
         self._sfrm_mapping_coorMod = sFrm_CoorModifier(
-            master=notebook,
+            master=self._modifier_page.content,
             motion_controller=self._motion_controller,
             coor_Hub=self._coorHub,
         )
-        notebook.add(self._sfrm_mapping_coorGen, text='Mapping coordinates generator')
-        notebook.add(self._sfrm_mapping_coorMod, text='Mapping coordinates modifier')
+        self._modifier_page.minimum_width = self._sfrm_mapping_coorMod.minimum_content_width
+        for page, frame, label in (
+                (self._generator_page, self._sfrm_mapping_coorGen, 'Mapping coordinates generator'),
+                (self._modifier_page, self._sfrm_mapping_coorMod, 'Mapping coordinates modifier')):
+            frame.pack(fill=tk.BOTH, expand=True)
+            notebook.add(page, text=label)
+            page.refresh()
         
     # >>> Mapping coordinate method widgets<<<
         # > Dictionaries and parameters to set up the mapping methods <

@@ -166,6 +166,12 @@ class ZController_PFM450(Class_ZController):
         coor = float(str(position_um))/10**3
         return coor
 
+    def get_surface_following_limits(self):
+        """Use the same micrometre device units as GetPosition/SetPosition."""
+        return dict(minimum_mm=self._min_travel,
+                    maximum_mm=min(.450, float(str(self._channel.GetMaxTravel()))/1000),
+                    settling_s=.5)
+
     def move_direct(self,coor_abs,waittime_sec:float=0.5):
         """
         Function to direct the motors to move at the same time towards a certain coordinate.

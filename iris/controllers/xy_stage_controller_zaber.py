@@ -292,6 +292,12 @@ class XYController_Zaber(Class_XYController):
         """
         relvel = min(self.motorx_vel_rel,self.motory_vel_rel) # Get the minimum relative velocity
         return (relvel,relvel,float(100))
+
+    def get_surface_following_limits(self):
+        """Conservative limits for either scan direction, in physical units."""
+        return dict(maximum_speed_mm_s=max(self.motorx_maxvel_mms, self.motory_maxvel_mms),
+                    minimum_relative_percent=self._min_vel_mmS /
+                    min(self.motorx_maxvel_mms, self.motory_maxvel_mms)*100)
     
     def report_attributes(self):
         print("\n>>>>> Device and motor attributes <<<<<")

@@ -34,6 +34,7 @@ from iris.utils.integration_experiment import validate_experiment_settings, run_
 from iris.utils.power_experiment import validate_power_experiment, run_power_experiment
 from iris.utils.laser_monitor import BackgroundLaserMonitor
 from iris.utils.mapping_waits import wait_for_buffer
+from iris.utils.continuous_surface import build_surface_lines, plan_surface_speed
 from iris.data import SaveParamsEnum
 
 from iris.gui.motion_video import Frm_MotionController
@@ -236,6 +237,24 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 
         self._btn_perform_discreetMapping_multi.grid(row=4,column=0,sticky='ew',pady=(5,0))
         self._btn_perform_continuousMapping_multi.grid(row=4,column=1,sticky='ew',pady=(5,0))
+
+        self._bool_continuous_surface = tk.BooleanVar(master=self, value=False)
+        self._str_surface_tolerance_um = tk.StringVar(master=self, value='5')
+        self._chk_continuous_surface = tk.Checkbutton(
+            self._ssfrm_mapping_options, text='Follow modified Z surface (continuous scans)',
+            variable=self._bool_continuous_surface)
+        self._chk_continuous_surface.grid(row=5, column=0, columnspan=2, sticky='w')
+        tolerance = tk.Frame(self._ssfrm_mapping_options)
+        tolerance.grid(row=6, column=0, columnspan=2, sticky='w')
+        tk.Label(tolerance, text='Z tracking tolerance [um]:').pack(side=tk.LEFT)
+        self._entry_surface_tolerance = tk.Entry(
+            tolerance, textvariable=self._str_surface_tolerance_um, width=8)
+        self._entry_surface_tolerance.pack(side=tk.LEFT)
+        tk.Label(self._ssfrm_mapping_options,
+                 text='Software following; slows XY if needed. Stops when sampled Z error exceeds the limit.\n'
+                      'Test a short scan first; the limit is not guaranteed between position samples.',
+                 anchor='w', justify='left', wraplength=430).grid(
+                     row=7, column=0, columnspan=2, sticky='w')
 
         self._init_experiment_settings()
         self._init_power_experiment_settings()
@@ -1054,7 +1073,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
         widgets = get_all_widgets(self._ssfrm_mapping_options)
         widgets.extend(self._list_shortcut_widgets)  # Include the shortcut buttons
         for widget in widgets:
-            if isinstance(widget, (tk.Button, ttk.Combobox, tk.Entry, tk.Spinbox)):
+            if isinstance(widget, (tk.Button, tk.Checkbutton, ttk.Combobox, tk.Entry, tk.Spinbox)):
                 widget.configure(state='disabled')
             
     def _enable_mapping_widgets(self):
@@ -1064,7 +1083,7 @@ class Frm_HighLvlController_Raman(tk.Frame):
         widgets = get_all_widgets(self._ssfrm_mapping_options)
         widgets.extend(self._list_shortcut_widgets)  # Include the shortcut buttons
         for widget in widgets:
-            if isinstance(widget, (tk.Button, ttk.Combobox, tk.Entry, tk.Spinbox)):
+            if isinstance(widget, (tk.Button, tk.Checkbutton, ttk.Combobox, tk.Entry, tk.Spinbox)):
                 widget.configure(state='normal')
     
     def abort_mapping_run(self, btn:tk.Button, text:str, command:Callable):
@@ -1364,6 +1383,11 @@ class Frm_HighLvlController_Raman(tk.Frame):
         settings = dict(map_name=self.measurement_data_2D_unit.get_unit_name(),
                         coordinates=[tuple(map(float, coor)) for coor in coordinates],
                         continuous=continuous, autosave_interval_s=20)
+        if continuous and getattr(self, '_continuous_surface_profiles', None):
+            settings['z_surface_following'] = dict(
+                tolerance_um=self._continuous_surface_tolerance_mm*1000,
+                lines=[dict(axis=line.axis, points=line.points)
+                       for line in self._continuous_surface_profiles])
         with open(os.path.join(recovery, 'settings.json'), 'x', encoding='utf-8') as output:
             json.dump(settings, output)
         self._mapping_journal = RecoveryWriter(recovery, settings=settings)
@@ -1405,6 +1429,10 @@ class Frm_HighLvlController_Raman(tk.Frame):
         if getattr(self, '_standard_mapping_continuous', False) and remaining_index % 2:
             remaining_index -= 1
         remaining = coordinates[remaining_index:] if self._flg_meaCancelled else []
+        if remaining and getattr(self, '_standard_mapping_continuous', False):
+            profiles = getattr(self, '_continuous_surface_profiles', None)
+            if profiles:
+                remaining = [point for profile in profiles[remaining_index//2:] for point in profile.points]
         if remaining:
             name = unit_name + '_remaining_' + get_timestamp_us_str()
             self._coorHub.append(MeaCoor_mm(name, remaining))
@@ -1822,8 +1850,26 @@ class Frm_HighLvlController_Raman(tk.Frame):
         """
         mapping_speed_rel = self.motion_controller.calculate_vel_relative(vel_xy_mmPerSec=mapping_speed_mmPerSec)
         mapping_speed_rel *= AppRamanEnum.CONTINUOUS_SPEED_MODIFIER.value
-        
-        mapping_coordinates_ends = self._convertCoor_byScanOptions(mapping_coordinates,ends_only=True)
+        profiles = None
+        tolerance_mm = None
+        if hasattr(self, '_bool_continuous_surface') and self._bool_continuous_surface.get():
+            try:
+                tolerance_mm = float(self._str_surface_tolerance_um.get())/1000
+            except (TypeError, ValueError) as failure:
+                raise ValueError('Enter a positive numeric Z tracking tolerance in micrometres.') from failure
+            try:
+                xy_limits = self.motion_controller.ctrl_xy.get_surface_following_limits()
+                z_limits = self.motion_controller.ctrl_z.get_surface_following_limits()
+            except AttributeError as failure:
+                raise ValueError('Continuous Z following currently supports Zaber XY and PFM450 Z stages.') from failure
+            axis = 1 if self._str_scanDir.get() == Enum_ScanDir.YDIR.value else 0
+            profiles = build_surface_lines(mapping_coordinates, axis,
+                                            self._str_scanMethod.get() == Enum_ScanMthd.SNAKE.value)
+            profiles = self._scramble_mapping_coordinates(profiles, 'discreet')
+            mapping_speed_rel = plan_surface_speed(profiles, mapping_speed_rel, xy_limits, z_limits, tolerance_mm)
+            mapping_coordinates_ends = [point for profile in profiles for point in (profile.start, profile.end)]
+        else:
+            mapping_coordinates_ends = self._convertCoor_byScanOptions(mapping_coordinates,ends_only=True)
         
     # >>> Initialisations <<<
         # Initialise the mapping measurement data class
@@ -1831,28 +1877,24 @@ class Frm_HighLvlController_Raman(tk.Frame):
         self._dataHub_map.append_MappingUnit(self.measurement_data_2D_unit)
         
         # Scramble the mapping coordinates if requested
-        mapping_coordinates_ends = self._scramble_mapping_coordinates(mapping_coordinates_ends,'continuous')
+        if profiles is None:
+            mapping_coordinates_ends = self._scramble_mapping_coordinates(mapping_coordinates_ends,'continuous')
         
         # Set up a flag to abort the mapping measurement if needed
         self.flg_isrunning_mapping = True
         
-        # Store the initial speed
-        initial_speed_xy,initial_speed_z = self.motion_controller.get_VelocityParameters()
-        
     # >>> Perform the mapping measurement <<<
         try:
-            self._scan_continuous(mapping_coordinates_ends, mapping_speed_rel)
+            if profiles is None:
+                self._scan_continuous(mapping_coordinates_ends, mapping_speed_rel)
+            else:
+                self._scan_continuous(mapping_coordinates_ends, mapping_speed_rel,
+                                      surface_profiles=profiles, tolerance_mm=tolerance_mm)
         finally:
             self._dataHub_map.update_tree()
-            # Never issue a speed command over an outstanding driver call.
-            try:
-                self.motion_controller._check_mapping_motion_idle()
-            except RuntimeError:
-                print('Stage command still running: velocity was not restored. Recover the stage before another scan.')
-            else:
-                self.motion_controller.set_vel_relative(vel_xy=initial_speed_xy, vel_z=initial_speed_z)
         
-    def _scan_continuous(self, mapping_coordinates_ends:list,mapping_speed_rel:int):
+    def _scan_continuous(self, mapping_coordinates_ends:list,mapping_speed_rel:int,
+                         surface_profiles=None, tolerance_mm=None):
         """
         Scans the mapping coordinates continuously based on the given scan coordinates.
 
@@ -1860,6 +1902,14 @@ class Frm_HighLvlController_Raman(tk.Frame):
             mapping_coordinates_ends (list): List of scan coordinates (end coordinates of each scan lines)
             mapping_speed_rel (int): The relative speed to move between the coordinates
         """
+        initial_speed_xy, initial_speed_z = self.motion_controller.get_VelocityParameters()
+        self._continuous_surface_profiles = surface_profiles
+        self._continuous_surface_tolerance_mm = tolerance_mm
+        self._continuous_surface_report = dict(
+            mode='sampled_software_Z_following', tolerance_um=tolerance_mm*1000,
+            scan_speed_relative_percent=mapping_speed_rel,
+            note='Measured errors are sampled; they do not bound errors between samples.', lines=[]
+        ) if surface_profiles else None
         self._start_mapping_autosave(mapping_coordinates_ends, continuous=True)
         # >> Prep the continuous measurement <<
         # Prep the raman controller
@@ -1895,7 +1945,9 @@ class Frm_HighLvlController_Raman(tk.Frame):
         unit_name = self.measurement_data_2D_unit.get_unit_name()
         i = 0
         try:
-            thread_offload = self._frm_coorHub_treeview.offload_mappingCoor(unit_name,mapping_coordinates_ends,0)
+            offload_coordinates = ([point for profile in surface_profiles for point in profile.points]
+                                   if surface_profiles else mapping_coordinates_ends)
+            thread_offload = self._frm_coorHub_treeview.offload_mappingCoor(unit_name,offload_coordinates,0)
         
             self.motion_controller.video_terminate()
         
@@ -1908,7 +1960,11 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 coor = mapping_coordinates_ends[i]
                 if not self.flg_isrunning_mapping: break   # Stops the measurement immediately when required.
                 if i%AppRamanEnum.AUTOSAVE_FREQ_CONTINUOUS.value == 0 and i > 0 and not thread_offload.is_alive():
-                    thread_offload = self._frm_coorHub_treeview.offload_mappingCoor(unit_name,mapping_coordinates_ends,i)
+                    if surface_profiles:
+                        remaining = [point for profile in surface_profiles[i//2:] for point in profile.points]
+                        thread_offload = self._frm_coorHub_treeview.offload_mappingCoor(unit_name,remaining,0)
+                    else:
+                        thread_offload = self._frm_coorHub_treeview.offload_mappingCoor(unit_name,mapping_coordinates_ends,i)
             
                 # >> Only perform the continuous measurement for x-rows <<
                 # (i.e., skipped whenever moving between 1 y-coor to another)
@@ -1929,9 +1985,16 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 self._check_mapping_saver()
 
                 # Go to the requested coordinates
-                self.motion_controller.go_to_coordinates(
-                    float(coor[0]), float(coor[1]), float(coor[2]), override_controls=True,
-                    timeout=15.0 + self.raman_controller.get_integration_time_ms() / 1000)
+                if surface_profiles and i % 2:
+                    report = dict(line_index=i//2)
+                    self._continuous_surface_report['lines'].append(report)
+                    self.motion_controller.follow_surface_line(
+                        surface_profiles[i//2], tolerance_mm,
+                        lambda: self.flg_isrunning_mapping, report)
+                else:
+                    self.motion_controller.go_to_coordinates(
+                        float(coor[0]), float(coor[1]), float(coor[2]), override_controls=True,
+                        timeout=15.0 + self.raman_controller.get_integration_time_ms() / 1000)
                 if not self.flg_isrunning_mapping:
                     break
 
@@ -1948,37 +2011,62 @@ class Frm_HighLvlController_Raman(tk.Frame):
                 i+=1
         finally:
             try:
-                func_store_Raman()
-                func_stop_Raman()
-                thread_continuous.join(timeout=15.0 + self.raman_controller.get_integration_time_ms() / 1000)
-                if thread_continuous.is_alive():
-                    # Let the consumer drain late results, then terminate. Guard both
-                    # workers against a new scan while either is still alive.
-                    def finish_late():
-                        thread_continuous.join()
-                        flg_isrunning_autosaver.clear()
-                        thread_autosaver.join(timeout=15)
-                        try:
-                            self._finish_standard_mapping(mapping_coordinates_ends, i, unit_name, thread_autosaver)
-                        except Exception as failure:
-                            print(f'Late mapping recovery failed: {failure}')
-                        finally:
-                            if not thread_autosaver.is_alive() and not self._mapping_journal.thread.is_alive():
-                                self._mapping_journal.release_run()
-                    threading.Thread(target=finish_late, daemon=True).start()
-                    self._flg_meaCancelled = True
-                    self.flg_isrunning_mapping = False
-                    raise RuntimeError('Spectrometer worker did not stop. Partial data remains in the data hub; recover the connection before another scan.')
-                flg_isrunning_autosaver.clear()
-                thread_autosaver.join(timeout=15)
-                self._finish_standard_mapping(mapping_coordinates_ends, i, unit_name, thread_autosaver)
+                # Restore before final saving can re-enable manual stage controls.
+                # Never overlap an outstanding driver call after a motion timeout.
+                try:
+                    self.motion_controller._check_mapping_motion_idle()
+                except RuntimeError:
+                    print('Stage command still running: velocity was not restored. Recover the stage before another scan.')
+                else:
+                    self.motion_controller.set_vel_relative(vel_xy=initial_speed_xy, vel_z=initial_speed_z)
             finally:
-                self._standard_mapping_active = False
+                self._finish_continuous_mapping(
+                    mapping_coordinates_ends, i, unit_name, func_store_Raman,
+                    func_stop_Raman, thread_continuous, thread_autosaver, flg_isrunning_autosaver)
+
+        return thread_plot
+
+    def _finish_continuous_mapping(self, mapping_coordinates_ends, i, unit_name, func_store_Raman,
+                                   func_stop_Raman, thread_continuous, thread_autosaver,
+                                   flg_isrunning_autosaver):
+        """Drain acquired spectra even if restoring the stage speed failed."""
+        try:
+            func_store_Raman()
+            func_stop_Raman()
+            thread_continuous.join(timeout=15.0 + self.raman_controller.get_integration_time_ms() / 1000)
+            if thread_continuous.is_alive():
+                # Let the consumer drain late results, then terminate. Guard both
+                # workers against a new scan while either is still alive.
+                def finish_late():
+                    thread_continuous.join()
+                    flg_isrunning_autosaver.clear()
+                    thread_autosaver.join(timeout=15)
+                    try:
+                        self._finish_standard_mapping(mapping_coordinates_ends, i, unit_name, thread_autosaver)
+                    except Exception as failure:
+                        print(f'Late mapping recovery failed: {failure}')
+                    finally:
+                        if not thread_autosaver.is_alive() and not self._mapping_journal.thread.is_alive():
+                            self._mapping_journal.release_run()
+                threading.Thread(target=finish_late, daemon=True).start()
+                self._flg_meaCancelled = True
+                self.flg_isrunning_mapping = False
+                raise RuntimeError('Spectrometer worker did not stop. Partial data remains in the data hub; recover the connection before another scan.')
+            flg_isrunning_autosaver.clear()
+            thread_autosaver.join(timeout=15)
+            self._finish_standard_mapping(mapping_coordinates_ends, i, unit_name, thread_autosaver)
+        finally:
+            self._standard_mapping_active = False
+            try:
+                report = getattr(self, '_continuous_surface_report', None)
+                if report is not None:
+                    with open(os.path.join(self._mapping_recovery_dir, 'z_surface_tracking.json'),
+                              'w', encoding='utf-8') as output:
+                        json.dump(report, output, indent=2)
+            finally:
                 if (not thread_continuous.is_alive() and not thread_autosaver.is_alive()
                         and not self._mapping_journal.thread.is_alive()):
                     self._mapping_journal.release_run()
-
-        return thread_plot
         
         
         
